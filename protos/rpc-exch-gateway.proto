@@ -1,0 +1,244 @@
+syntax="proto3";
+import "common.proto";
+import "exch-gateway.proto";
+
+package tqrpc_exch_gw;
+
+
+message ExchSendOrderRequest {
+    int64 correlation_id = 1; // order_id
+    string exch_account_id = 2;
+    string instrument = 3; // exchange format
+    common.BuySellType buysell_type = 4;
+    common.OpenCloseType openclose_type = 5;
+    common.BasicOrderType order_type = 6;
+    common.TimeInForceType time_inforce_type = 12;
+    repeated common.ExtraOrderTagType extra_order_tags = 13;
+    double scaled_price = 7;
+    double scaled_qty = 8;
+    double leverage = 9;
+    int64 timestamp = 10;
+
+    common.ExtraData exch_specific_params = 11;
+}
+
+message ExchBatchSendOrdersRequest {
+    repeated ExchSendOrderRequest order_requests = 1;
+}
+
+
+message ExchOrder {
+    string order_ref = 1;
+    string instrument = 2; // exchange format
+    common.BuySellType buysell_type = 3;
+    common.OpenCloseType openclose_type = 4;
+    common.BasicOrderType order_type = 5;
+    exch_gw.OrderReport order_report = 6;
+    double leverage = 11;
+    int64 timestamp = 12;
+
+    string exch_order_original = 13; // original order serialized
+}
+
+
+message ExchCancelOrderRequest {
+    string exch_order_ref = 1;
+    int64 order_id = 2;
+    common.ExtraData exch_specific_params = 3;
+    int64 timestamp = 4;
+}
+
+message ExchBatchCancelOrdersRequest {
+    repeated ExchCancelOrderRequest cancel_requests = 1;
+}
+
+
+message ExchAmendOrderRequest {
+    string exch_order_ref = 1;
+    // TBA
+}
+
+
+message GatewayCommandRequest {
+    enum CommandType {
+        CMD_TYPE_UNSPECIFIED = 0;
+        CMD_TYPE_RECONNECT_EXCH = 1;
+        CMD_TYPE_PUBLISH_ACCOUNT = 2;
+        CMD_TYPE_USER_DEFINED = 3;
+    }
+    CommandType command_type = 1;
+    string command_source_id = 2;
+    string command_payload = 3;
+}
+
+
+message GatewayResponse {
+    enum Status {
+        GW_RESP_STATUS_UNSPECIFIED = 0;
+        GW_RESP_STATUS_SUCCESS = 1;
+        GW_RESP_STATUS_FAIL = 2;
+    }
+    int64 timestamp = 1;
+    Status status = 2;
+    int64 error_code = 4; // exch/gw specific error code; deprecated
+    string message = 5; // deprecated
+    common.Rejection rejection_info = 6;
+}
+
+
+message ExchSingleOrderQuery {
+    string exch_order_ref = 1;
+    int64 order_id = 2;
+    string symbol = 3;
+    string exch_account = 4;
+}
+
+// account
+message ExchQueryAccountRequest {
+    repeated string explicit_symbols = 1;
+}
+
+message ExchAccountResponse {
+    string exch_account_code = 1;
+    exch_gw.BalanceUpdate balance_update = 4;
+    int64 timestamp = 3;
+}
+
+
+// position
+message ExchQueryPositionRequest {
+    // TBA
+}
+
+message ExchPositionResponse {
+    // TBA
+}
+
+
+// order
+message ExchQueryOpenOrderRequest {
+    string exch_account_code = 1;
+}
+
+message ExchQueryOrderDetailRequest {
+    repeated ExchSingleOrderQuery order_queries = 1;
+}
+
+message ExchOrderDetailResponse {
+    repeated ExchOrder orders = 1;
+}
+
+
+message ExchQueryTradeDetailRequest {
+    string exch_account_id = 1;
+    string instrument_code = 2;
+
+    //    # NOTE: either of the following should be provided: [start_ts, limit],
+    //    # [end_ts, limit] if all are provided, it's up to the GW to decide which one
+    //    # to use
+    int64 start_ts = 3;
+    int64 end_ts = 4;
+    int64 limit = 5;
+}
+
+message HistoryTradeRecord {
+    string exch_order_ref = 1;
+    exch_gw.OrderInfo order_info = 2;
+    exch_gw.TradeReport trade = 3;
+    exch_gw.FeeReport fee = 4;
+    repeated exch_gw.FeeReport extra_fees = 5;
+    int64 timestamp = 6;
+    string idx = 7;
+}
+
+message ExchTradeDetailResponse {
+    repeated HistoryTradeRecord history_trades = 1;
+}
+
+
+//Fee
+message ExchQueryFeeRequest {
+    string instrument_code = 1;
+    int64 start_ts = 2; 
+    int64 end_ts = 3; // optional
+    int64 limit = 6;
+    string exch_account_id = 4;
+    common.FeeType fee_types = 5; 
+}
+
+message ExchFeeResponse {
+    repeated exch_gw.FeeReport fees = 1;
+}
+
+// order trades
+message ExchQueryOrderTradesRequest {
+    string exch_order_ref = 1;  // required
+    string instrument_exch = 2; // required
+}
+
+message ExchOrderTradesResponse {
+    string order_id = 1;
+    string exch_order_ref = 2;
+    string instrument_exch = 3;
+    common.BuySellType buysell_type = 4;
+    repeated ExchTrade exch_trades = 5;
+}
+
+message ExchTrade {
+    exch_gw.TradeReport trade_report = 1;
+    exch_gw.FeeReport fee_report = 2;
+}
+
+// misc 
+message ExchGenericRequest {
+    string request_json = 1;
+}
+
+
+message ExchGenericResponse {
+    string response_json = 1;
+}
+
+
+message ExchAccountSettingRequest {
+    exch_gw.AccountSettingEntry account_setting_entry = 1;
+}
+
+message ExchAccountSettingUpdateResponse {
+    bool margin_mode_changed = 1;
+    bool leverage_changed = 2;
+    string err_msg = 3;
+}
+
+message ExchQueryAccountSettingRequest {
+    string exch_account_id = 1;
+    string instrument = 2;
+}
+
+message ExchAccountSettingResponse {
+    exch_gw.AccountSettingEntry account_setting_entry = 1;
+    string original_info = 2;
+}
+
+service ExchangeGatewayService {
+
+    // rpc with side effects
+    rpc PlaceOrder(ExchSendOrderRequest) returns (GatewayResponse);
+    rpc BatchPlaceOrders(ExchBatchSendOrdersRequest) returns (GatewayResponse);
+    rpc CancelOrder(ExchCancelOrderRequest) returns (GatewayResponse);
+    rpc BatchCancelOrders(ExchBatchCancelOrdersRequest) returns (GatewayResponse);
+    //rpc AmendOrder(ExchAmendOrderRequest) returns (GatewayResponse);
+    //rpc SendGatewayCommand(GatewayCommandRequest) returns (GatewayResponse);
+
+    // rpc for data service
+    rpc QueryAccountBalance(ExchQueryAccountRequest) returns (ExchAccountResponse);
+    rpc QueryPosition(ExchQueryPositionRequest) returns (ExchPositionResponse);
+    //rpc QueryOpenOrders(ExchQueryOpenOrderRequest) returns (ExchOrderDetailResponse);
+    rpc QueryOrderDetails(ExchQueryOrderDetailRequest) returns (ExchOrderDetailResponse);
+    //rpc QueryTradeDetails(ExchQeuryTradeDetailRequest) returns (ExchTradeDetailResponse);
+    rpc QueryAccountFees(ExchQueryFeeRequest) returns (ExchFeeResponse);
+    rpc QueryOrderTrades(ExchQueryOrderTradesRequest) returns (ExchOrderTradesResponse);
+
+    // entrypoint for all other non-standard gw rpc methods
+    rpc GenericRpcCall(ExchGenericRequest) returns (ExchGenericResponse);
+}

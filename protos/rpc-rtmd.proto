@@ -1,0 +1,23 @@
+
+
+syntax = "proto3";
+
+import "rtmd.proto";
+
+package tqrpc_rtmd;
+
+
+//message HistoryKlineQueryRequest {
+//  string exch_symbol = 2;
+//  string begin_time = 3;
+//  string end_time = 4;
+//  int64 limit = 5;
+//  RealtimeKline.KlineType kline_type = 6;
+//}
+//
+//
+//service RtmdService {
+//    rpc QueryHistoryKline(HistoryKlineQueryRequest) returns (ExchOrderDetailResponse);
+//    //rpc QueryHistoryOrderbook(ExchQueryOrderDetailRequest) returns (ExchOrderDetailResponse);
+//    //rpc QueryHistoryTrade(ExchQeuryTradeDetailRequest) returns (ExchTradeDetailResponse);
+//}

@@ -1,0 +1,282 @@
+syntax = "proto3";
+import "common.proto";
+import "exch-gateway.proto";
+import "oms.proto";
+import "ods.proto";
+
+
+package tqrpc_ods;
+
+
+//@dataclass
+//class OMSQueryAccountRequest(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+//    query_gw: bool = betterproto.bool_field(2)
+//    instruments: List[str] = betterproto.string_field(3)
+
+message OMSQueryAccountRequest {
+    int64 account_id = 1;
+    bool query_gw = 2;
+    repeated string instruments = 3;
+}
+
+
+//@dataclass
+//class ODSQueryAccountSummaryRequest(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+
+message ODSQueryAccountSummaryRequest {
+    int64 account_id = 1;
+}
+
+//@dataclass
+//class ODSAccountSummaryResponse(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+//    account_summary: exch_gw.AccountSummaryEntry = betterproto.message_field(2)
+//    timestamp: int = betterproto.int64_field(3)
+message ODSAccountSummaryResponse {
+    int64 account_id = 1;
+    exch_gw.AccountSummaryEntry account_summary = 2;
+    int64 timestamp = 3;
+}
+
+//@dataclass
+//class ODSQueryAccountSettingRequest(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+//    instrument_id: str = betterproto.string_field(2)
+message ODSQueryAccountSettingRequest {
+    int64 account_id = 1;
+    string instrument_id = 2;
+}
+
+//@dataclass
+//class ODSAccountSettingResponse(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+//    account_setting_entry: exch_gw.AccountSettingEntry = betterproto.message_field(2)
+//    timestamp: int = betterproto.int64_field(3)
+message ODSAccountSettingResponse {
+    int64 account_id = 1;
+    exch_gw.AccountSettingEntry account_setting_entry = 2;
+    int64 timestamp = 3;
+}
+
+//@dataclass
+//class ODSUpdateAccountSettingRequest(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+//    account_setting_entry: exch_gw.AccountSettingEntry = betterproto.message_field(2)
+message ODSUpdateAccountSettingRequest {
+    int64 account_id = 1;
+    exch_gw.AccountSettingEntry account_setting_entry = 2;
+}
+
+
+//@dataclass
+//class ODSUpdateAccountSettingResponse(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+//    margin_mode_changed: bool = betterproto.bool_field(2)
+//    leverage_changed: bool = betterproto.bool_field(3)
+//    err_msg: str = betterproto.string_field(4)
+//    timestamp: int = betterproto.int64_field(5)
+message ODSUpdateAccountSettingResponse {
+    int64 account_id = 1;
+    bool margin_mode_changed = 2;
+    bool leverage_changed = 3;
+    string err_msg = 4;
+    int64 timestamp = 5;
+}
+
+//@dataclass
+//class OMSQueryPositionRequest(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+//    query_gw: bool = betterproto.bool_field(2)
+//    instruments: List[str] = betterproto.string_field(3)
+message OMSQueryPositionRequest {
+    int64 account_id = 1;
+    bool query_gw = 2;
+    repeated string instruments = 3;
+}
+
+//@dataclass
+//class OMSPositionResponse(betterproto.Message):
+//    positions: List[oms.Position] = betterproto.message_field(1)
+message OMSPositionResponse {
+    repeated oms.Position positions = 1;
+}
+
+//@dataclass
+//class OMSQueryOpenOrderRequest(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+//    query_gw: bool = betterproto.bool_field(2)
+//    instruments: List[str] = betterproto.string_field(3)
+message OMSQueryOpenOrderRequest {
+    int64 account_id = 1;
+    bool query_gw = 2;
+    repeated string instruments = 3;
+}
+
+//@dataclass
+//class OMSQueryOrderDetailRequest(betterproto.Message):
+//    order_refs: List[str] = betterproto.string_field(1)
+//    query_gw: bool = betterproto.bool_field(2)
+message OMSQueryOrderDetailRequest {
+    repeated string order_refs = 1;
+    bool query_gw = 2;
+}
+
+//@dataclass
+//class OMSOrderDetailResponse(betterproto.Message):
+//    orders: List[oms.Order] = betterproto.message_field(1)
+message OMSOrderDetailResponse {
+    repeated oms.Order orders = 1;
+}
+
+
+//@dataclass
+//class OMSQeuryTradeDetailRequest(betterproto.Message):
+//    order_refs: List[str] = betterproto.string_field(1)
+//    # todo: other criteria?
+//    query_gw: bool = betterproto.bool_field(2)
+message OMSQeuryTradeDetailRequest {
+    repeated string order_refs = 1;
+    bool query_gw = 2;
+}
+
+//@dataclass
+//class OMSTradeDetailResponse(betterproto.Message):
+//    trades: List[oms.Trade] = betterproto.message_field(1)
+message OMSTradeDetailResponse {
+    repeated oms.Trade trades = 1;
+}
+
+//@dataclass
+//class OMSQueryInstrumentRefdataRequest(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+//    instruments: List[str] = betterproto.string_field(2)
+//    start: int = betterproto.int32_field(3)
+//    limit: int = betterproto.int32_field(4)
+message OMSQueryInstrumentRefdataRequest {
+    int64 account_id = 1;
+    repeated string instruments = 2;
+    int32 start = 3;
+    int32 limit = 4;
+}
+
+//@dataclass
+//class OMSQueryInstrumentRefdataResponse(betterproto.Message):
+//    instrument_refdata: List[common.InstrumentRefData] = betterproto.message_field(1)
+//    prev: int = betterproto.int32_field(2)
+//    next: int = betterproto.int32_field(3)
+//    prev_instrument_id: str = betterproto.string_field(4)
+message OMSQueryInstrumentRefdataResponse {
+    repeated common.InstrumentRefData instrument_refdata = 1;
+    int32 prev = 2;
+    int32 next = 3;
+    string prev_instrument_id = 4;
+}
+
+
+//@dataclass
+//class OMSQueryInstrumentRequest(betterproto.Message):
+//    account_id: int = betterproto.int64_field(1)
+message OMSQueryInstrumentRequest {
+    int64 account_id = 1;
+}
+
+//@dataclass
+//class OMSQueryInstrumentResponse(betterproto.Message):
+//    instrument_ids: List[str] = betterproto.string_field(1)
+message OMSQueryInstrumentResponse {
+    repeated string instrument_ids = 1;
+}
+
+//@dataclass
+//class OMSQueryAccountTradingConfigRequest(betterproto.Message):
+//    account_ids: List[int] = betterproto.int64_field(1)
+message OMSQueryAccountTradingConfigRequest {
+    repeated int64 account_ids = 1;
+}
+
+//@dataclass
+//class OMSQueryAccountTradingConfigResponse(betterproto.Message):
+//    account_trading_configs: List[ods.AccountTradingConfig] = betterproto.message_field(
+//        1
+//    )
+message OMSQueryAccountTradingConfigResponse {
+    repeated ods.AccountTradingConfig account_trading_configs = 1;
+}
+
+//@dataclass
+//class OMSQueryOmsConfigRequest(betterproto.Message):
+//    oms_id: str = betterproto.string_field(1)
+message OMSQueryOmsConfigRequest {
+    string oms_id = 1;
+}
+
+//@dataclass
+//class OMSQueryOmsConfigResponse(betterproto.Message):
+//    oms_config: ods.OMSConfigEntry = betterproto.message_field(1)
+message OMSQueryOmsConfigResponse {
+    ods.OMSConfigEntry oms_config = 1;
+}
+
+//@dataclass
+//class OMSQueryClientConfigRequest(betterproto.Message):
+//    trading_account_ids: List[int] = betterproto.int64_field(1)
+//    order_subscribed_account_ids: List[int] = betterproto.int64_field(2)
+//    position_subscribed_account_ids: List[int] = betterproto.int64_field(3)
+message OMSQueryClientConfigRequest {
+    repeated int64 trading_account_ids = 1;
+    repeated int64 order_subscribed_account_ids = 2;
+    repeated int64 position_subscribed_account_ids = 3;
+}
+
+//@dataclass
+//class OMSQueryClientConfigResponse(betterproto.Message):
+//    oms_service_endpoints: Dict[int, str] = betterproto.map_field(
+//        1, betterproto.TYPE_INT64, betterproto.TYPE_STRING
+//    )
+//    oms_orderupdates_endpoints: List[str] = betterproto.string_field(2)
+//    oms_balanceupdates_endpoints: List[str] = betterproto.string_field(3)
+message OMSQueryClientConfigResponse {
+    map<int64, string> oms_service_endpoints = 1;
+    repeated string oms_orderupdates_endpoints = 2;
+    repeated string oms_balanceupdates_endpoints = 3;
+}
+
+//@dataclass
+//class ODSRtmdQueryRequest(betterproto.Message):
+//    instrument_id: str = betterproto.string_field(1)
+message ODSRtmdQueryRequest {
+    string instrument_id = 1;
+}
+
+//@dataclass
+//class ODSRtmdChannelQueryResponse(betterproto.Message):
+//    channel_present: bool = betterproto.bool_field(1)
+//    rtmd_channel: str = betterproto.string_field(2)
+message ODSRtmdChannelQueryResponse {
+    bool channel_present = 1;
+    string rtmd_channel = 2;
+}
+
+//@dataclass
+//class ODSRtmdDataQueryResponse(betterproto.Message):
+//    data_present: bool = betterproto.bool_field(1)
+//    rtmd_orderbook_bytes: bytes = betterproto.bytes_field(3)
+message ODSRtmdDataQueryResponse {
+    bool data_present = 1;
+    bytes rtmd_orderbook_bytes = 3;
+}
+//@dataclass
+//class ODSRtmdSubQueryRequest(betterproto.Message):
+//    exch_name: str = betterproto.string_field(1)
+//    rtmd_instance_id: str = betterproto.string_field(2)
+message ODSRtmdSubQueryRequest {
+    string exch_name = 1;
+    string rtmd_instance_id = 2;
+}
+//@dataclass
+//class ODSRtmdSubQueryResponse(betterproto.Message):
+//    exch_name: str = betterproto.string_field(1)
+//    rtmd_instance_id: str = betterproto.string_field(2)
+//    exch_instrument_ids: List[str] = betterproto.string_field(3)

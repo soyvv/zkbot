@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/zk-datamodel-rs", "crates/zk-core-rs"]
+resolver = "2"

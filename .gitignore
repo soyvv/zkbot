@@ -1,0 +1,42 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Generated artifacts
+generated/
+
+# Protobuf generated code - C++
+polyglot/cpp/src/*.pb.cc
+polyglot/cpp/src/*.pb.h
+
+# Protobuf generated code - Java
+polyglot/java/src/
+
+# Protobuf generated code - Rust
+rust/crates/zk-datamodel-rs/src/*.rs
+!rust/crates/zk-datamodel-rs/src/lib.rs
+
+# Protobuf generated code - Python (betterproto)
+libs/zk-datamodel/src/zk_datamodel/common/
+libs/zk-datamodel/src/zk_datamodel/oms/
+libs/zk-datamodel/src/zk_datamodel/rtmd/
+libs/zk-datamodel/src/zk_datamodel/strategy/
+libs/zk-datamodel/src/zk_datamodel/exch_gw/
+libs/zk-datamodel/src/zk_datamodel/ods/
+libs/zk-datamodel/src/zk_datamodel/tqrpc_*/
+
+# Rust build artifacts
+rust/target/
+Cargo.lock
+
+# IDE
+.idea/
+*.iml
+.vscode/

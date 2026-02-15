@@ -1,0 +1,52 @@
+// generate protobuf def file based on ods.py
+syntax = "proto3";
+
+import "common.proto";
+
+package ods;
+
+message OMSRouteEntry {
+    int64 account_id = 1;
+    string exch_account_id = 2;
+    string gw_key = 3;
+    bool startup_sync = 4;
+    string desc = 5;
+}
+
+
+message GWConfigEntry {
+    string exch_name = 1;
+    string gw_key = 2;
+    string rpc_endpoint = 3;
+    string extra_rpc_endpoint = 15;
+    string report_endpoint = 4;
+    string balance_endpoint = 5;
+    string gw_system_endpoint = 6;
+    bool support_order_replace = 7;
+    bool support_order_query = 8;
+    bool support_position_query = 9;
+    bool support_batch_order = 10;
+    bool support_batch_cancel = 11;
+    bool support_trade_history_query = 14;
+    bool support_fee_query = 16;
+    bool calc_balance_needed = 12;
+    repeated string cancel_required_fields = 13;
+}
+
+
+message OMSConfigEntry {
+    string oms_id = 1;
+    repeated int64 managed_account_ids = 2;
+    string namespace = 4;
+    string desc = 5;
+}
+
+message AccountTradingConfig {
+    int64 account_id = 1;
+    string oms_id = 2;
+    OMSRouteEntry account_route = 3;
+    GWConfigEntry gw_config = 4;
+    repeated common.InstrumentRefData supported_instruments = 5;
+}
+
+

@@ -1,0 +1,260 @@
+syntax = "proto3";
+package common;
+
+enum InstrumentType {
+    INST_TYPE_UNSPECIFIED = 0;
+    INST_TYPE_SPOT = 1; // technically not a derivative but listed here for convenience
+    INST_TYPE_PERP = 2; // perp contract
+    INST_TYPE_FUTURE = 3; // future contract with expiry date
+    INST_TYPE_CFD = 4; // contract for difference
+    INST_TYPE_OPTION = 5; // option contract
+}
+
+
+
+
+enum BuySellType {
+    BS_UNSPECIFIED = 0;
+    BS_BUY = 1;
+    BS_SELL = 2;
+}
+
+
+enum OpenCloseType {
+    OC_UNSPECIFIED = 0;
+    OC_OPEN = 1;
+    OC_CLOSE = 2;
+}
+
+
+enum LongShortType {
+    LS_UNSPECIFIED = 0;
+    LS_LONG = 1;
+    LS_SHORT = 2;
+}
+
+
+enum BasicOrderType {
+    ORDERTYPE_UNSPECIFIED = 0;
+    ORDERTYPE_LIMIT = 1;
+    ORDERTYPE_MARKET = 2;
+}
+
+
+enum TimeInForceType {
+    TIMEINFORCE_UNSPECIFIED = 0;
+    TIMEINFORCE_IOC = 1;
+    TIMEINFORCE_FAK = 2;
+    TIMEINFORCE_GTC = 3; // good til canceled
+    TIMEINFORCE_FOK = 4; // fill or kill
+}
+
+enum ExtraOrderTagType {
+    EXTRA_TAG_UNSPECIFIED = 0;
+    EXTRA_TAG_POST_ONLY = 1;
+    EXTRA_TAG_REDUCE_ONLY = 2;
+}
+
+
+enum FillType {
+    FILL_UNSPECIFIED = 0;
+    FILL_TAKER = 1;
+    FILL_MAKER = 2;
+    FILL_BACKFILL = 3; // backfilled trade (e.g. for reconciliation)
+}
+
+
+enum FeeType {
+    FEE_UNSPECIFIED = 0;
+    FEE_EXCH = 1;
+    FEE_FUNDING = 2;
+    FEE_TAX = 3;
+    FEE_GAS = 4;
+    FEE_INTEREST = 5;
+}
+
+enum ValueSymbol {
+    VALUE_SYMBOL_UNSPECIFIED = 0;
+    VALUE_SYMBOL_USDT = 2;
+    VALUE_SYMBOL_USDC = 3;
+}
+
+
+enum FiatSymbol {
+    FIAT_UNSPECIFIED = 0;
+    FIAT_USD = 1;
+    FIAT_HKD = 2;
+    FIAT_SGD = 3;
+    FIAT_JPY = 4;
+}
+
+
+enum Exchange {
+    EXCH_UNSPECIFIED = 0;
+    EXCH_BINANCE = 1;
+    EXCH_INJECTIVE = 2;
+    EXCH_DEXALOT = 3;
+    EXCH_DDEX = 4;
+    EXCH_ORDERLY = 5;
+}
+
+//
+//enum InstrumentCode {
+//
+//}
+
+
+message InstrumentRefData {
+    string instrument_id = 1;  // internal instrument id 
+    string instrument_id_exchange = 2; // instrument symbol name at the exchange 
+    int64 update_ts = 3;
+    string exchange_name = 5;  
+
+    InstrumentType instrument_type = 6;  // SPOT/PERP/FUTURE etc
+
+    string base_asset = 7;
+    string quote_asset = 8;
+
+    string settlement_asset = 9;  // for perps
+
+    double contract_size = 10;  // contract multiplier
+
+    int64 price_precision = 11;
+    int64 qty_precision = 12;
+
+    double price_tick_size = 13; // min price increment
+    double qty_lot_size = 14; // min size increment
+
+    double min_notional = 15;
+    double max_notional = 16;
+
+    double min_price = 17;
+    double max_price = 18;
+
+    double min_order_qty = 19;
+    double max_order_qty = 20;
+
+    double max_mkt_order_qty = 24; // max qty for market order
+
+    map<string, string> extra_properties = 21; 
+
+    string original_info = 22;  // original data from exchange api(if any)
+
+    bool disabled = 23; 
+    // more fields to be added when needed;
+    // reference: https://docs.ccxt.com/#/README?id=market-structure
+}
+
+enum SymbolType {
+    SYMBOL_TYPE_UNSPECIFIED = 0;
+    SYMBOL_TYPE_FIAT = 1;
+    SYMBOL_TYPE_COIN = 2;
+}
+
+
+
+message ExtraData {
+    map<string, string> data_map = 1;
+}
+
+
+message DummyRequest {
+    
+}
+
+
+enum EventLogLevelType {
+    LOGLEVEL_UNSPECIFIED = 0;
+    LOGLEVEL_ERROR = 1;
+    LOGLEVEL_WARN = 2;
+    LOGLEVEL_INFO = 3;
+    LOGLEVEL_DEBUG = 4;
+}
+
+
+enum EventSourceType {
+    EVENT_SRC_TYPE_UNSPECIFIED = 0;
+    EVENT_SRC_TYPE_STRAT = 1;
+    EVENT_SRC_TYPE_OMS = 2;
+    EVENT_SRC_TYPE_GW = 3;
+}
+
+
+enum EventType {
+    EVENT_TYPE_UNSPECIFIED = 0;
+    EVENT_TYPE_INBOUND = 1;
+    EVENT_TYPE_OUTBOUND =2;
+    EVENT_TYPE_INPROCESS =3;
+}
+
+message OrderEventMessage {
+
+    int64 timestamp = 1;
+
+    string source_id = 2;
+    int64 order_id = 3;
+    string exch_order_ref = 4;
+
+    EventLogLevelType event_loglevel_type = 5;
+    EventSourceType source_type = 6;
+    
+    EventType event_type = 7;
+
+    string message = 8;
+}
+
+
+message LatencyMetric {
+    map<string, int64> tagged_timestamps = 1; // key: tag, value: timestamp in nanoseconds
+}
+
+
+
+enum RejectionSource {
+    UNSPECIFIED_REJECT = 0;
+    EXCH_REJECT = 1;
+    EXCH_GW_REJECT = 2;
+    OMS_REJECT = 3;
+}
+
+
+enum RejectionReason {
+    UNSPECIFIED_REJECT_REASON = 0;
+    REJ_REASON_INSUFFICIENT_FUNDS = 1;
+    REJ_REASON_INVALID_ORDER_TYPE = 2;
+    REJ_REASON_OMS_INTERNAL_ERROR = 3;
+    REJ_REASON_GW_INTERNAL_ERROR = 4;
+    REJ_REASON_PRICE_OUT_OF_RANGE = 5;
+    REJ_REASON_QTY_OUT_OF_RANGE = 6;
+    REJ_REASON_NETWORK_ERROR = 7;
+
+    REJ_REASON_OMS_INVALID_STATE = 8;
+
+    REJ_REASON_EXCH_REJECT = 9;
+
+    // add more reason types as needed
+}
+
+message Rejection {
+    RejectionSource source = 1;
+    bool recoverable = 2; // == can retry; this field is what matters the most.
+    RejectionReason reason = 3;
+    int64 error_code = 4;  // exchange-specific error code
+    string error_message = 5;   // detailed error message for debug/logging purpose
+}
+
+message MarginPositionInfo {
+
+    double leverage = 1;
+    double entry_price = 2;
+    double mark_price = 3;
+    double liquidation_price = 4;
+    double margin = 5;
+    double contracts = 6;
+    double contract_size = 7;
+    double contract_value = 8;
+    double index_price = 9;
+    double unsettled_pnl = 10;
+    double last_trade_price = 11;
+    int64 update_ts = 12;
+}

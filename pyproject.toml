@@ -1,0 +1,32 @@
+[project]
+name = "zkbot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+
+[dependency-groups]
+# tools only needed to (re)generate code
+"dev" = [
+  "grpcio-tools>=1.60",
+  "betterproto[compiler]>=2.0.0b6",  # provides protoc-gen-python_betterproto
+  "build",
+  "twine"
+]
+
+[tool.uv.workspace]
+members = [
+  "libs/*",
+  "services/*",
+]
+
+# Local workspace sources for development
+# Allows packages to depend on each other and resolve locally
+[tool.uv.sources]
+zk-datamodel = { workspace = true }
+zk-core = { workspace = true }
+zk-client = { workspace = true }
+zk-rpc = { workspace = true }
+gw-utils = { workspace = true }

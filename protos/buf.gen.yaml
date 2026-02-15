@@ -1,0 +1,28 @@
+version: v2
+managed:
+  enabled: true
+
+plugins:
+  # --- Python: BetterProto ---
+  #- remote: buf.build/community/betterproto
+#  - remote: buf.build/community/danielgtaylor-betterproto:v1.2.5
+#    out: ../libs/zk-datamodel/src/zk_datamodel
+#    # common BetterProto opts you can uncomment if desired:
+#    # opt:
+#    #   - generate_descriptors=true
+#    #   - pyi=true
+
+  # --- Rust: prost ---
+  - remote: buf.build/community/neoeinstein-prost
+    out: ../rust/crates/zk-datamodel-rs/src
+    opt:
+        - compile_well_known_types=true
+        - bytes=bytes
+
+  # --- Java ---
+  - remote: buf.build/protocolbuffers/java
+    out: ../polyglot/java/src/main/java
+
+  # --- C++ ---
+  - remote: buf.build/protocolbuffers/cpp
+    out: ../polyglot/cpp/src

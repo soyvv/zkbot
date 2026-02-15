@@ -1,0 +1,29 @@
+
+syntax = "proto3";
+
+import "common.proto";
+
+package tqrpc_ref;
+
+
+message InstrumentDataQueryRequest {
+    repeated string instrument_code = 1; 
+}
+
+message InstrumentDataQueryResponse {
+    repeated common.InstrumentRefData Instrument_ref_data = 1;
+}
+
+
+message TradingPairsResponse {
+    repeated string pairs = 1;
+}
+
+service RefDataService {
+
+    rpc QueryInstrumentRefData( InstrumentDataQueryRequest) returns (InstrumentDataQueryResponse);
+
+    rpc QueryTradingPairs(common.DummyRequest) returns (TradingPairsResponse);
+
+    // TBA
+} 

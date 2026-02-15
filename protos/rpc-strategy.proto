@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+import "common.proto";
+import "strategy.proto";
+
+package tqrpc_strategy;
+
+
+service StrategyService {
+    // TBA
+}

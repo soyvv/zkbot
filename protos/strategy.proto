@@ -1,0 +1,137 @@
+syntax="proto3";
+
+import "common.proto";
+import "rpc-oms.proto";
+
+package strategy;
+
+
+message Strategy {
+    string strategy_key = 1;
+    string strategy_desc = 2;
+    string strategy_script_file_name = 3;
+    repeated int64 account_ids = 4;
+    repeated string symbols = 5;
+
+    string config = 6;
+    string oms_config = 7; // OMS config json string
+
+    string current_execution_id = 8; // None if not running
+}
+
+
+message StrategyExecution {
+    int64 start_ts = 1;
+    int64 end_ts = 2;  // None if not ended
+
+    string strategy_key = 3;
+    string execution_id = 4;
+
+    string config = 6;
+}
+
+
+enum StrategyCommandType {
+    STRAT_CMD_UNSPECIFIED = 0;
+    STRAT_CMD_REINIT = 1;
+    STRAT_CMD_PAUSE = 2;
+    STRAT_SPECIFIC_CMD = 3;
+}
+
+message StrategyCommand {
+    StrategyCommandType cmd_type = 1;
+    string source_id = 2;
+    string strategy_key = 3;
+    string execution_id = 4;
+    string cmd_data = 5;
+}
+
+
+//enum StrategyActionType {
+//    STRAT_ACTION_TYPE_UNSPECIFIED = 0;
+//    STRAT_ACTION_TYPE_LIFECYCLE_NOTFIY = 1;
+//    STRAT_ACTION_TYPE_ORDER = 2;
+//    STRAT_ACTION_TYPE_CANCEL = 3;
+//    STRAT_ACTION_TYPE_LOG = 4;
+//    STRAT_ACTION_TYPE_CONFIG_NOTIFY = 5;
+//    STRAT_ACTION_TYPE_EXPORT = 6;
+//}
+
+
+enum StrategyStatusType {
+    STRAT_STATUS_UNSPECIFIED = 0;
+    STRAT_STATUS_INITIALIZING = 1; // running init stuff
+    STRAT_STATUS_RUNNING = 2; // running and reacting to ext events
+    STRAT_STATUS_STOPPED = 3; // stopped by user
+    STRAT_STATUS_ERROR = 4; // strategy self-marked as error
+    STRAT_STATUS_EXCEPTIONED = 5; // unexpected exception
+}
+
+
+message StrategyConfig {
+    // TBA
+}
+
+message StrategyLifecycleNotifyEvent{
+    int64 timestamp = 1;
+    string strategy_id = 2;
+    string execution_id = 3;
+    StrategyStatusType status = 4;
+    string payload_json = 5;
+}
+
+message StrategyOrderEvent{
+    int64 timestamp = 1;
+    string strategy_id = 2;
+    string execution_id = 3;
+    //tqrpc_oms.OMSPlaceOrderRequest order_request = 4;
+    //string order_request_json = 4
+    int64 order_id = 5;
+    double price = 6;
+    double qty = 7;
+    string symbol = 8;
+    int64 account_id = 9;
+    common.BuySellType buy_sell = 10;
+
+}
+
+message StrategyCancelEvent {
+    int64 timestamp = 1;
+    string strategy_id = 2;
+    string execution_id = 3;
+    int64 order_id = 4;
+    string exch_order_id = 5;
+}
+
+message StrategyLogEvent {
+    int64 timestamp = 1;
+    string strategy_id = 2;
+    string execution_id = 3;
+    string log = 4;
+    string log_type = 5; // INFO/DEBUG/ERROR etc
+}
+
+//message StrategyAction {
+//
+//    int64 timestamp = 1;
+//    StrategyActionType event_type = 2;
+//    string strategy_id = 3;
+//    string execution_id = 4;
+//
+//    oneof action_data {
+//        StrategyLifecycleEvent lifecycle_event = 5;
+//        StrategyOrderEvent order_event = 6;
+//        StrategyLogEvent log_event = 7;
+//        StrategyConfigEvent config_event = 8;
+//    }
+//}
+
+
+message StrategyNotification {
+    int64 timestamp = 1;
+    string strategy_key = 2;
+    string execution_id = 3;
+    string message = 4;
+    map<string, string> message_meta_info = 5;
+}
+

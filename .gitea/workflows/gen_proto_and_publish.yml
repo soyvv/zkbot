@@ -1,0 +1,72 @@
+name: proto-build-and-publish
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".gitea/workflows/**"
+      - "protos/**"
+      - "scripts/gen_proto.py"
+      - "pyproject.toml"
+      - "uv.lock"
+  tags:
+    - "v*"
+  pull_request:
+
+jobs:
+  generate_and_publish:
+    name: Generate proto code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Cache uv, pip, and the venv itself for speed
+#      - name: Cache uv & venv
+#        uses: actions/cache@v4
+#        with:
+#          path: |
+#            ~/.cache/uv
+#            ~/.cache/pip
+#            .venv
+#          key: ${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+
+      - name: Install uv (cached)
+        run: |
+          if ! command -v uv >/dev/null 2>&1; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            echo "$HOME/.local/bin" >> $GITHUB_PATH
+          else
+            echo "uv already installed"
+          fi
+
+      - name: Ensure uv on PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Sync deps (runtime + dev)
+        run: uv sync --all-groups
+
+      - name: Generate BetterProto code
+        run: uv run python -m scripts.gen_proto
+
+      # Optional guard: keep generated code committed
+      - name: Check for uncommitted changes in tq_datamodel
+        run: |
+          if ! git diff --exit-code -- tq_datamodel; then
+            echo "::error::Generated files changed. Commit them."
+            exit 1
+          fi
+
+      - name: Build wheel
+        run: uv run python -m build --wheel
+
+      - name: Show dist
+        run: ls -l dist
+
+      - name: Upload to Private PyPI (no password)
+        env:
+          REPO_URL: ${{ vars.PRIVATE_PYPI_REPOSITORY_URL }}  # e.g. https://nexus.example.com/repository/pypi-internal/
+          TWINE_USERNAME: ${{ secrets.PRIVATE_PYPI_REPOSITORY_USER }}
+          TWINE_PASSWORD: ${{ secrets.PRIVATE_PYPI_REPOSITORY_PASS }}
+        run: |
+          uv run python -m twine upload --verbose --non-interactive --repository-url "$REPO_URL" -u "$TWINE_USERNAME" -p "$TWINE_PASSWORD" dist/*
