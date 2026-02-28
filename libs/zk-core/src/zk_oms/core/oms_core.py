@@ -9,6 +9,7 @@ from .confdata_mgr import ConfdataManager
 
 from .utils import pb_to_json
 from .models import *
+from zk_utils.instrument_utils import SPOT_LIKE_TYPES
 from .order_mgr import OrderManager
 from .balance_mgr import BalanceManager
 
@@ -850,10 +851,10 @@ class OMSCore:
     def _resolve_context(self, instrument_code: str, account_id: int) -> OrderContext:
         symbol_ref = self.refdata.get(instrument_code)
         if symbol_ref:
-            pos_symbol = symbol_ref.base_asset \
-                if symbol_ref.instrument_type == common.InstrumentType.INST_TYPE_SPOT \
-                else symbol_ref.instrument_id
-            fund_symbol = symbol_ref.quote_asset
+            is_spot_like = symbol_ref.instrument_type in SPOT_LIKE_TYPES
+            pos_symbol = symbol_ref.base_asset if is_spot_like else symbol_ref.instrument_id
+            fund_symbol = symbol_ref.quote_asset if is_spot_like \
+                else (symbol_ref.settlement_asset or symbol_ref.quote_asset)
             pos_balance = self.balance_mgr.get_balance_for_symbol(account_id, pos_symbol, create_if_not_exists=True)
             fund_balance = self.balance_mgr.get_balance_for_symbol(account_id, fund_symbol, create_if_not_exists=True)
         else:

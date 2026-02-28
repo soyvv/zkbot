@@ -40,7 +40,7 @@ class Oanda(ExchangeBase):
             price_tick_size = 10 ** pip_location
 
             instrument_ref_data = InstrumentRefData(
-                instrument_id=self.instrument_id(base_asset, "", quote_asset, self.exch_name),
+                instrument_id=self.instrument_id(base_asset, "-CFD", quote_asset, self.exch_name),
                 instrument_id_exchange=instrument_id_exch,
                 update_ts=update_ts,
                 exchange_name=self.exch_name,

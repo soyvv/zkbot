@@ -1,4 +1,5 @@
 import zk_utils.zk_utils
+from zk_utils.instrument_utils import infer_instrument_type_from_symbol
 from zk_datamodel.ods import OmsConfigEntry
 from zk_oms.core.confdata_mgr import ConfdataManager
 from zk_oms.core.models import OMSRouteEntry, GwConfigEntry, InstrumentRefdata, InstrumentTradingConfig, OMSPosition
@@ -54,61 +55,51 @@ def get_test_symbols() -> list[InstrumentRefdata]:
     refdata = [
         InstrumentRefdata(
             instrument_id="ETH-P/USDC@EX1",
-            instrument_code="ETH-P/USDC@EX1",
             instrument_id_exchange="ETH",
-            exch_symbol="ETH",
-            exch_name="EX1",
+            exchange_name="EX1",
             instrument_type=common.InstrumentType.INST_TYPE_PERP,
-            quote_symbol="USDC",
-            base_symbol="ETH",
+            quote_asset="USDC",
+            base_asset="ETH",
             price_precision=2,
             qty_precision=2
         ),
         InstrumentRefdata(
             instrument_id="ETH-P/USDC@EX2",
-            instrument_code="ETH-P/USDC@EX2",
             instrument_id_exchange="ETH",
-            exch_symbol="ETH",
-            exch_name="EX2",
+            exchange_name="EX2",
             instrument_type=common.InstrumentType.INST_TYPE_PERP,
-            quote_symbol="USDC",
-            base_symbol="ETH",
+            quote_asset="USDC",
+            base_asset="ETH",
             price_precision=2,
             qty_precision=2
         ),
         InstrumentRefdata(
             instrument_id="BTC-P/USDC@EX1",
-            instrument_code="BTC-P/USDC@EX1",
             instrument_id_exchange="BTC",
-            exch_symbol="BTC",
-            exch_name="EX1",
+            exchange_name="EX1",
             instrument_type=common.InstrumentType.INST_TYPE_PERP,
-            quote_symbol="USDC",
-            base_symbol="BTC",
+            quote_asset="USDC",
+            base_asset="BTC",
             price_precision=1,
             qty_precision=5
         ),
         InstrumentRefdata(
             instrument_id="BTC-P/USDC@EX2",
-            instrument_code="BTC-P/USDC@EX2",
-            exch_symbol="BTC",
             instrument_id_exchange="BTC",
-            exch_name="EX2",
+            exchange_name="EX2",
             instrument_type=common.InstrumentType.INST_TYPE_PERP,
-            quote_symbol="USDC",
-            base_symbol="BTC",
+            quote_asset="USDC",
+            base_asset="BTC",
             price_precision=1,
             qty_precision=5
         ),
         InstrumentRefdata(
-            instrument_id="ETH/USD@EX1",
-            instrument_code="ETH/USD@EX2",
+            instrument_id="ETH/USD@EX2",
             instrument_id_exchange="ETH",
-            exch_symbol="ETH",
-            exch_name="EX2",
+            exchange_name="EX2",
             instrument_type=common.InstrumentType.INST_TYPE_SPOT,
-            quote_symbol="USD",
-            base_symbol="ETH",
+            quote_asset="USD",
+            base_asset="ETH",
             price_precision=1,
             qty_precision=5
         ),
@@ -126,8 +117,7 @@ def _create_init_positions(init_balances: dict[int, dict[str, float]]) -> list[O
     positions = []
     for acc_id, balances in init_balances.items():
         for sym, qty in balances.items():
-            is_perp = "-P" in sym
-            instrument_type = common.InstrumentType.INST_TYPE_PERP if is_perp else common.InstrumentType.INST_TYPE_SPOT
+            instrument_type = infer_instrument_type_from_symbol(sym)
             pos = OMSPosition.create_position(account_id=acc_id, symbol=sym, instrument_type=instrument_type)
             pos.position_state.avail_qty = qty
             pos.position_state.total_qty = qty
@@ -141,7 +131,7 @@ def get_default_test_omscore(init_positions: dict[int, dict[str, float]]=None) -
     refdata = get_test_symbols()
     trading_config_table = [
         InstrumentTradingConfig(
-            instrument_code=ref.instrument_code,
+            instrument_code=ref.instrument_id,
             bookkeeping_balance=False,
             balance_check=False
         )
@@ -182,7 +172,7 @@ def get_nontq_test_omscore(init_positions: dict[int, dict[str, float]]=None) -> 
     refdata = get_test_symbols()
     trading_config_table = [
         InstrumentTradingConfig(
-            instrument_code=ref.instrument_code,
+            instrument_code=ref.instrument_id,
             bookkeeping_balance=False,
             balance_check=False
         )
@@ -222,7 +212,7 @@ def get_spot_trading_omscore(init_positions: dict[int, dict[str, float]]=None) -
     refdata = get_test_symbols()
     trading_config_table = [
         InstrumentTradingConfig(
-            instrument_code=ref.instrument_code,
+            instrument_code=ref.instrument_id,
             bookkeeping_balance=True,
             balance_check=True,
             publish_balance_on_book=True

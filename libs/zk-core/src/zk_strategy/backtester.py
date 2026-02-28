@@ -18,6 +18,7 @@ from .strategy_core import StrategyTemplate, StrategyConfig
 import zk_simulator.sim_core as sim
 from zk_oms.core.models import OMSAction, OMSActionType, GwConfigEntry, InstrumentRefdata, OMSRouteEntry, OMSPosition, \
     InstrumentTradingConfig
+from zk_utils.instrument_utils import MARGIN_TYPES, infer_instrument_type_from_symbol
 from zk_oms.core.oms_core import OMSCore
 
 import zk_datamodel.rtmd as rtmd
@@ -470,15 +471,7 @@ class BacktestOMSV2:
                 base, quote = pair.split("/", maxsplit=2)
                 #base: str
 
-                # TODO: infer instrument type
-                if base.endswith("-P"):
-                    sym_type = common.InstrumentType.INST_TYPE_PERP
-                elif base.endswith("-F"):
-                    sym_type = common.InstrumentType.INST_TYPE_FUTURE
-                elif base.endswith("-CFD"):
-                    sym_type = common.InstrumentType.INST_TYPE_CFD
-                else:
-                    sym_type = common.InstrumentType.INST_TYPE_SPOT
+                sym_type = infer_instrument_type_from_symbol(base)
 
                 _refdata = {
                     "instrument_id": sym,
@@ -498,8 +491,7 @@ class BacktestOMSV2:
         all_trading_conf = []
         for ref in refdata:
             trading_conf = InstrumentTradingConfig(instrument_code=ref.instrument_id)
-            if ref.instrument_type != common.InstrumentType.INST_TYPE_SPOT \
-             and ref.instrument_type != common.InstrumentType.INST_TYPE_UNSPECIFIED:
+            if ref.instrument_type in MARGIN_TYPES:
                 trading_conf.use_margin = True
                 trading_conf.margin_ratio = 0.1 # TODO: use config
             all_trading_conf.append(trading_conf)

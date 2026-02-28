@@ -2,6 +2,7 @@ import copy
 from typing import Optional, Union
 
 from .models import *
+from zk_utils.instrument_utils import SPOT_LIKE_TYPES
 import zk_datamodel.exch_gw as gw
 import datetime
 import logging
@@ -210,8 +211,8 @@ class BalanceManager:
             (account_id in self._balance_config and self._balance_config[account_id].allow_override_oms_managed_balance)
 
         for b in gw_balance_updates.balances:
-            if b.instrument_type == common.InstrumentType.INST_TYPE_SPOT:
-                symbol = b.instrument_code # should be symbols like USDC/ETH/NEAR etc so should not need conversion
+            if b.instrument_type in SPOT_LIKE_TYPES:
+                symbol = b.instrument_code # should be symbols like USDC/ETH/NEAR/SPY etc so should not need conversion
             else:
                 symbol_refdata = self._symbol_map.get(account_id, {}).get(b.instrument_code, None)
                 symbol = symbol_refdata.instrument_id if symbol_refdata else None
