@@ -18,7 +18,7 @@ class BalanceManageConfigEntry:
 class BalanceManager:
     def __init__(self, instrument_refdata_lookuptable: dict[int, dict[str, InstrumentRefdata]],
                  account_mapping: list[OMSRouteEntry],
-                 gw_configs: list[GWConfigEntry],
+                 gw_configs: list[GwConfigEntry],
                  balance_mgr_config: list[BalanceManageConfigEntry] = None):
 
 
@@ -35,7 +35,7 @@ class BalanceManager:
 
         self._refdata: dict[str, InstrumentRefdata] = {}
 
-        self._gw_configs: dict[str, GWConfigEntry] = {}
+        self._gw_configs: dict[str, GwConfigEntry] = {}
         self._account_reverse_map: dict[str, OMSRouteEntry] = {}  # exch_account_code -> accoutn_entry
         self._symbol_map: dict[int, dict[str, InstrumentRefdata]] = {}  # account_id -> exch_symbol_code -> refdata
 
@@ -65,7 +65,7 @@ class BalanceManager:
         self._symbol_map = instrument_refdata_lookuptable
 
 
-    def reload_account_config(self, account_routes: list[OMSRouteEntry], gw_configs: list[GWConfigEntry]):
+    def reload_account_config(self, account_routes: list[OMSRouteEntry], gw_configs: list[GwConfigEntry]):
         self._gw_configs = {}
         self._account_reverse_map = {}
         for gw_config in gw_configs:

@@ -18,7 +18,7 @@ class OMSFund:
 
 
 from zk_datamodel.common import InstrumentRefData as InstrumentRefdata
-from zk_datamodel.ods import GWConfigEntry as GWConfigEntry
+from zk_datamodel.ods import GwConfigEntry
 
 @dataclass
 class InstrumentTradingConfig:
@@ -147,7 +147,7 @@ class OrderContext:
     route: OMSRouteEntry = None
     trading_config: InstrumentTradingConfig = None
     symbol_ref: InstrumentRefdata = None
-    gw_config: GWConfigEntry = None
+    gw_config: GwConfigEntry = None
     order: OMSOrder = None
     errors: list[str] = field(default_factory=list)
 
@@ -158,7 +158,7 @@ class OrderContext:
 class RefdataContext:
     instrument_refdata: InstrumentRefdata = None
     account_route: OMSRouteEntry = None
-    gw_config: GWConfigEntry = None
+    gw_config: GwConfigEntry = None
     trading_config: InstrumentTradingConfig = None
 
 

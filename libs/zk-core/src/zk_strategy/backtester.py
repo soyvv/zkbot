@@ -7,7 +7,7 @@ import copy
 import betterproto as bp
 import pandas as pd
 
-from zk_datamodel.ods import OMSConfigEntry
+from zk_datamodel.ods import OmsConfigEntry
 from zk_datamodel.strategy import StrategyCommand
 from zk_oms.core.confdata_mgr import ConfdataManager
 
@@ -16,7 +16,7 @@ from .models import *
 from .strategy_core import StrategyTemplate, StrategyConfig
 
 import zk_simulator.sim_core as sim
-from zk_oms.core.models import OMSAction, OMSActionType, GWConfigEntry, InstrumentRefdata, OMSRouteEntry, OMSPosition, \
+from zk_oms.core.models import OMSAction, OMSActionType, GwConfigEntry, InstrumentRefdata, OMSRouteEntry, OMSPosition, \
     InstrumentTradingConfig
 from zk_oms.core.oms_core import OMSCore
 
@@ -420,7 +420,7 @@ class BacktestOMSV2:
 
 
         gw_config_table = [
-            GWConfigEntry(
+            GwConfigEntry(
                 rpc_endpoint="dummy1",
                 report_endpoint="dummy2",
                 gw_key=exch,
@@ -438,7 +438,7 @@ class BacktestOMSV2:
 
         confdata_mgr = ConfdataManager(oms_id="bt_oms")
         confdata_mgr .reload_config(
-            oms_config_entry=OMSConfigEntry(
+            oms_config_entry=OmsConfigEntry(
                 oms_id="bt_oms",
                 managed_account_ids=account_ids,
                 namespace="test"

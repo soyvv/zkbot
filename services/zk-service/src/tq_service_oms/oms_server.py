@@ -26,18 +26,18 @@ except:
 
 from zk_oms.core.oms_core import OMSCore
 
-from zk_oms.core.models import OMSActionType, OMSAction, GWConfigEntry, OMSOrder, OMSRouteEntry, OMSPosition, \
+from zk_oms.core.models import OMSActionType, OMSAction, GwConfigEntry, OMSOrder, OMSRouteEntry, OMSPosition, \
     OrderRecheckRequest, CancelRecheckRequest, ExchOrderRef, OMSCoreSchedRequest, SchedRequestType
 from zk_datamodel import oms, common
 from zk_datamodel import tqrpc_oms as oms_rpc
 from zk_datamodel import exch_gw as gw
 from zk_datamodel import tqrpc_exch_gw as gw_rpc
-from zk_datamodel.tqrpc_oms import  OMSResponse, OMSResponseStatus
+from zk_datamodel.tqrpc_oms import  OmsResponse, OmsResponseStatus
 
 from loguru import logger
 
 
-OK = OMSResponse(status=OMSResponseStatus.OMS_RESP_STATUS_SUCCESS)
+OK = OmsResponse(status=OmsResponseStatus.OMS_RESP_STATUS_SUCCESS)
 
 POST_TRADE_EVENT_TOPIC = "tq.posttrade"
 
@@ -47,7 +47,7 @@ class OMSSubscriber:
     def __init__(self,
                  nats_client: nats.NATS,
                  managed_accounts: list[int],
-                 gw_config_table: list[GWConfigEntry],
+                 gw_config_table: list[GwConfigEntry],
                  account_routes: list[OMSRouteEntry],
                  queue: asyncio.Queue, oms_core: OMSCore,
                  gw_sender: GWSender,
@@ -66,7 +66,7 @@ class OMSSubscriber:
         self.reload_config(gw_config_table, account_routes)
 
 
-    def reload_config(self, gw_config_table: list[GWConfigEntry],
+    def reload_config(self, gw_config_table: list[GwConfigEntry],
                       account_routes: list[OMSRouteEntry]):
         logger.info("reloading config for oms subscriber")
         self._gws_to_connect = set([r.gw_key for r in account_routes])
@@ -81,7 +81,7 @@ class OMSSubscriber:
 
         self._msg_source_gw = _msg_source_gw
 
-    async def reload_and_restart(self, gw_config_table: list[GWConfigEntry],
+    async def reload_and_restart(self, gw_config_table: list[GwConfigEntry],
                       account_routes: list[OMSRouteEntry]):
         logger.info("reloading and restarting oms subscriber")
         self.reload_config(gw_config_table, account_routes)
@@ -97,7 +97,7 @@ class OMSSubscriber:
         else:
             logger.info(f"already subscribed to order report channel: {subject}; skipping...")
 
-    async def _start_sub(self, gw_entry:GWConfigEntry):
+    async def _start_sub(self, gw_entry:GwConfigEntry):
         if gw_entry.gw_key not in self._gws_to_connect:
             logger.info(f"omitting gw config entry for exchange: {gw_entry.gw_key}")
             return
@@ -191,52 +191,52 @@ class OMSSubscriber:
 
     async def handle_order_request(self, msg):
         reply = msg.reply
-        rpc_req = oms_rpc.OMSPlaceOrderRequest().parse(msg.data)
+        rpc_req = oms_rpc.OmsPlaceOrderRequest().parse(msg.data)
         req = rpc_req.order_request
         await self.queue.put(req)
         await self.nc.publish(reply, bytes(OK))
 
     async def handle_order_cancel(self, msg):
         reply = msg.reply
-        rpc_req = oms_rpc.OMSCancelOrderRequest().parse(msg.data)
+        rpc_req = oms_rpc.OmsCancelOrderRequest().parse(msg.data)
         req = rpc_req.order_cancel_request
         await self.queue.put(req)
         await self.nc.publish(reply, bytes(OK))
 
     async def handle_batch_order_request(self, msg):
         reply = msg.reply
-        rpc_req = oms_rpc.OMSBatchPlaceOrdersRequest().parse(msg.data)
+        rpc_req = oms_rpc.OmsBatchPlaceOrdersRequest().parse(msg.data)
         reqs = rpc_req.order_requests
         await self.queue.put(reqs)
         await self.nc.publish(reply, bytes(OK))
 
     async def handle_batch_order_cancel(self, msg):
         reply = msg.reply
-        rpc_req = oms_rpc.OMSBatchCancelOrdersRequest().parse(msg.data)
+        rpc_req = oms_rpc.OmsBatchCancelOrdersRequest().parse(msg.data)
         reqs = rpc_req.order_cancel_requests
         await self.queue.put(reqs)
         await self.nc.publish(reply, bytes(OK))
 
     async def handle_open_order_query(self, msg):
         reply = msg.reply
-        rpc_req = oms_rpc.OMSQueryOpenOrderRequest().parse(msg.data)
+        rpc_req = oms_rpc.OmsQueryOpenOrderRequest().parse(msg.data)
         account_id = int(rpc_req.account_id)
 
         open_orders = self.oms_core.get_open_orders(account_id)
-        resp = oms_rpc.OMSOrderDetailResponse()
+        resp = oms_rpc.OmsOrderDetailResponse()
         resp.orders = [o.oms_order_state for o in open_orders]
 
         await self.nc.publish(reply, bytes(resp))
 
     async def handle_account_balance_query(self, msg):
         reply = msg.reply
-        rpc_req = oms_rpc.OMSQueryAccountRequest().parse(msg.data)
+        rpc_req = oms_rpc.OmsQueryAccountRequest().parse(msg.data)
         oms_positions: list[OMSPosition] = None
         if not rpc_req.query_gw:
             oms_positions = self.oms_core.get_account_balance(rpc_req.account_id)
         else:
             pass # todo: query gw or use exch cache from balance mgr?
-        resp = oms_rpc.OMSAccountResponse()
+        resp = oms_rpc.OmsAccountResponse()
         resp.account_id = rpc_req.account_id
         resp.account_balance_entries = [p.position_state for p in oms_positions]
 
@@ -331,7 +331,7 @@ class OMSActionHandler:
 
     async def publish_error(self, action: OMSAction):
         err_msg: str = action.action_data
-        err_system_event = oms.OMSSystemEvent(
+        err_system_event = oms.OmsSystemEvent(
             event_type="ERROR",
             event_message=err_msg,
             timestamp=int(datetime.datetime.now().timestamp()*1000),
@@ -669,7 +669,7 @@ async def main(oms_cmd_config: OMSConfig):
     async def periodic_resync_balance():
 
         while True:
-            gw_configs_dict: dict[str, GWConfigEntry] = {gw.gw_key: gw for gw in confdata_mgr.get_gw_configs()}
+            gw_configs_dict: dict[str, GwConfigEntry] = {gw.gw_key: gw for gw in confdata_mgr.get_gw_configs()}
             refdata_dict: dict[str, common.InstrumentRefData] = confdata_mgr.get_instrument_refdata_dict()
 
             await asyncio.sleep(60)

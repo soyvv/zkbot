@@ -52,7 +52,7 @@ class ODSServer:
         self.mongo_client = MongoClient(self.config.mongo_uri)
         self.db = self.mongo_client[self.config.mongo_db_name]
 
-        #self.oms_config_dict: dict[str, ods.OMSConfigEntry] = {}
+        #self.oms_config_dict: dict[str, ods.OmsConfigEntry] = {}
         self.account_config_dict: dict[int, ods.AccountTradingConfig] = {}
         self.instrument_refdata: dict[str, common.InstrumentRefData] = {}
 
@@ -134,8 +134,8 @@ class ODSServer:
         self.account_config_dict = _account_to_config
         self.instrument_refdata = {refdata.instrument_id: refdata for refdata in instruments}
 
-    def query_account_balance(self, request: tqrpc_ods.OMSQueryAccountRequest) \
-            -> tqrpc_ods.OMSAccountResponse:
+    def query_account_balance(self, request: tqrpc_ods.OmsQueryAccountRequest) \
+            -> tqrpc_ods.OmsAccountResponse:
         query_gw = request.query_gw
         account_id = request.account_id
 
@@ -149,7 +149,7 @@ class ODSServer:
                 ]
             else:
                 converted_balances = []
-            return tqrpc_ods.OMSAccountResponse(
+            return tqrpc_ods.OmsAccountResponse(
                 account_id=account_id,
                 account_balance_entries=converted_balances
             )
@@ -157,15 +157,15 @@ class ODSServer:
             # query oms redis
             oms_id = self._get_oms_id(account_id)
             oms_balances: list[oms.Position] = self.query_oms_balances(oms_id=oms_id, account_id=account_id)
-            return tqrpc_ods.OMSAccountResponse(
+            return tqrpc_ods.OmsAccountResponse(
                 account_id=account_id,
                 account_balance_entries=oms_balances
             )
 
 
 
-    def query_order_details(self, request: tqrpc_ods.OMSQueryOrderDetailRequest) \
-            -> tqrpc_ods.OMSOrderDetailResponse:
+    def query_order_details(self, request: tqrpc_ods.OmsQueryOrderDetailRequest) \
+            -> tqrpc_ods.OmsOrderDetailResponse:
         order_refs = request.order_refs
         query_gw = request.query_gw
 
@@ -176,25 +176,25 @@ class ODSServer:
                 self._convert_gw_order_to_oms_order(gw_order)
                 for gw_order in gw_orders
             ]
-            return tqrpc_ods.OMSOrderDetailResponse(
+            return tqrpc_ods.OmsOrderDetailResponse(
                 orders=converted_orders
             )
         else: # query oms
             oms_id = self._query_oms_id()
 
 
-    def query_open_orders(self, request: tqrpc_ods.OMSQueryOpenOrderRequest) \
-            -> tqrpc_ods.OMSOrderDetailResponse:
+    def query_open_orders(self, request: tqrpc_ods.OmsQueryOpenOrderRequest) \
+            -> tqrpc_ods.OmsOrderDetailResponse:
 
         account_id = request.account_id
         oms_id = self._get_oms_id(account_id)
         open_orders: list[oms.Order] = self._query_open_orders(oms_id=oms_id, account_id=account_id)
-        return tqrpc_ods.OMSOrderDetailResponse(
+        return tqrpc_ods.OmsOrderDetailResponse(
             orders=open_orders
         )
 
-    def query_instrument_refdata(self, request: tqrpc_ods.OMSQueryInstrumentRefdataRequest) \
-            -> tqrpc_ods.OMSQueryInstrumentRefdataResponse:
+    def query_instrument_refdata(self, request: tqrpc_ods.OmsQueryInstrumentRefdataRequest) \
+            -> tqrpc_ods.OmsQueryInstrumentRefdataResponse:
         logger.info(f"Query instrument refdata: {request}")
         account_id = request.account_id
         instruments = request.instruments
@@ -202,7 +202,7 @@ class ODSServer:
         # load cached data
         if account_id:
             if account_id not in self.account_config_dict:
-                return tqrpc_ods.OMSQueryInstrumentRefdataResponse()
+                return tqrpc_ods.OmsQueryInstrumentRefdataResponse()
             _refdata = self.account_config_dict.get(account_id).supported_instruments
             # filter by instrument ids provided
             if instruments:
@@ -215,32 +215,32 @@ class ODSServer:
         #_refdata.sort(key=lambda x: x.instrument_id)
 
         # TODO: need pagination
-        return tqrpc_ods.OMSQueryInstrumentRefdataResponse(
+        return tqrpc_ods.OmsQueryInstrumentRefdataResponse(
             instrument_refdata=_refdata
         )
 
 
-    def query_instruments(self, request: tqrpc_ods.OMSQueryInstrumentRequest) \
-            -> tqrpc_ods.OMSQueryInstrumentResponse:
+    def query_instruments(self, request: tqrpc_ods.OmsQueryInstrumentRequest) \
+            -> tqrpc_ods.OmsQueryInstrumentResponse:
         logger.info(f"Query instruments: {request}")
         account_id = request.account_id
 
         if account_id:
             if account_id not in self.account_config_dict:
-                return tqrpc_ods.OMSQueryInstrumentResponse()
+                return tqrpc_ods.OmsQueryInstrumentResponse()
             _refdata = self.account_config_dict.get(account_id).supported_instruments
             instrument_ids = [rd.instrument_id for rd in _refdata]
         else:
             instrument_ids = list(self.instrument_refdata.keys())
 
-        return tqrpc_ods.OMSQueryInstrumentResponse(
+        return tqrpc_ods.OmsQueryInstrumentResponse(
             instrument_ids=instrument_ids
         )
 
 
 
-    def query_account_trading_config(self, request: tqrpc_ods.OMSQueryAccountTradingConfigRequest) \
-            -> tqrpc_ods.OMSQueryAccountTradingConfigResponse:
+    def query_account_trading_config(self, request: tqrpc_ods.OmsQueryAccountTradingConfigRequest) \
+            -> tqrpc_ods.OmsQueryAccountTradingConfigResponse:
         account_ids = request.account_ids
 
         _account_omsid_dict = self._query_account_omsid_dict()
@@ -261,34 +261,34 @@ class ODSServer:
             account_config.gw_config = _gw_key_to_config.get(gw_key, None)
             account_configs.append(account_config)
 
-        return tqrpc_ods.OMSQueryAccountTradingConfigResponse(
+        return tqrpc_ods.OmsQueryAccountTradingConfigResponse(
             account_trading_configs=account_configs
         )
 
 
     def query_all_account_trading_config(self, req: common.DummyRequest) \
-            -> tqrpc_ods.OMSQueryAccountTradingConfigResponse:
+            -> tqrpc_ods.OmsQueryAccountTradingConfigResponse:
         account_ids = list(self.account_config_dict.keys())
-        _req = tqrpc_ods.OMSQueryAccountTradingConfigRequest(
+        _req = tqrpc_ods.OmsQueryAccountTradingConfigRequest(
             account_ids=account_ids)
         return self.query_account_trading_config(_req)
 
-    def query_oms_config(self, request: tqrpc_ods.OMSQueryOmsConfigRequest) \
-            -> tqrpc_ods.OMSQueryOmsConfigResponse:
+    def query_oms_config(self, request: tqrpc_ods.OmsQueryOmsConfigRequest) \
+            -> tqrpc_ods.OmsQueryOmsConfigResponse:
         logger.info(f"Query oms config: {request}")
         oms_id = request.oms_id
         oms_configs = self._query_mongo(collection_name='oms_config', query={'oms_id': oms_id})
         if len(oms_configs) == 0:
-            return tqrpc_ods.OMSQueryOmsConfigResponse()
+            return tqrpc_ods.OmsQueryOmsConfigResponse()
         else:
-            oms_config: ods.OMSConfigEntry = ods.OMSConfigEntry(**oms_configs[0])
-            return tqrpc_ods.OMSQueryOmsConfigResponse(
+            oms_config: ods.OmsConfigEntry = ods.OmsConfigEntry(**oms_configs[0])
+            return tqrpc_ods.OmsQueryOmsConfigResponse(
                 oms_config=oms_config
             )
 
 
-    def query_client_config(self, request: tqrpc_ods.OMSQueryClientConfigRequest) \
-            -> tqrpc_ods.OMSQueryClientConfigResponse:
+    def query_client_config(self, request: tqrpc_ods.OmsQueryClientConfigRequest) \
+            -> tqrpc_ods.OmsQueryClientConfigResponse:
         logger.info(f"Query client config: {request}")
         account_ids = request.trading_account_ids
         account_endpoint_mapping = {}
@@ -316,7 +316,7 @@ class ODSServer:
                 _, _, oms_bu_endpoint = self._get_oms_endpoints(oms_id)
                 balance_update_endpoints.append(oms_bu_endpoint + ".*")
 
-        return tqrpc_ods.OMSQueryClientConfigResponse(
+        return tqrpc_ods.OmsQueryClientConfigResponse(
             oms_service_endpoints=account_endpoint_mapping,
             oms_orderupdates_endpoints=order_update_endpoints,
             oms_balanceupdates_endpoints=balance_update_endpoints
@@ -324,25 +324,25 @@ class ODSServer:
 
 
     def query_app_client_config(self, req: common.DummyRequest) \
-            -> tqrpc_ods.OMSQueryClientConfigResponse:
+            -> tqrpc_ods.OmsQueryClientConfigResponse:
         account_id_2_oms_id = self._query_account_omsid_dict()
         account_ids = list(account_id_2_oms_id.keys())
 
-        _req = tqrpc_ods.OMSQueryClientConfigRequest(
+        _req = tqrpc_ods.OmsQueryClientConfigRequest(
             trading_account_ids=account_ids)
 
         return self.query_client_config(_req)
 
 
-    def query_rtmd_subscription_list(self, request: tqrpc_ods.ODSRtmdSubQueryRequest) \
-        -> tqrpc_ods.ODSRtmdSubQueryResponse:
+    def query_rtmd_subscription_list(self, request: tqrpc_ods.OdsRtmdSubQueryRequest) \
+        -> tqrpc_ods.OdsRtmdSubQueryResponse:
         logger.info(f"Query rtmd subscription list: {request}")
         exch_name = request.exch_name
         instance_id = request.rtmd_instance_id
 
         exch_sub_table = self._query_mongo(collection_name='rtmd_subscriptions', query={'exch_name': exch_name})
         if not exch_sub_table:
-            return tqrpc_ods.ODSRtmdSubQueryResponse()
+            return tqrpc_ods.OdsRtmdSubQueryResponse()
         else:
             exch_subs = exch_sub_table[0]['subscriptions']
             instrument_ids = [instrument_id for instrument_id, instance in exch_subs.items()
@@ -352,7 +352,7 @@ class ODSServer:
 
             exch_instrument_ids = [refdata.instrument_id_exchange for refdata in refdata_items]
 
-            return tqrpc_ods.ODSRtmdSubQueryResponse(
+            return tqrpc_ods.OdsRtmdSubQueryResponse(
                 exch_instrument_ids=exch_instrument_ids,
                 exch_name=exch_name,
                 rtmd_instance_id=instance_id
@@ -360,16 +360,16 @@ class ODSServer:
 
 
 
-    _CHANNEL_NOT_PRESENT_MSG = tqrpc_ods.ODSRtmdChannelQueryResponse(
+    _CHANNEL_NOT_PRESENT_MSG = tqrpc_ods.OdsRtmdChannelQueryResponse(
         channel_present=False
     )
 
-    _DATA_NOT_PRESENT_MSG = tqrpc_ods.ODSRtmdDataQueryResponse(
+    _DATA_NOT_PRESENT_MSG = tqrpc_ods.OdsRtmdDataQueryResponse(
         data_present=False
     )
 
-    async def query_rtmd_channel(self, query_request: tqrpc_ods.ODSRtmdQueryRequest) \
-            -> tqrpc_ods.ODSRtmdChannelQueryResponse:
+    async def query_rtmd_channel(self, query_request: tqrpc_ods.OdsRtmdQueryRequest) \
+            -> tqrpc_ods.OdsRtmdChannelQueryResponse:
         logger.info(f"Query rtmd channel: {query_request}")
         instrument_id= query_request.instrument_id
         if instrument_id in self.instrument_refdata:
@@ -380,14 +380,14 @@ class ODSServer:
             channel_bytes = await self._query_redis(channel_key)
             if channel_bytes:
                 channel = channel_bytes.decode('utf-8')
-                return tqrpc_ods.ODSRtmdChannelQueryResponse(
+                return tqrpc_ods.OdsRtmdChannelQueryResponse(
                     rtmd_channel=channel,
                     channel_present=True
                 )
         return self._CHANNEL_NOT_PRESENT_MSG
 
-    async def query_rtmd_orderbook(self, query_request: tqrpc_ods.ODSRtmdQueryRequest)\
-            -> tqrpc_ods.ODSRtmdDataQueryResponse:
+    async def query_rtmd_orderbook(self, query_request: tqrpc_ods.OdsRtmdQueryRequest)\
+            -> tqrpc_ods.OdsRtmdDataQueryResponse:
         logger.info(f"Query rtmd orderbook: {query_request}")
         instrument_id = query_request.instrument_id
         if instrument_id in self.instrument_refdata:
@@ -397,7 +397,7 @@ class ODSServer:
             data_key = f"rtmd:data:{exchange_name}:{instrument_exch_id}"
             data = await self._query_redis(data_key)
             if data:
-                return tqrpc_ods.ODSRtmdDataQueryResponse(
+                return tqrpc_ods.OdsRtmdDataQueryResponse(
                     data_present=True,
                     rtmd_orderbook_bytes=data
                 )
@@ -405,8 +405,8 @@ class ODSServer:
         return self._DATA_NOT_PRESENT_MSG
 
 
-    async def query_account_summary(self, query_request: tqrpc_ods.ODSQueryAccountSummaryRequest) \
-            -> tqrpc_ods.ODSAccountSummaryResponse:
+    async def query_account_summary(self, query_request: tqrpc_ods.OdsQueryAccountSummaryRequest) \
+            -> tqrpc_ods.OdsAccountSummaryResponse:
         account_id = query_request.account_id
         account_config = self.account_config_dict.get(account_id)
         if not account_config:
@@ -423,15 +423,15 @@ class ODSServer:
 
         if not is_error and resp_data is not None:
             resp = rpc_gw.ExchAccountSummaryResponse().parse(resp_data)
-            return tqrpc_ods.ODSAccountSummaryResponse(
+            return tqrpc_ods.OdsAccountSummaryResponse(
                 account_summary=resp .account_summary)
         else:
             logger.error(f"Error querying account summary: {resp_data}")
-            return tqrpc_ods.ODSAccountSummaryResponse()
+            return tqrpc_ods.OdsAccountSummaryResponse()
 
 
-    async def query_account_setting(self, request: tqrpc_ods.ODSQueryAccountSettingRequest) \
-            -> tqrpc_ods.ODSAccountSettingResponse:
+    async def query_account_setting(self, request: tqrpc_ods.OdsQueryAccountSettingRequest) \
+            -> tqrpc_ods.OdsAccountSettingResponse:
         account_id = request.account_id
         instrument_id = request.instrument_id
         account_config = self.account_config_dict.get(account_id)
@@ -459,15 +459,15 @@ class ODSServer:
 
         if not is_error and resp_data is not None:
             resp = rpc_gw.ExchAccountSettingResponse().parse(resp_data)
-            return tqrpc_ods.ODSAccountSettingResponse(
+            return tqrpc_ods.OdsAccountSettingResponse(
                 account_setting_entry=resp.account_setting_entry)
         else:
             logger.error(f"Error querying account setting: {resp_data}")
-            return tqrpc_ods.ODSAccountSettingResponse()
+            return tqrpc_ods.OdsAccountSettingResponse()
 
 
-    async def update_account_setting(self, request: tqrpc_ods.ODSUpdateAccountSettingRequest) \
-            -> tqrpc_ods.ODSUpdateAccountSettingResponse:
+    async def update_account_setting(self, request: tqrpc_ods.OdsUpdateAccountSettingRequest) \
+            -> tqrpc_ods.OdsUpdateAccountSettingResponse:
         account_id = request.account_id
         account_config = self.account_config_dict.get(account_id)
         if not account_config:
@@ -492,14 +492,14 @@ class ODSServer:
 
         if not is_error and resp_data is not None:
             resp = rpc_gw.ExchAccountSettingUpdateResponse().parse(resp_data)
-            return tqrpc_ods.ODSUpdateAccountSettingResponse(
+            return tqrpc_ods.OdsUpdateAccountSettingResponse(
                 margin_mode_changed=resp.margin_mode_changed,
                 leverage_changed=resp.leverage_changed,
                 err_msg=resp.err_msg
             )
         else:
             logger.error(f"Error updating account setting: {resp_data}")
-            return tqrpc_ods.ODSUpdateAccountSettingResponse(
+            return tqrpc_ods.OdsUpdateAccountSettingResponse(
                 margin_mode_changed=False,
                 leverage_changed=False,
                 err_msg=str(resp_data)
@@ -522,14 +522,14 @@ class ODSServer:
         return None
 
 
-    def _query_account_route_dict(self) -> dict[int, ods.OMSRouteEntry]:
+    def _query_account_route_dict(self) -> dict[int, ods.OmsRouteEntry]:
         account_routes_jsons = self._query_mongo(collection_name='refdata_account_mapping')
         account_routes = []
         for account_route_json in account_routes_jsons:
             # compatibility with typo
             if 'accound_id' in account_route_json:
                 account_route_json['account_id'] = account_route_json.pop('accound_id')
-            account_routes.append(ods.OMSRouteEntry().from_dict(account_route_json))
+            account_routes.append(ods.OmsRouteEntry().from_dict(account_route_json))
 
         _account_to_routes = {}
         for account_route in account_routes:
@@ -539,9 +539,9 @@ class ODSServer:
         return _account_to_routes
 
 
-    def _query_gw_config_dict(self) -> dict[str, ods.GWConfigEntry]:
+    def _query_gw_config_dict(self) -> dict[str, ods.GwConfigEntry]:
         gw_configs_jsons = self._query_mongo(collection_name='refdata_gw_config')
-        gw_configs = [ods.GWConfigEntry().from_dict(gw_config_json)
+        gw_configs = [ods.GwConfigEntry().from_dict(gw_config_json)
                         for gw_config_json in gw_configs_jsons]
 
         _gw_key_to_config = {}
@@ -554,7 +554,7 @@ class ODSServer:
 
     def _query_account_omsid_dict(self) -> dict[int, str]:
         oms_configs_jsons = self._query_mongo(collection_name='oms_config')
-        oms_configs = [ods.OMSConfigEntry().from_dict(oms_config_json)
+        oms_configs = [ods.OmsConfigEntry().from_dict(oms_config_json)
                        for oms_config_json in oms_configs_jsons]
 
         _account_to_omsid = {}
@@ -565,9 +565,9 @@ class ODSServer:
 
         return _account_to_omsid
 
-    def _get_account_config_dict(self, account_to_routes: dict[int, ods.OMSRouteEntry],
+    def _get_account_config_dict(self, account_to_routes: dict[int, ods.OmsRouteEntry],
                                 account_to_omsid: dict[int, str],
-                                gw_key_to_config: dict[str, ods.GWConfigEntry],
+                                gw_key_to_config: dict[str, ods.GwConfigEntry],
                                  instruments: list[common.InstrumentRefData]) -> dict[int, ods.AccountTradingConfig]:
         _account_to_config: dict[int, ods.AccountTradingConfig] = {}
         for (account_id, account_route) in account_to_routes.items():

@@ -13,10 +13,10 @@ def get_followed_orders_key(prefix: str, oms_id: str, account_id: Union[str, int
 async def fetch_balance(nc: NatsClient, oms_id: str, account_id: int):
     subject = f"tq.oms.service.{oms_id}.rpc"
     headers = {"rpc_method": "QueryAccountBalance"}
-    query_request = oms_rpc.OMSQueryAccountRequest()
+    query_request = oms_rpc.OmsQueryAccountRequest()
     query_request.account_id = account_id
     resp = await nc.request(subject, bytes(query_request), headers=headers, timeout=3)
-    balances = oms_rpc.OMSAccountResponse().parse(resp.data)
+    balances = oms_rpc.OmsAccountResponse().parse(resp.data)
     return balances
 
 def calc_open_order_stats(orders: list[oms.Order]):

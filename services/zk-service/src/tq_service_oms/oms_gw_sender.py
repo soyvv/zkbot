@@ -6,7 +6,7 @@ import nats
 
 from tqrpc_utils.simple_rpc_client import rpc
 
-from zk_oms.core.models import GWConfigEntry, ExchOrderRef, OMSAction, OMSActionType, OrderRecheckRequest, \
+from zk_oms.core.models import GwConfigEntry, ExchOrderRef, OMSAction, OMSActionType, OrderRecheckRequest, \
     CancelRecheckRequest
 from zk_datamodel import exch_gw as gw, common
 from zk_datamodel import tqrpc_exch_gw as gw_rpc
@@ -35,15 +35,15 @@ async def _put_back_to_inbound_queue(msg:any, queue:asyncio.Queue):
 class GWSender:
     def __init__(self,
                  nats_client: nats.NATS,
-                 gw_config_table: list[GWConfigEntry],
+                 gw_config_table: list[GwConfigEntry],
                  report_queue: asyncio.Queue=None):
         self.nc = nats_client
         self.queue = report_queue
-        self.gw_route_table: dict[str, GWConfigEntry] = {}
+        self.gw_route_table: dict[str, GwConfigEntry] = {}
         for gw_entry in gw_config_table:
             self.gw_route_table[gw_entry.gw_key] = gw_entry
 
-    def reload_config(self, gw_config_table: list[GWConfigEntry]):
+    def reload_config(self, gw_config_table: list[GwConfigEntry]):
         self.gw_route_table = {}
         for gw_entry in gw_config_table:
             self.gw_route_table[gw_entry.gw_key] = gw_entry

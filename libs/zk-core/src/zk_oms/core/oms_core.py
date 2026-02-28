@@ -75,7 +75,7 @@ class OMSCore:
                 self.exch_name_to_gw_keys[exch_name] = set()
             self.exch_name_to_gw_keys[exch_name].add(gw_config.gw_key)
 
-        self.accountid_to_gwconfig: dict[int, GWConfigEntry] = {}
+        self.accountid_to_gwconfig: dict[int, GwConfigEntry] = {}
         for route in account_routes_list:
             gw_conf = self.gw_configs.get(route.gw_key)
             if gw_conf is None:
@@ -741,7 +741,7 @@ class OMSCore:
 
 
     def get_account_balance(self, account_id: int, use_exch_data=True) -> list[OMSPosition]:
-        gw_conf: GWConfigEntry = self.accountid_to_gwconfig.get(account_id)
+        gw_conf: GwConfigEntry = self.accountid_to_gwconfig.get(account_id)
         if gw_conf is None:
             return []
         _use_exch_data = not gw_conf.calc_balance_needed

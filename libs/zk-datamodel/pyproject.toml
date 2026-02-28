@@ -8,8 +8,7 @@ version = "0.1.0"
 description = "ZK protobuf datamodel (generated code + helpers)"
 requires-python = ">=3.10"
 dependencies = [
-    "betterproto>=2.0.0b6",
-    "grpclib>=0.4.6",
+    "betterproto[grpclib]>=2.0.0b6",
 ]
 
 [project.optional-dependencies]

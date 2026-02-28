@@ -1,7 +1,7 @@
 import zk_utils.zk_utils
-from zk_datamodel.ods import OMSConfigEntry
+from zk_datamodel.ods import OmsConfigEntry
 from zk_oms.core.confdata_mgr import ConfdataManager
-from zk_oms.core.models import OMSRouteEntry, GWConfigEntry, InstrumentRefdata, InstrumentTradingConfig, OMSPosition
+from zk_oms.core.models import OMSRouteEntry, GwConfigEntry, InstrumentRefdata, InstrumentTradingConfig, OMSPosition
 import zk_datamodel.common as common
 from zk_oms.core.oms_core import OMSCore
 import zk_datamodel.exch_gw as gw
@@ -28,9 +28,9 @@ def get_test_account_routes() -> list[OMSRouteEntry]:
     return account_routes
 
 
-def get_test_gw_config() -> list[GWConfigEntry]:
+def get_test_gw_config() -> list[GwConfigEntry]:
     gw_configs = [
-        GWConfigEntry(
+        GwConfigEntry(
             rpc_endpoint="dummy1",
             report_endpoint="dummy2",
             balance_endpoint="dummy3",
@@ -38,7 +38,7 @@ def get_test_gw_config() -> list[GWConfigEntry]:
             exch_name="EX1",
             cancel_required_fields=["order_id"]
         ),
-        GWConfigEntry(
+        GwConfigEntry(
             rpc_endpoint="dummy4",
             report_endpoint="dummy5",
             balance_endpoint="dummy6",
@@ -150,7 +150,7 @@ def get_default_test_omscore(init_positions: dict[int, dict[str, float]]=None) -
 
     confdata_mgr = ConfdataManager(oms_id="test_oms")
     confdata_mgr.reload_config(
-        oms_config_entry=OMSConfigEntry(
+        oms_config_entry=OmsConfigEntry(
             oms_id="test_oms",
             managed_account_ids=[100, 101],
             namespace="test"
@@ -191,7 +191,7 @@ def get_nontq_test_omscore(init_positions: dict[int, dict[str, float]]=None) -> 
 
     confdata_mgr = ConfdataManager(oms_id="test_oms")
     confdata_mgr.reload_config(
-        oms_config_entry=OMSConfigEntry(
+        oms_config_entry=OmsConfigEntry(
             oms_id="test_oms",
             managed_account_ids=[100, 101],
             namespace="test"
@@ -232,7 +232,7 @@ def get_spot_trading_omscore(init_positions: dict[int, dict[str, float]]=None) -
 
     confdata_mgr = ConfdataManager(oms_id="test_oms")
     confdata_mgr.reload_config(
-        oms_config_entry=OMSConfigEntry(
+        oms_config_entry=OmsConfigEntry(
             oms_id="test_oms",
             managed_account_ids=[100, 101],
             namespace="test"

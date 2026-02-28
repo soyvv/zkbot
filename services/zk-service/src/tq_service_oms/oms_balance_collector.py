@@ -12,9 +12,9 @@ import pymongo
 import os
 from zk_datamodel import tqrpc_exch_gw as gw_rpc
 from zk_datamodel import oms, exch_gw, common
-from zk_datamodel.ods import OMSConfigEntry
+from zk_datamodel.ods import OmsConfigEntry
 from zk_oms.core.confdata_mgr import ConfdataManager
-from zk_oms.core.models import GWConfigEntry, OMSRouteEntry, InstrumentRefdata, BalanceSnapshot, PositionExtraData
+from zk_oms.core.models import GwConfigEntry, OMSRouteEntry, InstrumentRefdata, BalanceSnapshot, PositionExtraData
 from tq_service_oms.oms_gw_sender import GWSender
 from tq_service_oms.oms_server import reload_refdata
 from tqrpc_utils.config_utils import try_load_config
@@ -77,7 +77,7 @@ def enrich_gw_position(
     gw_position: exch_gw.PositionReport,
     sync_timestamp_ms: int,
     account_detail: OMSRouteEntry,
-    gw_config: GWConfigEntry,
+    gw_config: GwConfigEntry,
     instrument_refdata: InstrumentRefdata) -> tuple[BalanceSnapshot, PositionExtraData]:
 
     if gw_position .instrument_type == common.InstrumentType.INST_TYPE_SPOT:
@@ -163,7 +163,7 @@ def enrich_gw_position(
 async def resync_balance(
         account_id: int,
         account_route: OMSRouteEntry,
-        gw_config: GWConfigEntry,
+        gw_config: GwConfigEntry,
         refdata_lookup: dict[str, InstrumentRefdata],
         gw_sender: GWSender,
         redis_handler: RedisHandler):
@@ -237,7 +237,7 @@ async def main(recorder_config: RecorderConfig):
                 refdata_lookup_by_gw_key = _refdata_lookup_by_gw_key
 
         try:
-            all_oms_config_entries: list[OMSConfigEntry] = db_config_loader.load_oms_configs()
+            all_oms_config_entries: list[OmsConfigEntry] = db_config_loader.load_oms_configs()
             gw_configs = db_config_loader.load_gw_config()
             gw_config_dict = {gw.gw_key: gw for gw in gw_configs}
             account_routes = db_config_loader.load_account_routing()

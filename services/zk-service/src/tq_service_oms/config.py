@@ -5,7 +5,7 @@ from typing import Optional
 
 from pymongo import MongoClient
 from dataclasses import dataclass
-from zk_oms.core.models import GWConfigEntry, OMSRouteEntry, InstrumentRefdata, InstrumentTradingConfig
+from zk_oms.core.models import GwConfigEntry, OMSRouteEntry, InstrumentRefdata, InstrumentTradingConfig
 import zk_datamodel.common as common
 import zk_datamodel.ods as ods
 '''
@@ -69,7 +69,7 @@ class OMSResolvedConfig:
 
     # refdata related config
     # instrument_refdata: list[InstrumentRefdata] = None
-    # gw_config_table: list[GWConfigEntry] = None
+    # gw_config_table: list[GwConfigEntry] = None
     # account_routing_table: list[OMSRouteEntry] = None
     # trading_config_table: list[InstrumentTradingConfig] = None
     # serving_accounts: list[int] = None
@@ -117,21 +117,21 @@ class DBConfigLoader:
         # make them None if not set (to avoid 0 set automatically)
 
 
-    def get_oms_config(self, oms_id: str) -> ods.OMSConfigEntry:
+    def get_oms_config(self, oms_id: str) -> ods.OmsConfigEntry:
         _oms_config = self.oms_config_collection.find_one({"oms_id": oms_id})
         if _oms_config is None:
             raise ValueError(f"OMS config not found for oms_id {oms_id}")
         self._remove_id(_oms_config)
-        oms_config_entry = ods.OMSConfigEntry().from_dict(_oms_config)
+        oms_config_entry = ods.OmsConfigEntry().from_dict(_oms_config)
 
         return oms_config_entry
 
 
-    def load_oms_configs(self) -> list[ods.OMSConfigEntry]:
+    def load_oms_configs(self) -> list[ods.OmsConfigEntry]:
         oms_configs = []
         for record in self.oms_config_collection.find({}):
             record_dict = self._remove_id(record)
-            oms_configs.append(ods.OMSConfigEntry().from_dict(record_dict))
+            oms_configs.append(ods.OmsConfigEntry().from_dict(record_dict))
         return oms_configs
 
     def get_simulator_config(self, gw_key: str) -> Optional[dict]:
@@ -165,13 +165,13 @@ class DBConfigLoader:
             refdata.append(InstrumentRefdata(**record_dict))
         return refdata
 
-    def load_gw_config(self) -> list[GWConfigEntry]:
+    def load_gw_config(self) -> list[GwConfigEntry]:
         gw_config_records = self.gw_config_collection.find({})
         gw_configs = []
         for record in gw_config_records:
             record_dict = _GW_CONFIG_DEFAULTS.copy()
             record_dict.update(self._remove_id(record))
-            gw_configs.append(GWConfigEntry(**record_dict))
+            gw_configs.append(GwConfigEntry(**record_dict))
         return gw_configs
 
     def load_account_routing(self) -> list[OMSRouteEntry]:

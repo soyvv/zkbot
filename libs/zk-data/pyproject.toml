@@ -1,0 +1,10 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zk-data"
+version = "0.1.0"
+description = "Data utilities"
+requires-python = ">=3.10"
+dependencies = []

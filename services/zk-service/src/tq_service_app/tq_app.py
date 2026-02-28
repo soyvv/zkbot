@@ -393,11 +393,11 @@ async def query_open_orders(oms_id:str, account_id: str):
     nc = await connect_nats()
     subject = f"tq.oms.service.{oms_id}.rpc"
     headers = {"rpc_method": "QueryOpenOrders"}
-    query_request = oms_rpc.OMSQueryOpenOrderRequest()
+    query_request = oms_rpc.OmsQueryOpenOrderRequest()
     query_request.account_id=int(account_id)
     query_request.query_gw = False
     resp = await nc.request(subject, bytes(query_request), headers=headers, timeout=2)
-    query_resp = oms_rpc.OMSOrderDetailResponse().parse(resp.data)
+    query_resp = oms_rpc.OmsOrderDetailResponse().parse(resp.data)
 
     resp = query_resp.to_dict(casing=Casing.SNAKE)
     resp['stats'] = calc_open_order_stats(query_resp.orders)

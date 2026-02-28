@@ -1,5 +1,5 @@
-from zk_datamodel.ods import OMSConfigEntry
-from zk_oms.core.models import OMSRouteEntry, GWConfigEntry, InstrumentTradingConfig, InstrumentRefdata
+from zk_datamodel.ods import OmsConfigEntry
+from zk_oms.core.models import OMSRouteEntry, GwConfigEntry, InstrumentTradingConfig, InstrumentRefdata
 
 
 class ConfdataManager:
@@ -9,17 +9,17 @@ class ConfdataManager:
         self._oms_id = oms_id
         self._oms_managed_accounts: set[int] = None
         self._account_routes: list[OMSRouteEntry] = None
-        self._gw_configs: dict[str, GWConfigEntry] = None
-        self._gw_configs_list: list[GWConfigEntry] = None
+        self._gw_configs: dict[str, GwConfigEntry] = None
+        self._gw_configs_list: list[GwConfigEntry] = None
         self._instrument_refdata: list[InstrumentRefdata] = None
         self._instrument_refdata_dict: dict[str, InstrumentRefdata] = None
         self._instrument_trading_configs: list[InstrumentTradingConfig] = None
 
 
     def validate_config(self,
-                        oms_config_entry: OMSConfigEntry,
+                        oms_config_entry: OmsConfigEntry,
                         account_routes: list[OMSRouteEntry],
-                        gw_configs: list[GWConfigEntry],
+                        gw_configs: list[GwConfigEntry],
                         refdata: list[InstrumentRefdata],
                         trading_configs: list[InstrumentTradingConfig]):
         '''
@@ -69,9 +69,9 @@ class ConfdataManager:
 
 
     def reload_config(self,
-                      oms_config_entry: OMSConfigEntry,
+                      oms_config_entry: OmsConfigEntry,
                       account_routes: list[OMSRouteEntry],
-                      gw_configs: list[GWConfigEntry],
+                      gw_configs: list[GwConfigEntry],
                       refdata: list[InstrumentRefdata],
                       trading_configs: list[InstrumentTradingConfig]):
 
@@ -111,7 +111,7 @@ class ConfdataManager:
         return self._account_routes
 
 
-    def get_gw_configs(self) -> list[GWConfigEntry]:
+    def get_gw_configs(self) -> list[GwConfigEntry]:
         return self._gw_configs_list
 
 
@@ -127,11 +127,11 @@ class ConfdataManager:
         return self._instrument_trading_configs
 
 
-    def get_gw_config_by_key(self, gw_key) -> GWConfigEntry:
+    def get_gw_config_by_key(self, gw_key) -> GwConfigEntry:
         pass
 
 
-    def get_gw_config_by_account_id(self, account_id) -> GWConfigEntry:
+    def get_gw_config_by_account_id(self, account_id) -> GwConfigEntry:
         pass
 
 
@@ -146,7 +146,7 @@ class ConfdataManager:
     @staticmethod
     def build_lookuptable_by_account_id(
         account_routes: list[OMSRouteEntry],
-        gw_configs: list[GWConfigEntry],
+        gw_configs: list[GwConfigEntry],
         instrument_refdata: list[InstrumentRefdata]
     ) -> dict[int, dict[str, InstrumentRefdata]]:
         refdata_lookup: dict[int, dict[str, InstrumentRefdata]] = {}  # account_id -> instrument_code -> refdata
@@ -170,7 +170,7 @@ class ConfdataManager:
 
     @staticmethod
     def build_lookuptable_by_gw_key(
-        gw_configs: list[GWConfigEntry],
+        gw_configs: list[GwConfigEntry],
         instrument_refdata: list[InstrumentRefdata]
     ) -> dict[str, dict[str, InstrumentRefdata]]:
         refdata_lookup: dict[str, dict[str, InstrumentRefdata]] = {}  # gw_key -> instrument_code -> refdata

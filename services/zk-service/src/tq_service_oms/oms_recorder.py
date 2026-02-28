@@ -6,7 +6,7 @@ from betterproto import Casing
 from dataclasses import dataclass
 import datetime
 
-from zk_oms.core.models import GWConfigEntry, OMSRouteEntry, InstrumentRefdata, TradeExtraData, RefdataContext
+from zk_oms.core.models import GwConfigEntry, OMSRouteEntry, InstrumentRefdata, TradeExtraData, RefdataContext
 from tqrpc_utils.config_utils import try_load_config
 
 from zk_datamodel.strategy import *
@@ -114,7 +114,7 @@ class OMSPersister:
         else:
             _config_loader = self._config_loader
         account_routes = _config_loader.load_account_routing()
-        gw_configs: list[GWConfigEntry] = _config_loader.load_gw_config()
+        gw_configs: list[GwConfigEntry] = _config_loader.load_gw_config()
         refdata: list[InstrumentRefdata] = _config_loader.load_refdata()
         self.gw_config_dict = {gw.gw_key: gw for gw in gw_configs}
         self.account_routes_dict = {route.accound_id: route for route in account_routes}

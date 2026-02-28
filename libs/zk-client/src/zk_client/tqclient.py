@@ -106,14 +106,14 @@ async def create_client(
     if api_root_url is None:
         raise ValueError("api_root_url is required! Please provide it as an argument or set TQ_ENV in the environment.")
 
-    config_req = ods_rpc.OMSQueryClientConfigRequest()
+    config_req = ods_rpc.OmsQueryClientConfigRequest()
     config_req .trading_account_ids = account_ids
 
     nc = await nats.connect(nats_url) if nats_client is None else nats_client
     _data, is_error = await _rpc(nc, _GLOBAL_ODS_ENDPOINT, "QueryClientConfig",
                                  bytes(config_req), timeout_in_secs=timeout, retry_on_timeout=True)
     if not is_error:
-        client_config_data = ods_rpc.OMSQueryClientConfigResponse().parse(_data)
+        client_config_data = ods_rpc.OmsQueryClientConfigResponse().parse(_data)
         client_config = TQClientConfig()
         client_config.rtmd_endpoints = rtmd_channels
         client_config.nats_url = nats_url
@@ -368,13 +368,13 @@ class TQClient:
         accounts = list(self.account_ids)
         # load account details
         _account_details: dict[int, ods.AccountTradingConfig] = {}
-        account_req = ods_rpc.OMSQueryAccountTradingConfigRequest()
+        account_req = ods_rpc.OmsQueryAccountTradingConfigRequest()
         account_req.account_ids = accounts
         _data, is_error = await _rpc(self.nc, _GLOBAL_ODS_ENDPOINT,
                                      "QueryAccountTradingConfig", bytes(account_req), timeout_in_secs=rpc_timeout,
                                      retry_on_timeout=True)
         if not is_error:
-            resp = ods_rpc.OMSQueryAccountTradingConfigResponse().parse(_data)
+            resp = ods_rpc.OmsQueryAccountTradingConfigResponse().parse(_data)
             for account_config in resp.account_trading_configs:
                 _account_details[account_config.account_id] = account_config
 
@@ -562,7 +562,7 @@ class TQClient:
             if trader_name:
                 req.source_id = trader_name
 
-        rpc_req = oms_rpc.OMSPlaceOrderRequest(
+        rpc_req = oms_rpc.OmsPlaceOrderRequest(
             order_request=req
         )
 
@@ -574,7 +574,7 @@ class TQClient:
         response_msg = await self.nc.request(subject=oms_rpc_endpoint,
                                              headers={"rpc_method": "PlaceOrder"},
                                              payload=bytes(rpc_req), timeout=self.timeout)
-        response = oms_rpc.OMSResponse().parse(response_msg.data)
+        response = oms_rpc.OmsResponse().parse(response_msg.data)
         logger.info(f"place order response: {response}")
         return client_order_id
 
@@ -615,12 +615,12 @@ class TQClient:
 
         if self.oms_dispatch_table is None:
             # use the default oms service endpoint
-            req = oms_rpc.OMSBatchPlaceOrdersRequest()
+            req = oms_rpc.OmsBatchPlaceOrdersRequest()
             req.order_requests = all_orders
             response_msg = await self.nc.request(subject=self.config.oms_service_endpoint,
                                                  headers={"rpc_method": "BatchPlaceOrders"},
                                                  payload=bytes(req), timeout=self.timeout)
-            response = oms_rpc.OMSResponse().parse(response_msg.data)
+            response = oms_rpc.OmsResponse().parse(response_msg.data)
             logger.info(f"batch place order response: {response}")
         else:
             # group the orders by account_id if the dispatch table is provided
@@ -635,19 +635,19 @@ class TQClient:
                 if oms_rpc_endpoint is None:
                     raise ValueError(f"oms rpc endpoint not found for account_id {account_id}")
 
-                req = oms_rpc.OMSBatchPlaceOrdersRequest()
+                req = oms_rpc.OmsBatchPlaceOrdersRequest()
                 req.order_requests = orders
                 response_msg = await self.nc.request(subject=oms_rpc_endpoint,
                                                      headers={"rpc_method": "BatchPlaceOrders"},
                                                      payload=bytes(req), timeout=self.timeout)
-                response = oms_rpc.OMSResponse().parse(response_msg.data)
+                response = oms_rpc.OmsResponse().parse(response_msg.data)
                 logger.info(f"batch place order response: {response}")
 
     async def cancel(self, order_id: int, **kwargs):
         cancel_req = oms.OrderCancelRequest()
         cancel_req.order_id = order_id
 
-        rpc_req = oms_rpc.OMSCancelOrderRequest(
+        rpc_req = oms_rpc.OmsCancelOrderRequest(
             order_cancel_request=cancel_req
         )
 
@@ -656,7 +656,7 @@ class TQClient:
                                                  headers = {"rpc_method": "CancelOrder"},
                                                  payload=bytes(rpc_req), timeout=self.timeout)
 
-            response = oms_rpc.OMSResponse().parse(response_msg.data)
+            response = oms_rpc.OmsResponse().parse(response_msg.data)
             logger.info(f"cancel response: {response}")
         else:
             account_id = kwargs.get("account_id")
@@ -670,12 +670,12 @@ class TQClient:
                                                  headers={"rpc_method": "CancelOrder"},
                                                  payload=bytes(rpc_req), timeout=self.timeout)
 
-            response = oms_rpc.OMSResponse().parse(response_msg.data)
+            response = oms_rpc.OmsResponse().parse(response_msg.data)
             logger.info(f"cancel response: {response}")
 
     async def batch_cancel(self, cancels: list[TQCancel]):
         if self.oms_dispatch_table is None:
-            req = oms_rpc.OMSBatchCancelOrdersRequest()
+            req = oms_rpc.OmsBatchCancelOrdersRequest()
             cancel_reqs = []
             for _c in cancels:
                 cancel_req = oms.OrderCancelRequest()
@@ -687,7 +687,7 @@ class TQClient:
                                                  headers={"rpc_method": "BatchCancelOrders"},
                                                  payload=bytes(req), timeout=self.timeout)
 
-            response = oms_rpc.OMSResponse().parse(response_msg.data)
+            response = oms_rpc.OmsResponse().parse(response_msg.data)
             logger.info(f"batch cancel response: {response}")
         else:
             # group cancels by account_id
@@ -701,7 +701,7 @@ class TQClient:
                 oms_rpc_endpoint = self._resolve_oms_rpc_endpoint(account_id)
                 if oms_rpc_endpoint is None:
                     raise ValueError(f"oms rpc endpoint not found for account_id {account_id}")
-                req = oms_rpc.OMSBatchCancelOrdersRequest()
+                req = oms_rpc.OmsBatchCancelOrdersRequest()
                 cancel_reqs = []
                 for _c in cancels:
                     cancel_req = oms.OrderCancelRequest()
@@ -713,13 +713,13 @@ class TQClient:
                                                      headers={"rpc_method": "BatchCancelOrders"},
                                                      payload=bytes(req), timeout=self.timeout)
 
-                response = oms_rpc.OMSResponse().parse(response_msg.data)
+                response = oms_rpc.OmsResponse().parse(response_msg.data)
                 logger.info(f"batch cancel response: {response}")
 
 
 
     async def get_account_balance(self, account_id: int, query_gw=False, **kwargs) -> list[oms.Position]:
-        query_request = oms_rpc.OMSQueryAccountRequest()
+        query_request = oms_rpc.OmsQueryAccountRequest()
         headers = {"rpc_method": "QueryAccountBalance"}
         query_request.account_id = account_id
         query_request.query_gw = query_gw
@@ -731,7 +731,7 @@ class TQClient:
         resp_data, is_error = await _rpc(nc=self.nc, subject=rpc_endpoint, method="QueryAccountBalance",
                           payload=query_request, retry_on_timeout=True, timeout_in_secs=timeout_secs)
         if not is_error and resp_data is not None:
-            query_resp = oms_rpc.OMSAccountResponse().parse(resp_data)
+            query_resp = oms_rpc.OmsAccountResponse().parse(resp_data)
             if self.enable_contract_size_adjustment:
                 for pos in query_resp.account_balance_entries:
                     self._adjust_position_for_contract_size(pos)
@@ -742,7 +742,7 @@ class TQClient:
 
 
     async def get_open_orders(self, account_id:int, query_gw=False, **kwargs)-> list[oms.Order]:
-        rpc_req = oms_rpc.OMSQueryOpenOrderRequest(
+        rpc_req = oms_rpc.OmsQueryOpenOrderRequest(
             account_id=account_id,
             query_gw=query_gw
         )
@@ -754,7 +754,7 @@ class TQClient:
         resp_data, is_error = await _rpc(nc=self.nc, subject=rpc_endpoint, method="QueryOpenOrders",
                                     payload=rpc_req, retry_on_timeout=True, timeout_in_secs=timeout_secs)
         if not is_error and resp_data is not None:
-            response = oms_rpc.OMSOrderDetailResponse().parse(resp_data)
+            response = oms_rpc.OmsOrderDetailResponse().parse(resp_data)
             return response.orders
         else:
             logger.error(f"error querying open orders: {resp_data}")
@@ -870,7 +870,7 @@ class TQClient:
                                              headers={"rpc_method": "Panic"},
                                              payload=bytes(rpc_req))
 
-        response = oms_rpc.OMSResponse().parse(response_msg.data)
+        response = oms_rpc.OmsResponse().parse(response_msg.data)
         logger.info(f"panic response: {response}")
 
     async def dont_panic(self, account_id: int):
@@ -884,7 +884,7 @@ class TQClient:
                                              headers={"rpc_method": "DontPanic"},
                                              payload=bytes(rpc_req))
 
-        response = oms_rpc.OMSResponse().parse(response_msg.data)
+        response = oms_rpc.OmsResponse().parse(response_msg.data)
         logger.info(f"dont panic response: {response}")
 
 
