@@ -213,6 +213,10 @@ message AccountSummaryEntry {
     double total_margin = 9;
     int64 update_timestamp = 14;
     string original_info = 15;
+    double buying_power = 16;
+    double maintenance_margin = 17;
+    double net_liquidation_value = 18;
+    common.AccountType account_type = 19;
 }
 
 
@@ -222,4 +226,9 @@ message AccountSettingEntry {
     double short_leverage = 3;
     MarginModeType margin_mode_type = 4;
     string instrument = 5;
+    common.BrokerType broker_type = 6;
+    common.AccountType account_type = 7;       // CASH / MARGIN / PORTFOLIO_MARGIN
+    string base_currency = 8;                  // account denomination currency (e.g., "USD")
+    string regulatory_info = 9;                // e.g., "SEC Reg-T", "FCA"
+    map<string, string> extra_settings = 10;   // broker-specific config
 }

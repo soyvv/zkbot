@@ -1,7 +1,6 @@
 syntax="proto3";
 
 import "common.proto";
-import "rpc-oms.proto";
 
 package strategy;
 
@@ -134,4 +133,3 @@ message StrategyNotification {
     string message = 4;
     map<string, string> message_meta_info = 5;
 }
-

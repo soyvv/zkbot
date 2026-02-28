@@ -2,8 +2,6 @@
 
 syntax = "proto3";
 
-import "rtmd.proto";
-
 package tqrpc_rtmd;
 
 

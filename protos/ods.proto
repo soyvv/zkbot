@@ -11,6 +11,7 @@ message OMSRouteEntry {
     string gw_key = 3;
     bool startup_sync = 4;
     string desc = 5;
+    common.BrokerType broker_type = 6;
 }
 
 
@@ -31,6 +32,8 @@ message GWConfigEntry {
     bool support_fee_query = 16;
     bool calc_balance_needed = 12;
     repeated string cancel_required_fields = 13;
+    common.BrokerType broker_type = 17;
+    common.AccountType account_type = 18;
 }
 
 

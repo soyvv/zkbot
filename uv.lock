@@ -8,6 +8,7 @@ members = [
     "okx-gw",
     "zk-client",
     "zk-core",
+    "zk-data",
     "zk-datamodel",
     "zk-refdata-loader",
     "zk-rpc",
@@ -3236,12 +3237,16 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "zk-data"
+version = "0.1.0"
+source = { editable = "libs/zk-data" }
+
+[[package]]
 name = "zk-datamodel"
 version = "0.1.0"
 source = { editable = "libs/zk-datamodel" }
 dependencies = [
     { name = "betterproto" },
-    { name = "grpclib" },
 ]
 
 [package.optional-dependencies]
@@ -3252,8 +3257,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "betterproto", specifier = ">=2.0.0b6" },
-    { name = "grpclib", specifier = ">=0.4.6" },
+    { name = "betterproto", extras = ["grpclib"], specifier = ">=2.0.0b6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
 ]

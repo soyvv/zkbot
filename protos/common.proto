@@ -8,6 +8,8 @@ enum InstrumentType {
     INST_TYPE_FUTURE = 3; // future contract with expiry date
     INST_TYPE_CFD = 4; // contract for difference
     INST_TYPE_OPTION = 5; // option contract
+    INST_TYPE_ETF = 6; // exchange-traded fund
+    INST_TYPE_STOCK = 7; // equity / common stock
 }
 
 
@@ -86,6 +88,11 @@ enum FiatSymbol {
     FIAT_HKD = 2;
     FIAT_SGD = 3;
     FIAT_JPY = 4;
+    FIAT_EUR = 5;
+    FIAT_GBP = 6;
+    FIAT_AUD = 7;
+    FIAT_CAD = 8;
+    FIAT_CHF = 9;
 }
 
 
@@ -96,12 +103,37 @@ enum Exchange {
     EXCH_DEXALOT = 3;
     EXCH_DDEX = 4;
     EXCH_ORDERLY = 5;
+    EXCH_OKX = 6;
+    EXCH_KUCOIN = 7;
+    EXCH_HYPERLIQUID = 8;
+    EXCH_DYDX = 9;
+    EXCH_VERTEX = 10;
+    EXCH_PARADEX = 11;
+    EXCH_BLUEFIN = 12;
+    EXCH_BLITZ = 13;
+    EXCH_CHAINFLIP = 14;
+    // traditional brokers
+    EXCH_OANDA = 20;
+    EXCH_IBKR = 21;
 }
 
-//
-//enum InstrumentCode {
-//
-//}
+
+// Distinguishes broker categories for routing and feature-gating
+enum BrokerType {
+    BROKER_TYPE_UNSPECIFIED = 0;
+    BROKER_TYPE_CRYPTO_CEX = 1;    // centralized crypto exchange (Binance, OKX, etc.)
+    BROKER_TYPE_CRYPTO_DEX = 2;    // decentralized exchange (Injective, dYdX, etc.)
+    BROKER_TYPE_FX_CFD = 3;        // FX/CFD broker (Oanda)
+    BROKER_TYPE_TRAD_BROKER = 4;   // traditional multi-asset broker (IBKR)
+}
+
+// Account capability type -- determines what operations are allowed
+enum AccountType {
+    ACCT_TYPE_UNSPECIFIED = 0;
+    ACCT_TYPE_CASH = 1;            // cash account, no margin
+    ACCT_TYPE_MARGIN = 2;          // Reg-T margin account
+    ACCT_TYPE_PORTFOLIO_MARGIN = 3; // portfolio margin account
+}
 
 
 message InstrumentRefData {
@@ -140,7 +172,16 @@ message InstrumentRefData {
 
     string original_info = 22;  // original data from exchange api(if any)
 
-    bool disabled = 23; 
+    bool disabled = 23;
+
+    // fields for traditional instruments (ETF, stock, CFD, futures, options)
+    string expiry_date = 25;         // ISO-8601 date for futures/options (e.g., "2025-06-20")
+    string currency = 26;            // denomination currency (e.g., "USD", "EUR")
+    string isin = 27;                // ISIN identifier for stocks/ETFs
+    string listing_exchange = 28;    // primary listing venue (e.g., "NASDAQ", "NYSE")
+    double margin_requirement = 29;  // initial margin requirement as fraction (e.g., 0.25 = 25%)
+    string asset_class = 30;         // broad classification: "equity", "fx", "commodity", "fixed_income"
+
     // more fields to be added when needed;
     // reference: https://docs.ccxt.com/#/README?id=market-structure
 }
