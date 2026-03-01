@@ -11,7 +11,7 @@ import zk_datamodel.tqrpc_exch_gw as gw_rpc
 import zk_datamodel.oms as oms
 import zk_simulator.sim_core as sim
 import enum
-from typing import Union, Protocol
+from typing import Optional, Union, Protocol
 from dataclasses import dataclass
 import zk_oms.tests.gw_test_utils as gw_test_utils
 
@@ -213,6 +213,13 @@ class TestSim(sim.Simulator):
             filled_qty=order_req.scaled_qty,
             ts=ts
         )
+        # Add order_info to trade report entries (needed by SimGwBalanceMgr)
+        for entry in fill_report.order_report_entries:
+            if entry.report_type == gw.OrderReportType.ORDER_REP_TYPE_TRADE:
+                order_info = gw.OrderInfo()
+                order_info.instrument = order_req.instrument
+                order_info.buy_sell_type = order_req.buysell_type
+                entry.trade_report.order_info = order_info
 
         state_report = self._gw_test_helper.generate_orderstate_report(
             state=gw.ExchangeOrderStatus.EXCH_ORDER_STATUS_FILLED,
@@ -238,6 +245,13 @@ class TestSim(sim.Simulator):
                 filled_qty=filled_qty,
                 ts=ts
             )
+            # Add order_info to trade report entries (needed by SimGwBalanceMgr)
+            for entry in fill_report.order_report_entries:
+                if entry.report_type == gw.OrderReportType.ORDER_REP_TYPE_TRADE:
+                    order_info = gw.OrderInfo()
+                    order_info.instrument = order_req.instrument
+                    order_info.buy_sell_type = order_req.buysell_type
+                    entry.trade_report.order_info = order_info
         else:
             fill_report = None
         cancel_report = self._gw_test_helper.generate_orderstate_report(
@@ -444,6 +458,7 @@ class StrategyTestBuilder:
         self.symbols: dict[str, str] = None
         self.init_balances: dict[int, dict[str, float]] = None
         self.init_data: any = None
+        self.fund_asset: Optional[str] = None
         #self._curr_ts: int = None  # virtual timestamp during building
 
     def for_strategy(self, strategy_script_path, custom_config: dict) -> "StrategyTestBuilder":
@@ -475,6 +490,10 @@ class StrategyTestBuilder:
         self.event_seq = seq
         return self
     
+    def with_fund_asset(self, fund_asset: str) -> "StrategyTestBuilder":
+        self.fund_asset = fund_asset
+        return self
+
     def with_match_simulator(self, sim: TestSim) -> "StrategyTestBuilder":
         self.sim = sim
         return self
@@ -499,7 +518,8 @@ class StrategyTestBuilder:
         bt_config.init_balances = self.init_balances 
         bt_config.init_data_fetcher = init_data_fetcher
 
-        bt_config.simulator_gw = self.sim 
+        bt_config.simulator_gw = self.sim
+        bt_config.fund_asset = self.fund_asset
 
         bt_config.data_source = tick_ds
 

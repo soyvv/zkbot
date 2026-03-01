@@ -309,13 +309,7 @@ class OMSCore:
             fund_change = self.balance_mgr.create_balance_change(account_id=order.account_id, orig_position=ctx.fund)
             pos_change = self.balance_mgr.create_balance_change(account_id=order.account_id, orig_position=ctx.position)
             if ctx.trading_config.use_margin:
-                # if increasing the net exposure, need to deduct margin
-                # else, nothing needs to be done
-                # in margin trading, position is not checked
-                if ctx.position.is_short and order.buy_sell_type == proto_common.BuySellType.BS_SELL or \
-                 not ctx.position.is_short and order.buy_sell_type == proto_common.BuySellType.BS_BUY:
-                    fund_change.avail_change = - order.qty * order.price * ctx.trading_config.margin_ratio
-                    fund_change.frozen_change = - fund_change.avail_change  # positive
+                pass  # fund managed externally (GW for live, simulator for backtest)
             else:
                 if order.buy_sell_type == proto_common.BuySellType.BS_BUY:
                     fund_change.avail_change = - order.qty * order.price # todo: what if market order?
@@ -1046,9 +1040,17 @@ class OMSCore:
                             fund_change.avail_change = filled_qty * filled_price
                             fund_change.total_change = fund_change.avail_change
                             position_changes.append(fund_change)
-                    else:
-                        # TODO:
-                        pass
+                    else:  # margin trading — track position, fund managed externally
+                        pos_change = self.balance_mgr.create_balance_change(
+                            account_id=ctx.account_id, orig_position=ctx.position)
+                        filled_qty = gw_trade.filled_qty
+                        if ctx.order.oms_order_state.buy_sell_type == common.BuySellType.BS_BUY:
+                            pos_change.avail_change = filled_qty
+                            pos_change.total_change = filled_qty
+                        elif ctx.order.oms_order_state.buy_sell_type == common.BuySellType.BS_SELL:
+                            pos_change.avail_change = -filled_qty
+                            pos_change.total_change = -filled_qty
+                        position_changes.append(pos_change)
 
 
         return position_changes

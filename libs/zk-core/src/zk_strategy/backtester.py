@@ -2,7 +2,7 @@ import functools
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 import copy
 import betterproto as bp
 import pandas as pd
@@ -16,6 +16,7 @@ from .models import *
 from .strategy_core import StrategyTemplate, StrategyConfig
 
 import zk_simulator.sim_core as sim
+from zk_simulator.sim_balance import SimGwBalanceMgr
 from zk_oms.core.models import OMSAction, OMSActionType, GwConfigEntry, InstrumentRefdata, OMSRouteEntry, OMSPosition, \
     InstrumentTradingConfig
 from zk_utils.instrument_utils import MARGIN_TYPES, infer_instrument_type_from_symbol
@@ -56,6 +57,8 @@ class BacktestConfig:
     match_policy: MatchPolicy = None
     match_policy_cls: type = None # ignored if match_policy is configured
     match_policy_config: dict = None # kwargs for object creation
+
+    fund_asset: Optional[str] = None # e.g. "USD", "USDC"; required for SimGwBalanceMgr fund tracking
 
     # mostly required; for bar driven strategy, this is optional
     data_source: ds.MDDataSource = None
@@ -397,9 +400,10 @@ class BacktestResultCollector:
 class BacktestOMSV2:
     def __init__(self, account_ids: list[int], symbols: dict[str, str],
                  match_policy: sim.MatchPolicy = None,
-                 simulator_gw: sim.Simulator = None, 
+                 simulator_gw: sim.Simulator = None,
                  init_balances: dict[int, dict[str, float]] = None,
-                 trading_conf_overrides: dict[str, dict[str, any]] = None):
+                 trading_conf_overrides: dict[str, dict[str, any]] = None,
+                 fund_asset: Optional[str] = None):
         exch = "SIM1"
         if simulator_gw:
             self.matcher: sim.Simulator = simulator_gw
@@ -459,6 +463,19 @@ class BacktestOMSV2:
         positions = self._create_init_positions(init_balances) if init_balances else []
         self.oms_core.init_state(curr_orders=[], curr_balances=positions)
 
+        # Set up SimGwBalanceMgr for fund tracking (used by both spot and margin)
+        self.sim_balance_mgr: Optional[SimGwBalanceMgr] = None
+        if fund_asset and init_balances:
+            # Flatten init_balances across accounts into tuples for first account
+            first_account = account_ids[0]
+            bal_tuples = [(sym, qty) for sym, qty in init_balances.get(first_account, {}).items()]
+            self.sim_balance_mgr = SimGwBalanceMgr(
+                init_balances=bal_tuples,
+                fund_asset=fund_asset,
+                exch_account_id=str(first_account),
+                refdata=refdata
+            )
+
     def _infer_refdata(self, symbols: Union[dict[str, str], list[InstrumentRefdata]]) -> list[InstrumentRefdata]:
         all_refdata = []
         if isinstance(symbols, list):
@@ -479,7 +496,9 @@ class BacktestOMSV2:
                     "exchange_name": "SIM1",
                     "instrument_type": sym_type,
                     "quote_asset": quote,
-                    "base_asset": base
+                    "base_asset": base,
+                    "price_precision": 8,
+                    "qty_precision": 8,
                 }
 
 
@@ -491,6 +510,7 @@ class BacktestOMSV2:
         all_trading_conf = []
         for ref in refdata:
             trading_conf = InstrumentTradingConfig(instrument_code=ref.instrument_id)
+            trading_conf.bookkeeping_balance = True
             if ref.instrument_type in MARGIN_TYPES:
                 trading_conf.use_margin = True
                 trading_conf.margin_ratio = 0.1 # TODO: use config
@@ -513,15 +533,27 @@ class BacktestOMSV2:
                 positions.append(pos)
         return positions
 
+    def _process_sim_balance(self, order_reports: list, ts: int, results: list[BTOMSOutput]):
+        """Feed order reports through SimGwBalanceMgr and inject balance updates into OMS."""
+        if self.sim_balance_mgr and order_reports:
+            balance_update = self.sim_balance_mgr.update_balance(order_reports)
+            if balance_update:
+                bal_actions = self.oms_core.process_balance_update(balance_update)
+                for action in bal_actions:
+                    if action.action_type == OMSActionType.UPDATE_BALANCE:
+                        results.append(BTOMSOutput(ts_ms=ts + 3, position_update=action.action_data))
+
     def on_new_order(self, order: StrategyOrder, ts: int) -> list[BTOMSOutput]:
         oms_orderreq: oms.OrderRequest = self._convert_order_req(order, ts)
         oms_actions: list[OMSAction] = self.oms_core.process_order(oms_orderreq)
         results = []
+        collected_reports = []
         for oms_action in oms_actions:
             if oms_action.action_type == OMSActionType.SEND_ORDER_TO_GW:
                 sim_results = self.matcher.on_new_order(oms_action.action_data, ts)
                 need_copy = len(sim_results) > 1
                 for res in sim_results:
+                    collected_reports.append(res.order_report)
                     more_oms_actions = self.oms_core.process_order_report(res.order_report)
                     for more_oms_action in more_oms_actions:
                         if more_oms_action.action_type == OMSActionType.UPDATE_ORDER:
@@ -535,6 +567,7 @@ class BacktestOMSV2:
                 res = BTOMSOutput(ts_ms=ts + 1, position_update=oms_action.action_data)
                 results.append(res)
 
+        self._process_sim_balance(collected_reports, ts, results)
         return results
 
 
@@ -542,8 +575,10 @@ class BacktestOMSV2:
         sim_results = self.matcher.on_tick(tick)
         results = []
         ts = tick.original_timestamp
+        collected_reports = []
         for res in sim_results:
             report = res.order_report
+            collected_reports.append(report)
             oms_actions = self.oms_core.process_order_report(report)
             for action in oms_actions:
                 if action.action_type == OMSActionType.UPDATE_ORDER:
@@ -552,16 +587,19 @@ class BacktestOMSV2:
                 elif action.action_type == OMSActionType.UPDATE_BALANCE:
                     res = BTOMSOutput(ts_ms=ts + 1, position_update=action.action_data)
                     results.append(res)
+        self._process_sim_balance(collected_reports, ts, results)
         return results
 
     def on_cancel(self, cancel: StrategyCancel, ts: int) -> list[BTOMSOutput]:
         oms_ordercancel: oms.OrderCancelRequest = self._convert_order_cancel_req(cancel, ts)
         oms_actions: list[OMSAction] = self.oms_core.process_cancel(oms_ordercancel)
         results = []
+        collected_reports = []
         for oms_action in oms_actions:
             if oms_action.action_type == OMSActionType.SEND_CANCEL_TO_GW:
                 sim_results = self.matcher.on_cancel_order(oms_action.action_data, ts)
                 for res in sim_results:
+                    collected_reports.append(res.order_report)
                     more_oms_actions = self.oms_core.process_order_report(res.order_report)
                     for more_oms_action in more_oms_actions:
                         if more_oms_action.action_type == OMSActionType.UPDATE_ORDER:
@@ -573,6 +611,7 @@ class BacktestOMSV2:
             elif oms_action.action_type == OMSActionType.UPDATE_BALANCE:
                 res = BTOMSOutput(ts_ms=ts + 1, position_update=oms_action.action_data)
                 results.append(res)
+        self._process_sim_balance(collected_reports, ts, results)
 
         return results
 
@@ -637,7 +676,8 @@ class StrategyBacktestor:
                                 symbols=self.backtest_config.symbols,
                                 simulator_gw=bt_config.simulator_gw,
                                 init_balances=bt_config.init_balances,
-                                trading_conf_overrides=bt_config.trading_config_overrides)
+                                trading_conf_overrides=bt_config.trading_config_overrides,
+                                fund_asset=bt_config.fund_asset)
         else:
             match_policy = None
             if bt_config.match_policy:
@@ -652,7 +692,8 @@ class StrategyBacktestor:
                                 symbols=self.backtest_config.symbols,
                                 init_balances=bt_config.init_balances,
                                 match_policy=match_policy,
-                                trading_conf_overrides=bt_config.trading_config_overrides)
+                                trading_conf_overrides=bt_config.trading_config_overrides,
+                                fund_asset=bt_config.fund_asset)
 
         self.oms = oms
 
