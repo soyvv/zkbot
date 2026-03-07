@@ -79,6 +79,27 @@ class BacktestConfig:
 
 
 
+@dataclass
+class BacktestRunMetaInfo:
+    # Run timing
+    strategy_name: str
+    symbols: list[str]
+    sim_start_dt: datetime          # backtest simulated start
+    sim_end_dt: datetime            # backtest simulated end
+    sim_duration_days: float        # sim_end - sim_start in days
+    wall_clock_start: datetime      # actual wall-clock start of run()
+    wall_clock_end: datetime        # actual wall-clock end of run()
+    wall_clock_runtime_s: float     # wall-clock seconds elapsed
+
+    # Config snapshots
+    strategy_config_json: dict      # strategy_config.custom_params as dict
+    init_balances: dict             # account_id -> symbol -> qty
+
+    # Result summary counts
+    num_trades: int
+    num_orders: int
+
+
 class ProgressEvent:
     pass
 
@@ -667,6 +688,10 @@ class StrategyBacktestor:
         self.cmd_seq: list[tuple[datetime, StrategyCommand]] = cmd_sequence
 
         self.result_collector = BacktestResultCollector()
+        self.run_meta_info: Optional[BacktestRunMetaInfo] = None
+
+    def get_run_meta_info(self) -> Optional[BacktestRunMetaInfo]:
+        return self.run_meta_info
 
     def _setup_om_and_matcher(self):
         bt_config = self.backtest_config
@@ -743,6 +768,8 @@ class StrategyBacktestor:
             #raise Exception(f"{len(self.strategy.get_errors())} error(s) detected during backtest; aborting")
 
     def run(self):
+        wall_clock_start = datetime.now()
+
         # 1. init matcher, timer and strategyTemplate
 
         # 2. load hist data from datasource
@@ -869,6 +896,26 @@ class StrategyBacktestor:
             else:
                 raise Exception(f"unknown event type for {item}")
 
+        # Collect run metadata
+        wall_clock_end = datetime.now()
+        sim_start = self.backtest_config.start_dt
+        sim_end = self.backtest_config.end_dt
+        symbols = list(self.backtest_config.symbols.keys()) if isinstance(self.backtest_config.symbols, dict) \
+            else [r.instrument_id for r in self.backtest_config.symbols]
+        self.run_meta_info = BacktestRunMetaInfo(
+            strategy_name=self.strategy_config.strategy_name or "",
+            symbols=symbols,
+            sim_start_dt=sim_start,
+            sim_end_dt=sim_end,
+            sim_duration_days=(sim_end - sim_start).total_seconds() / 86400,
+            wall_clock_start=wall_clock_start,
+            wall_clock_end=wall_clock_end,
+            wall_clock_runtime_s=(wall_clock_end - wall_clock_start).total_seconds(),
+            strategy_config_json=self.strategy_config.custom_params or {},
+            init_balances=self.backtest_config.init_balances or {},
+            num_trades=len(self.result_collector.trades),
+            num_orders=len(self.result_collector.orders),
+        )
 
     def get_result(self):
         return self.result_collector
