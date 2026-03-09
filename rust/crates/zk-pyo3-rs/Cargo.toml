@@ -1,0 +1,19 @@
+[package]
+name = "zk-pyo3-rs"
+version = "0.1.0"
+edition = "2021"
+description = "PyO3 bindings exposing the Rust backtester core to Python"
+
+[lib]
+name = "zk_backtest"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+zk-proto-rs        = { path = "../zk-proto-rs" }
+zk-backtest-rs     = { path = "../zk-backtest-rs" }
+zk-strategy-sdk-rs = { path = "../zk-strategy-sdk-rs" }
+pyo3  = { version = "0.22" }
+prost = { workspace = true }

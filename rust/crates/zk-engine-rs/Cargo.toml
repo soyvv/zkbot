@@ -1,0 +1,16 @@
+[package]
+name = "zk-engine-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Live event loop, event batching/coalescing, timer manager, and strategy dispatch for zkbot"
+
+[dependencies]
+zk-proto-rs        = { path = "../zk-proto-rs" }
+zk-domain-rs       = { path = "../zk-domain-rs" }
+zk-oms-rs          = { path = "../zk-oms-rs" }
+zk-strategy-sdk-rs = { path = "../zk-strategy-sdk-rs" }
+tokio              = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
+tracing            = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }

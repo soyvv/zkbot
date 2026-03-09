@@ -1,0 +1,37 @@
+[package]
+name = "zk-infra-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Infrastructure adapters: NATS, Redis, Postgres, MongoDB, gRPC, config, tracing"
+
+[dependencies]
+# shared
+tokio     = { version = "1", features = ["full"] }
+tracing   = "0.1"
+thiserror = "2"
+serde     = { version = "1", features = ["derive"] }
+bytes     = "1"
+
+# config — env-var loading into typed structs
+envy = "0.4"
+
+# NATS messaging + JetStream KV
+async-nats = "0.37"
+
+# gRPC channels
+tonic = { version = "0.12", default-features = false, features = ["transport"] }
+
+# PostgreSQL
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "macros"] }
+
+# Redis
+redis = { version = "0.27", features = ["tokio-comp"] }
+
+# MongoDB
+mongodb = "3"
+
+# tracing output
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

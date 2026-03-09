@@ -14,7 +14,7 @@ plugins:
 
   # --- Rust: prost ---
   - remote: buf.build/community/neoeinstein-prost
-    out: ../rust/crates/zk-datamodel-rs/src
+    out: ../rust/crates/zk-proto-rs/src
     opt:
         - compile_well_known_types=true
         - bytes=bytes

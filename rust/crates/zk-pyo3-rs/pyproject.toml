@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "zk-backtest"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Rust backtester core for zkbot, exposed to Python via PyO3"
+
+[tool.maturin]
+# Rust lib name must match [lib] name in Cargo.toml
+module-name = "zk_backtest"
+features = ["extension-module"]

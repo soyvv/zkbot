@@ -1,0 +1,11 @@
+[package]
+name = "zk-strategy-sdk-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Rust-native strategy trait and helper API (equivalent to StrategyBase and TokkaQuant)"
+
+[dependencies]
+zk-proto-rs = { path = "../zk-proto-rs" }
+zk-domain-rs = { path = "../zk-domain-rs" }
+chrono = "0.4"
+cron = "0.12"

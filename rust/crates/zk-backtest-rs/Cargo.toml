@@ -1,0 +1,18 @@
+[package]
+name = "zk-backtest-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic replay engine, event ordering, simulator core, and matching policies for zkbot"
+
+[dependencies]
+zk-proto-rs = { path = "../zk-proto-rs" }
+zk-domain-rs = { path = "../zk-domain-rs" }
+zk-oms-rs = { path = "../zk-oms-rs" }
+zk-strategy-sdk-rs = { path = "../zk-strategy-sdk-rs" }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "backtest_throughput"
+harness = false

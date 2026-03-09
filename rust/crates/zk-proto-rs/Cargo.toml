@@ -1,0 +1,8 @@
+[package]
+name = "zk-proto-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Generated protobuf types for zkbot (prost)"
+
+[dependencies]
+prost = { workspace = true }
