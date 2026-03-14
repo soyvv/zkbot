@@ -1,0 +1,74 @@
+[package]
+name = "zk-oms-svc"
+version = "0.1.0"
+edition = "2021"
+description = "Production OMS gRPC service wrapping zk-oms-rs"
+
+[lib]
+name = "zk_oms_svc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zk-oms-svc"
+path = "src/main.rs"
+
+[dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+
+# NATS
+async-nats = "0.37"
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# lock-free read replica
+arc-swap = "1"
+
+# async streams
+futures = "0.3"
+
+# byte buffers
+bytes = "1"
+
+# tracing
+tracing = "0.1"
+
+# errors
+thiserror = "2"
+anyhow = "1"
+
+# config from env
+envy = "0.4"
+
+# PostgreSQL (db.rs)
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio"] }
+
+# Redis (redis_writer.rs)
+redis = { version = "0.27", features = ["tokio-comp"] }
+
+# infra + domain
+zk-infra-rs = { path = "../zk-infra-rs" }
+zk-proto-rs  = { path = "../zk-proto-rs" }
+zk-oms-rs    = { path = "../zk-oms-rs", features = ["replica"] }
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[dev-dependencies]
+tokio     = { version = "1", features = ["full", "test-util"] }
+mockall   = "0.13"
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name    = "oms_svc_latency"
+harness = false
+
+[[example]]
+name = "e2e_latency"

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use zk_proto_rs::{
-    common::InstrumentRefData,
+    zk::common::v1::InstrumentRefData,
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
 };
 

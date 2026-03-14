@@ -146,14 +146,14 @@ OMS NATS service and shadow-compare are deferred until after the backtest and li
 exist, so the shadow harness can be tested with replay traces from Phase 3.
 
 ### Required outputs
-- Rust OMS NATS service (WS6 remainder)
+- Rust OMS gRPC service (WS6 remainder) — **core DONE** (see Phase 5b notes)
 - shadow-mode comparison flow
 - `calc_balance_changes_for_report` full implementation (Phase 2b balance bookkeeping)
 - out-of-process Python strategy runtime (WS9)
 
 ### Tasks
 - [ ] port reconciliation/recovery logic (`calc_balance_changes_for_report` — WS6)
-- [ ] implement Rust OMS service on current NATS subjects (WS6)
+- [x] implement Rust OMS gRPC service (`zk-oms-svc` — see Phase 5b)
 - [ ] implement shadow-mode compare flow (WS6)
 - [ ] execute WS9 (Python worker runtime)
 
@@ -161,7 +161,7 @@ exist, so the shadow harness can be tested with replay traces from Phase 3.
 - OMS shadow mode comparison is available
 - worker runtime meets latency, timeout, and recovery acceptance thresholds
 
-## Phase 5b: gRPC + NATS KV Discovery Migration (simulator, OMS, engine first)
+## Phase 5b: gRPC + NATS KV Discovery Migration (simulator, OMS, engine first) — PARTIALLY DONE
 
 ### Required outputs
 - simulator, OMS, and engine expose/consume gRPC transport
@@ -170,18 +170,25 @@ exist, so the shadow harness can be tested with replay traces from Phase 3.
 
 ### Tasks
 - [ ] execute WS12 registry schema and lease model
-- [ ] implement gateway startup KV declaration:
-  - [ ] transport info
-  - [ ] account info
-- [ ] implement OMS startup flow:
-  - [ ] load account config from DB
-  - [ ] discover/connect target gateways from KV
-  - [ ] register OMS gRPC endpoint in KV keyed by OMS id
+- [x] implement gateway startup KV declaration (implemented in `zk-mock-gw`):
+  - [x] transport info
+  - [x] account info
+- [x] implement OMS startup flow (`zk-oms-svc`):
+  - [x] load account config from DB
+  - [x] discover/connect target gateways from KV (`svc.gw.*` watch)
+  - [x] register OMS gRPC endpoint in KV (`svc.oms.<oms_id>`)
 - [ ] implement engine startup flow:
   - [ ] load configured OMS id
   - [ ] discover OMS endpoint from KV
   - [ ] connect and reconnect on OMS endpoint changes
-- [ ] implement simulator gRPC endpoint + KV registration
+- [x] implement simulator gRPC endpoint + KV registration (`zk-mock-gw`)
+
+### Implementation notes
+- `zk-oms-svc` is production-ready with full startup sequence, NATS gateway report handling, Redis persistence, gRPC command/query handlers, single-writer actor pattern, and latency observability
+- `zk-mock-gw` implements both legacy `ExchangeGatewayService` and new `GatewayService` (`zk.gateway.v1`)
+- Dev tooling: `scripts/clear_oms_redis.sh`, `Makefile` targets `oms-redis-clear`, `dev-up` (waits for Redis, clears OMS keys), `dev-reset` (wipes volumes then calls `dev-up`)
+- E2E latency benchmark: `zk-oms-svc/examples/e2e_latency.rs`
+- KV keys in use: `svc.gw.<gw_id>` (gateway), `svc.oms.<oms_id>` (OMS registration)
 
 ### Do not start next phase until
 - simulator/OMS/engine run with gRPC transport in integration environment

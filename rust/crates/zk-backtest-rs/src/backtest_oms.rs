@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use zk_proto_rs::{
-    common::{BasicOrderType, OpenCloseType, TimeInForceType},
-    oms::{OrderCancelRequest, OrderRequest},
-    common::InstrumentRefData,
+    zk::{
+        common::v1::{BasicOrderType, OpenCloseType, TimeInForceType, InstrumentRefData},
+        oms::v1::{OrderCancelRequest, OrderRequest},
+    },
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
 };
 
@@ -99,7 +100,7 @@ impl BacktestOms {
     }
 
     /// Process a tick: feeds the orderbook into the simulator, drives pending fills.
-    pub fn on_tick(&mut self, tick: &zk_proto_rs::rtmd::TickData) -> Vec<BtOmsOutput> {
+    pub fn on_tick(&mut self, tick: &zk_proto_rs::zk::rtmd::v1::TickData) -> Vec<BtOmsOutput> {
         let ts_ms = tick.original_timestamp;
         let sim_results = self.simulator.on_tick(tick);
         self.process_sim_results(sim_results, ts_ms)
@@ -203,7 +204,7 @@ fn to_order_request(order: &StrategyOrder, ts_ms: i64) -> OrderRequest {
 }
 
 fn build_init_positions(balances: &HashMap<i64, HashMap<String, f64>>) -> Vec<OmsPosition> {
-    use zk_proto_rs::common::InstrumentType;
+    use zk_proto_rs::zk::common::v1::InstrumentType;
     let mut positions = Vec::new();
     for (&acc_id, sym_map) in balances {
         for (sym, &qty) in sym_map {

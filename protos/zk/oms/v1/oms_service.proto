@@ -1,0 +1,27 @@
+syntax = "proto3";
+package zk.oms.v1;
+
+import "zk/oms/v1/oms.proto";
+import "zk/common/v1/common.proto";
+
+// OMSService — replaces legacy OrderManagerService in tqrpc_oms.
+service OMSService {
+    rpc PlaceOrder(PlaceOrderRequest) returns (OMSResponse);
+    rpc BatchPlaceOrders(BatchPlaceOrdersRequest) returns (OMSResponse);
+    rpc CancelOrder(CancelOrderRequest) returns (OMSResponse);
+    rpc BatchCancelOrders(BatchCancelOrdersRequest) returns (OMSResponse);
+    rpc ExecuteAlgoOrder(AlgoOrderRequest) returns (OMSResponse);
+    rpc CancelAlgoOrder(CancelAlgoOrderRequest) returns (OMSResponse);
+
+    rpc Panic(PanicRequest) returns (OMSResponse);
+    rpc DontPanic(DontPanicRequest) returns (OMSResponse);
+
+    rpc QueryAccountBalance(QueryAccountRequest) returns (AccountResponse);
+    rpc QueryPosition(QueryPositionRequest) returns (PositionResponse);
+    rpc QueryOpenOrders(QueryOpenOrderRequest) returns (OrderDetailResponse);
+    rpc QueryOrderDetails(QueryOrderDetailRequest) returns (OrderDetailResponse);
+    rpc QueryTradeDetails(QueryTradeDetailRequest) returns (TradeDetailResponse);
+    rpc QueryInstrumentRefdata(QueryInstrumentRefdataRequest) returns (QueryInstrumentRefdataResponse);
+
+    rpc HealthCheck(zk.common.v1.DummyRequest) returns (zk.common.v1.ServiceHealthResponse);
+}

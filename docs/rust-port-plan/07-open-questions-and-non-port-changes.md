@@ -25,6 +25,35 @@
   - `order_id_queue` LRU eviction only removes from `exch_ref_to_order_id` but not `context_cache` — clean up both on eviction
   - Batch order/cancel collapsing builds intermediate `Vec<OmsAction>` then re-iterates; can be done in a single pass
 
+### zk-oms-svc TODOs (Phase 5b — OMS service, balance stub, resync tasks)
+
+- [ ] **Balance reconciliation on startup**: `QueryAccountBalance` on each gateway for bound accounts is stubbed in `main.rs` step 8. Deferred until gateway proto `QueryAccountBalance` integration is tested.
+- [ ] **Order resync periodic task**: `order_resync_interval_secs` config field exists (default 60s) but the task is not spawned yet.
+- [ ] **Balance resync periodic task**: `balance_resync_interval_secs` config field exists (default 60s) but the task is not spawned yet.
+- [ ] **`balance_update` topic asset suffix**: current impl publishes to `zk.oms.<oms_id>.balance_update` (no asset suffix); design calls for `zk.oms.<oms_id>.balance_update.<asset>` for selective subscription. Need to add suffix and update subscribers.
+- [ ] **`t1_ns = 0` for `BatchPlaceOrders`**: the `oms_through` latency segment is not captured for batch orders. Design decision: acceptable for now; revisit if batch latency visibility becomes needed.
+- [ ] **`pending_order_reports` cache max-size**: no bound; can grow unboundedly if gateways stop sending reports. Add a cap (e.g. 10k entries) with LRU eviction.
+- [ ] **`cleanup_order` LRU eviction incomplete**: only removes from `exch_ref_to_order_id`, not `context_cache`. Fix both on eviction.
+
+### zk-oms-svc design decisions captured
+
+- **Single-writer actor pattern**: `OmsCore` is owned by one Tokio task; all mutations go through `OmsCommand` channel; no locking in hot path.
+- **ReadReplica = `Arc<ArcSwap<OmsSnapshot>>`**: shared between writer and gRPC query handlers; query handlers call `replica.load()` without blocking the writer.
+- **Latency tracking is off-hot-path**: hot path only captures timestamps into a two-phase ring buffer (`pending` HashMap → `complete` VecDeque); flush happens every `ZK_METRICS_INTERVAL_SECS` seconds off hot path.
+- **Proto wire compatibility**: both `exch-gateway.proto` (legacy, mock-gw encoding) and `zk/exch_gw/v1/exch_gw.proto` (OMS decoding) have `gw_received_at_ns = 9` at the same field number.
+- **NATS subjects (current)**:
+  - `zk.oms.{oms_id}.order_update.{account_id}` — order updates
+  - `zk.oms.{oms_id}.balance_update` — balance updates (no asset suffix yet)
+  - `zk.oms.{oms_id}.metrics.latency` — latency metric batches
+- **Redis keys (current)**:
+  - `oms:{oms_id}:order:{order_id}`
+  - `oms:{oms_id}:open_orders:{account_id}`
+  - `oms:{oms_id}:balance:{account_id}:{asset}`
+  - `oms:{oms_id}:position:{account_id}:{instrument}:{side}`
+- **KV registry keys (current)**:
+  - `svc.gw.{gw_id}` — gateway discovery
+  - `svc.oms.{oms_id}` — OMS registration
+
 ### Performance / arch follow-ups identified during Phase 3 strategy SDK + backtester port
 
 - **OMS balance updates not wired end-to-end in backtest**: `OmsCore::calc_balance_changes_for_report` (stub from Phase 2) means `PublishBalanceUpdate` is never emitted after fills. `StrategyContext.get_position()` therefore stays empty unless position updates are injected manually. Full bookkeeping is blocked on Phase 2b OmsCore work.

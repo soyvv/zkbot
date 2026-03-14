@@ -1,0 +1,54 @@
+syntax = "proto3";
+package zk.engine.v1;
+
+import "zk/common/v1/common.proto";
+
+// Engine lifecycle and control messages.
+
+message StartEngineRequest {
+    string instance_id    = 1;
+    string strategy_id    = 2;
+    string execution_id   = 3;
+    string config_json    = 4;
+    zk.common.v1.AuditMeta audit_meta = 5;
+}
+
+message StopEngineRequest {
+    string instance_id  = 1;
+    string execution_id = 2;
+    string reason       = 3;
+    zk.common.v1.AuditMeta audit_meta = 4;
+}
+
+message PauseEngineRequest {
+    string instance_id  = 1;
+    string execution_id = 2;
+    zk.common.v1.AuditMeta audit_meta = 3;
+}
+
+message ResumeEngineRequest {
+    string instance_id  = 1;
+    string execution_id = 2;
+    zk.common.v1.AuditMeta audit_meta = 3;
+}
+
+message EngineStatusRequest {
+    string instance_id = 1;
+}
+
+message EngineStatusResponse {
+    string instance_id  = 1;
+    string execution_id = 2;
+    string state        = 3;  // IDLE | RUNNING | PAUSED | ERROR
+    string detail       = 4;
+    int64  uptime_ms    = 5;
+}
+
+service EngineService {
+    rpc Start(StartEngineRequest) returns (zk.common.v1.CommandAck);
+    rpc Stop(StopEngineRequest) returns (zk.common.v1.CommandAck);
+    rpc Pause(PauseEngineRequest) returns (zk.common.v1.CommandAck);
+    rpc Resume(ResumeEngineRequest) returns (zk.common.v1.CommandAck);
+    rpc GetStatus(EngineStatusRequest) returns (EngineStatusResponse);
+    rpc HealthCheck(zk.common.v1.DummyRequest) returns (zk.common.v1.ServiceHealthResponse);
+}

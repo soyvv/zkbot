@@ -17,6 +17,13 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
+pub fn system_time_ns() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as i64
+}
+
 fn base_report(exch_order_ref: &str, order_id: i64, account_id: i64) -> OrderReport {
     OrderReport {
         exchange: "MOCK".to_string(),
@@ -39,6 +46,7 @@ async fn publish(nats: &async_nats::Client, gw_id: &str, report: OrderReport) {
 
 /// Publish Linkage + BOOKED immediately after order acceptance.
 /// Called from the gRPC handler before spawning the fill task.
+/// `gw_received_at_ns` should be captured at handler entry (t4).
 pub async fn publish_booked_report(
     nats: &async_nats::Client,
     gw_id: &str,
@@ -46,8 +54,10 @@ pub async fn publish_booked_report(
     order_id: i64,
     account_id: i64,
     qty: f64,
+    gw_received_at_ns: i64,
 ) {
     let mut report = base_report(exch_order_ref, order_id, account_id);
+    report.gw_received_at_ns = gw_received_at_ns;
     report.order_report_entries = vec![
         OrderReportEntry {
             report_type: OrderReportType::OrderRepTypeLinkage as i32,

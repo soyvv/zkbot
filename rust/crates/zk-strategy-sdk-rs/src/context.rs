@@ -1,9 +1,9 @@
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 
-use zk_proto_rs::{
-    common::InstrumentRefData,
-    oms::{Order, OrderStatus, OrderUpdateEvent, Position, PositionUpdateEvent},
+use zk_proto_rs::zk::{
+    common::v1::InstrumentRefData,
+    oms::v1::{Order, OrderStatus, OrderUpdateEvent, Position, PositionUpdateEvent},
 };
 
 use crate::models::{StrategyCancel, StrategyOrder};

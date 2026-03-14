@@ -1,11 +1,11 @@
 use std::collections::{HashMap, VecDeque};
 
 use tracing::{error, warn};
-use zk_proto_rs::{
-    common::{InstrumentRefData, Rejection},
-    exch_gw::{ExchangeOrderStatus, ExchExecType, OrderReport, OrderReportType},
-    tqrpc_exch_gw::ExchSendOrderRequest,
-    oms::{
+use zk_proto_rs::zk::{
+    common::v1::{InstrumentRefData, Rejection},
+    exch_gw::v1::{ExchangeOrderStatus, ExchExecType, OrderReport, OrderReportType},
+    gateway::v1::SendOrderRequest as ExchSendOrderRequest,
+    oms::v1::{
         ExecMessage, ExecType, Fee, Order, OrderRequest, OrderStatus,
         OrderUpdateEvent, Trade,
     },
@@ -433,7 +433,7 @@ impl OrderManager {
                 OrderReportType::OrderRepTypeLinkage => {
                     if let Some(linkage) =
                         entry.report.as_ref().and_then(|r| match r {
-                            zk_proto_rs::exch_gw::order_report_entry::Report::OrderIdLinkageReport(l) => Some(l),
+                            zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::OrderIdLinkageReport(l) => Some(l),
                             _ => None,
                         })
                     {
@@ -463,7 +463,7 @@ impl OrderManager {
                 OrderReportType::OrderRepTypeState => {
                     if let Some(state_report) =
                         entry.report.as_ref().and_then(|r| match r {
-                            zk_proto_rs::exch_gw::order_report_entry::Report::OrderStateReport(s) => Some(s),
+                            zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::OrderStateReport(s) => Some(s),
                             _ => None,
                         })
                     {
@@ -530,7 +530,7 @@ impl OrderManager {
                 OrderReportType::OrderRepTypeTrade => {
                     if let Some(trade_report) =
                         entry.report.as_ref().and_then(|r| match r {
-                            zk_proto_rs::exch_gw::order_report_entry::Report::TradeReport(t) => Some(t),
+                            zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::TradeReport(t) => Some(t),
                             _ => None,
                         })
                     {
@@ -559,7 +559,7 @@ impl OrderManager {
                 OrderReportType::OrderRepTypeExec => {
                     if let Some(exec_report) =
                         entry.report.as_ref().and_then(|r| match r {
-                            zk_proto_rs::exch_gw::order_report_entry::Report::ExecReport(e) => Some(e),
+                            zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::ExecReport(e) => Some(e),
                             _ => None,
                         })
                     {
@@ -594,7 +594,7 @@ impl OrderManager {
                 OrderReportType::OrderRepTypeFee => {
                     if let Some(fee_report) =
                         entry.report.as_ref().and_then(|r| match r {
-                            zk_proto_rs::exch_gw::order_report_entry::Report::FeeReport(f) => Some(f),
+                            zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::FeeReport(f) => Some(f),
                             _ => None,
                         })
                     {
@@ -628,6 +628,9 @@ impl OrderManager {
             event.timestamp = ts_event;
             event.order_snapshot = Some(order.order_state.clone());
             event.order_source_id = order.order_state.source_id.clone();
+            // Propagate GW timestamps for latency tracking (t5 and t4).
+            event.gw_report_timestamp_ns = report.update_timestamp * 1_000_000;
+            event.gw_received_at_ns = report.gw_received_at_ns;
             if new_oms_trade {
                 event.order_inferred_trade = order.order_inferred_trades.last().cloned();
             }
@@ -803,16 +806,16 @@ fn infer_trade_price(
 /// is present. Returns `Some(entry)` if inference applies, `None` otherwise.
 /// Borrows the entry slice rather than cloning it — caller chains the result if Some.
 fn infer_state_entry(
-    entries: &[zk_proto_rs::exch_gw::OrderReportEntry],
+    entries: &[zk_proto_rs::zk::exch_gw::v1::OrderReportEntry],
     order: &OmsOrder,
-) -> Option<zk_proto_rs::exch_gw::OrderReportEntry> {
+) -> Option<zk_proto_rs::zk::exch_gw::v1::OrderReportEntry> {
     if order.is_in_terminal_state() {
         return None;
     }
     let has_state = entries.iter().any(|e| {
         matches!(
             &e.report,
-            Some(zk_proto_rs::exch_gw::order_report_entry::Report::OrderStateReport(_))
+            Some(zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::OrderStateReport(_))
         )
     });
     if has_state {
@@ -824,7 +827,7 @@ fn infer_state_entry(
     let mut new_value = 0f64;
     let mut has_trade = false;
     for e in entries {
-        if let Some(zk_proto_rs::exch_gw::order_report_entry::Report::TradeReport(t)) =
+        if let Some(zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::TradeReport(t)) =
             &e.report
         {
             new_qty += t.filled_qty;
@@ -853,7 +856,7 @@ fn infer_state_entry(
         ExchangeOrderStatus::ExchOrderStatusPartialFilled
     };
 
-    use zk_proto_rs::exch_gw::{order_report_entry::Report, OrderReportEntry, OrderStateReport};
+    use zk_proto_rs::zk::exch_gw::v1::{order_report_entry::Report, OrderReportEntry, OrderStateReport};
     Some(OrderReportEntry {
         report_type: OrderReportType::OrderRepTypeState as i32,
         report: Some(Report::OrderStateReport(OrderStateReport {

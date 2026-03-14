@@ -9,6 +9,7 @@ members = [
     "crates/zk-infra-rs",
     "crates/zk-pyo3-rs",
     "crates/zk-mock-gw",
+    "crates/zk-oms-svc",
 ]
 resolver = "2"
 

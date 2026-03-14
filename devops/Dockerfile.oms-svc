@@ -1,0 +1,69 @@
+# Multi-stage build for zk-oms-svc.
+# Build context: zkbot/ (repo root) — set in docker-compose.yml.
+
+# ── Stage 1: builder ─────────────────────────────────────────────────────────
+FROM rust:1.88-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    protobuf-compiler \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Cache dependency compilation separately from source.
+# Copy workspace manifests first so the layer is reused when only src changes.
+COPY rust/Cargo.toml rust/Cargo.lock ./rust/
+COPY rust/crates/zk-proto-rs/Cargo.toml        ./rust/crates/zk-proto-rs/
+COPY rust/crates/zk-domain-rs/Cargo.toml       ./rust/crates/zk-domain-rs/
+COPY rust/crates/zk-oms-rs/Cargo.toml          ./rust/crates/zk-oms-rs/
+COPY rust/crates/zk-engine-rs/Cargo.toml       ./rust/crates/zk-engine-rs/
+COPY rust/crates/zk-backtest-rs/Cargo.toml     ./rust/crates/zk-backtest-rs/
+COPY rust/crates/zk-strategy-sdk-rs/Cargo.toml ./rust/crates/zk-strategy-sdk-rs/
+COPY rust/crates/zk-infra-rs/Cargo.toml        ./rust/crates/zk-infra-rs/
+COPY rust/crates/zk-pyo3-rs/Cargo.toml         ./rust/crates/zk-pyo3-rs/
+COPY rust/crates/zk-mock-gw/Cargo.toml         ./rust/crates/zk-mock-gw/
+COPY rust/crates/zk-oms-svc/Cargo.toml         ./rust/crates/zk-oms-svc/
+COPY rust/crates/zk-oms-svc/build.rs           ./rust/crates/zk-oms-svc/
+
+# Stub out every crate's lib/main so cargo can resolve the dep graph.
+RUN for dir in \
+      rust/crates/zk-proto-rs \
+      rust/crates/zk-domain-rs \
+      rust/crates/zk-oms-rs \
+      rust/crates/zk-engine-rs \
+      rust/crates/zk-backtest-rs \
+      rust/crates/zk-strategy-sdk-rs \
+      rust/crates/zk-infra-rs \
+      rust/crates/zk-pyo3-rs \
+      rust/crates/zk-mock-gw; do \
+        mkdir -p $dir/src && echo "" > $dir/src/lib.rs; \
+    done && \
+    mkdir -p rust/crates/zk-oms-svc/src && \
+    echo "" > rust/crates/zk-oms-svc/src/lib.rs && \
+    echo "fn main() {}" > rust/crates/zk-oms-svc/src/main.rs
+
+# Copy protos (needed by zk-proto-rs build.rs and zk-oms-svc build.rs).
+COPY protos/ ./protos/
+
+WORKDIR /build/rust
+RUN cargo build --release -p zk-oms-svc 2>&1 || true
+# Remove stub artifacts so the real source build replaces them.
+RUN rm -rf target/release/deps/zk_oms_svc* target/release/zk-oms-svc
+
+# Now copy real source.
+COPY rust/crates/ ./crates/
+RUN cargo build --release -p zk-oms-svc
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+FROM debian:12-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/rust/target/release/zk-oms-svc /usr/local/bin/zk-oms-svc
+
+EXPOSE 50051
+
+ENTRYPOINT ["/usr/local/bin/zk-oms-svc"]

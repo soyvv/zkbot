@@ -90,6 +90,53 @@ services:
       nats:
         condition: service_healthy
 
+  pilot:
+    profiles: ["full"]   # started by 'make dev-up-full'; run locally with 'uv run python -m zk_pilot.main'
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile.pilot
+    image: zk-pilot:dev
+    ports:
+      - "8090:8090"     # admin HTTP API
+    environment:
+      ZK_NATS_URL: "nats://nats:4222"
+      ZK_PG_URL: "postgres://zk:zk@postgres:5432/zkbot"
+      ZK_ENV: "dev"
+      ZK_PILOT_ID: "pilot_dev_1"
+      ZK_HTTP_PORT: "8090"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  oms-svc:
+    profiles: ["full"]   # not started by default; use 'make dev-up-full' or 'docker compose --profile full up'
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile.oms-svc
+    image: zk-oms-svc:dev
+    ports:
+      - "50051:50051"
+    environment:
+      ZK_OMS_ID: "oms_dev_1"
+      ZK_NATS_URL: "nats://nats:4222"
+      ZK_REDIS_URL: "redis://redis:6379"
+      ZK_PG_URL: "postgres://zk:zk@postgres:5432/zkbot"
+      ZK_GRPC_PORT: "50051"
+      ZK_GATEWAY_KV_PREFIX: "svc.gw"
+      ZK_RISK_CHECK_ENABLED: "false"
+      RUST_LOG: "zk_oms_svc=info,warn"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-gw:
+        condition: service_started
+
 volumes:
   postgres_data:
   mongo_data:

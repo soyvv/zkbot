@@ -108,7 +108,7 @@ services:
 
 ### Init scripts
 
-`docker/dev/init/postgres/00_schema.sql` — runs all `create schema` and `create table` DDL from [06-data-layer.md](../06-data-layer.md) in order:
+`docker/dev/init/postgres/00_schema.sql` — runs all `create schema` and `create table` DDL from [data_layer.md](../../system-arch/data_layer.md) in order:
 1. `cfg` schema tables
 2. `trd` schema tables
 3. `mon` schema tables

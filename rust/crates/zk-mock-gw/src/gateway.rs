@@ -93,7 +93,7 @@ impl ExchangeGatewayService for MockGatewayHandler {
 
         // Publish Linkage + BOOKED immediately — before the fill delay.
         if let Some(nats) = nats {
-            publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty).await;
+            publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty, 0).await;
         }
 
         Ok(Response::new(ok_response()))
@@ -134,7 +134,7 @@ impl ExchangeGatewayService for MockGatewayHandler {
             };
 
             if let Some(nats) = nats {
-                publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty).await;
+                publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty, 0).await;
             }
         }
         Ok(Response::new(ok_response()))

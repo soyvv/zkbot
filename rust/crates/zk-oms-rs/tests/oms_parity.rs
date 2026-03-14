@@ -21,14 +21,16 @@ use zk_oms_rs::{
     oms_core::OmsCore,
 };
 use zk_proto_rs::{
-    common::{BasicOrderType, BuySellType, InstrumentRefData, InstrumentType, LongShortType, OpenCloseType},
-    exch_gw::{
-        BalanceUpdate, ExchangeOrderStatus, OrderIdLinkageReport, OrderReport, OrderReportEntry,
-        OrderReportType, OrderStateReport, PositionReport, TradeReport,
-        order_report_entry::Report,
+    zk::{
+        common::v1::{BasicOrderType, BuySellType, InstrumentRefData, InstrumentType, LongShortType, OpenCloseType},
+        exch_gw::v1::{
+            BalanceUpdate, ExchangeOrderStatus, OrderIdLinkageReport, OrderReport, OrderReportEntry,
+            OrderReportType, OrderStateReport, PositionReport, TradeReport,
+            order_report_entry::Report,
+        },
+        oms::v1::{OrderCancelRequest, OrderRequest, OrderStatus, OrderUpdateEvent, PositionUpdateEvent},
     },
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
-    oms::{OrderCancelRequest, OrderRequest, OrderStatus, OrderUpdateEvent, PositionUpdateEvent},
 };
 
 // ---------------------------------------------------------------------------

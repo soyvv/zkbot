@@ -1,0 +1,320 @@
+syntax = "proto3";
+package zk.common.v1;
+
+// ===== Enums (migrated from common.proto, values preserved) =====
+
+enum InstrumentType {
+    INST_TYPE_UNSPECIFIED = 0;
+    INST_TYPE_SPOT = 1;
+    INST_TYPE_PERP = 2;
+    INST_TYPE_FUTURE = 3;
+    INST_TYPE_CFD = 4;
+    INST_TYPE_OPTION = 5;
+    INST_TYPE_ETF = 6;
+    INST_TYPE_STOCK = 7;
+}
+
+enum BuySellType {
+    BS_UNSPECIFIED = 0;
+    BS_BUY = 1;
+    BS_SELL = 2;
+}
+
+enum OpenCloseType {
+    OC_UNSPECIFIED = 0;
+    OC_OPEN = 1;
+    OC_CLOSE = 2;
+}
+
+enum LongShortType {
+    LS_UNSPECIFIED = 0;
+    LS_LONG = 1;
+    LS_SHORT = 2;
+}
+
+enum BasicOrderType {
+    ORDERTYPE_UNSPECIFIED = 0;
+    ORDERTYPE_LIMIT = 1;
+    ORDERTYPE_MARKET = 2;
+}
+
+enum TimeInForceType {
+    TIMEINFORCE_UNSPECIFIED = 0;
+    TIMEINFORCE_IOC = 1;
+    TIMEINFORCE_FAK = 2;
+    TIMEINFORCE_GTC = 3;
+    TIMEINFORCE_FOK = 4;
+}
+
+enum ExtraOrderTagType {
+    EXTRA_TAG_UNSPECIFIED = 0;
+    EXTRA_TAG_POST_ONLY = 1;
+    EXTRA_TAG_REDUCE_ONLY = 2;
+}
+
+enum FillType {
+    FILL_UNSPECIFIED = 0;
+    FILL_TAKER = 1;
+    FILL_MAKER = 2;
+    FILL_BACKFILL = 3;
+}
+
+enum FeeType {
+    FEE_UNSPECIFIED = 0;
+    FEE_EXCH = 1;
+    FEE_FUNDING = 2;
+    FEE_TAX = 3;
+    FEE_GAS = 4;
+    FEE_INTEREST = 5;
+}
+
+enum ValueSymbol {
+    VALUE_SYMBOL_UNSPECIFIED = 0;
+    VALUE_SYMBOL_USDT = 2;
+    VALUE_SYMBOL_USDC = 3;
+}
+
+enum FiatSymbol {
+    FIAT_UNSPECIFIED = 0;
+    FIAT_USD = 1;
+    FIAT_HKD = 2;
+    FIAT_SGD = 3;
+    FIAT_JPY = 4;
+    FIAT_EUR = 5;
+    FIAT_GBP = 6;
+    FIAT_AUD = 7;
+    FIAT_CAD = 8;
+    FIAT_CHF = 9;
+}
+
+enum Exchange {
+    EXCH_UNSPECIFIED = 0;
+    EXCH_BINANCE = 1;
+    EXCH_INJECTIVE = 2;
+    EXCH_DEXALOT = 3;
+    EXCH_DDEX = 4;
+    EXCH_ORDERLY = 5;
+    EXCH_OKX = 6;
+    EXCH_KUCOIN = 7;
+    EXCH_HYPERLIQUID = 8;
+    EXCH_DYDX = 9;
+    EXCH_VERTEX = 10;
+    EXCH_PARADEX = 11;
+    EXCH_BLUEFIN = 12;
+    EXCH_BLITZ = 13;
+    EXCH_CHAINFLIP = 14;
+    EXCH_OANDA = 20;
+    EXCH_IBKR = 21;
+}
+
+enum BrokerType {
+    BROKER_TYPE_UNSPECIFIED = 0;
+    BROKER_TYPE_CRYPTO_CEX = 1;
+    BROKER_TYPE_CRYPTO_DEX = 2;
+    BROKER_TYPE_FX_CFD = 3;
+    BROKER_TYPE_TRAD_BROKER = 4;
+}
+
+enum AccountType {
+    ACCT_TYPE_UNSPECIFIED = 0;
+    ACCT_TYPE_CASH = 1;
+    ACCT_TYPE_MARGIN = 2;
+    ACCT_TYPE_PORTFOLIO_MARGIN = 3;
+}
+
+enum SymbolType {
+    SYMBOL_TYPE_UNSPECIFIED = 0;
+    SYMBOL_TYPE_FIAT = 1;
+    SYMBOL_TYPE_COIN = 2;
+}
+
+enum EventLogLevelType {
+    LOGLEVEL_UNSPECIFIED = 0;
+    LOGLEVEL_ERROR = 1;
+    LOGLEVEL_WARN = 2;
+    LOGLEVEL_INFO = 3;
+    LOGLEVEL_DEBUG = 4;
+}
+
+enum EventSourceType {
+    EVENT_SRC_TYPE_UNSPECIFIED = 0;
+    EVENT_SRC_TYPE_STRAT = 1;
+    EVENT_SRC_TYPE_OMS = 2;
+    EVENT_SRC_TYPE_GW = 3;
+}
+
+enum EventType {
+    EVENT_TYPE_UNSPECIFIED = 0;
+    EVENT_TYPE_INBOUND = 1;
+    EVENT_TYPE_OUTBOUND = 2;
+    EVENT_TYPE_INPROCESS = 3;
+}
+
+enum RejectionSource {
+    UNSPECIFIED_REJECT = 0;
+    EXCH_REJECT = 1;
+    EXCH_GW_REJECT = 2;
+    OMS_REJECT = 3;
+}
+
+enum RejectionReason {
+    UNSPECIFIED_REJECT_REASON = 0;
+    REJ_REASON_INSUFFICIENT_FUNDS = 1;
+    REJ_REASON_INVALID_ORDER_TYPE = 2;
+    REJ_REASON_OMS_INTERNAL_ERROR = 3;
+    REJ_REASON_GW_INTERNAL_ERROR = 4;
+    REJ_REASON_PRICE_OUT_OF_RANGE = 5;
+    REJ_REASON_QTY_OUT_OF_RANGE = 6;
+    REJ_REASON_NETWORK_ERROR = 7;
+    REJ_REASON_OMS_INVALID_STATE = 8;
+    REJ_REASON_EXCH_REJECT = 9;
+}
+
+// ===== Messages (migrated from common.proto, field numbers preserved) =====
+
+message InstrumentRefData {
+    string instrument_id = 1;
+    string instrument_id_exchange = 2;
+    int64 update_ts = 3;
+    string exchange_name = 5;
+    InstrumentType instrument_type = 6;
+    string base_asset = 7;
+    string quote_asset = 8;
+    string settlement_asset = 9;
+    double contract_size = 10;
+    int64 price_precision = 11;
+    int64 qty_precision = 12;
+    double price_tick_size = 13;
+    double qty_lot_size = 14;
+    double min_notional = 15;
+    double max_notional = 16;
+    double min_price = 17;
+    double max_price = 18;
+    double min_order_qty = 19;
+    double max_order_qty = 20;
+    map<string, string> extra_properties = 21;
+    string original_info = 22;
+    bool disabled = 23;
+    double max_mkt_order_qty = 24;
+    string expiry_date = 25;
+    string currency = 26;
+    string isin = 27;
+    string listing_exchange = 28;
+    double margin_requirement = 29;
+    string asset_class = 30;
+}
+
+message ExtraData {
+    map<string, string> data_map = 1;
+}
+
+message DummyRequest {}
+
+message OrderEventMessage {
+    int64 timestamp = 1;
+    string source_id = 2;
+    int64 order_id = 3;
+    string exch_order_ref = 4;
+    EventLogLevelType event_loglevel_type = 5;
+    EventSourceType source_type = 6;
+    EventType event_type = 7;
+    string message = 8;
+}
+
+message LatencyMetric {
+    map<string, int64> tagged_timestamps = 1;  // tag → nanoseconds
+    int64  order_id  = 2;  // order this metric belongs to
+    string source_id = 3;  // publisher id (e.g. "oms_dev_1")
+}
+
+// Batch of LatencyMetric messages published periodically by services.
+// NATS subject: zk.{svc}.{svc_id}.metrics.latency
+message LatencyMetricBatch {
+    repeated LatencyMetric metrics       = 1;
+    string                 publisher_id  = 2;
+    int64                  publish_ts_ns = 3;
+}
+
+message Rejection {
+    RejectionSource source = 1;
+    bool recoverable = 2;
+    RejectionReason reason = 3;
+    int64 error_code = 4;
+    string error_message = 5;
+}
+
+message MarginPositionInfo {
+    double leverage = 1;
+    double entry_price = 2;
+    double mark_price = 3;
+    double liquidation_price = 4;
+    double margin = 5;
+    double contracts = 6;
+    double contract_size = 7;
+    double contract_value = 8;
+    double index_price = 9;
+    double unsettled_pnl = 10;
+    double last_trade_price = 11;
+    int64 update_ts = 12;
+}
+
+// ===== New messages (zk.common.v1 additions) =====
+
+message ErrorStatus {
+    int32  code    = 1;
+    string message = 2;
+    string detail  = 3;
+}
+
+message CommandAck {
+    bool        success         = 1;
+    ErrorStatus error           = 2;
+    string      request_id      = 3;
+    string      idempotency_key = 4;
+}
+
+message LifecycleAck {
+    bool        success    = 1;
+    ErrorStatus error      = 2;
+    string      request_id = 3;
+}
+
+message AuditMeta {
+    string source_id    = 1;
+    string request_id   = 2;
+    string trace_id     = 3;
+    int64  timestamp_ms = 4;
+}
+
+message PaginationRequest {
+    int32  page_size = 1;
+    string cursor    = 2;
+}
+
+message PaginationResponse {
+    string next_cursor  = 1;
+    bool   has_more     = 2;
+    int32  total_count  = 3;
+}
+
+message ServiceHealthResponse {
+    string service_id = 1;
+    string status     = 2;
+    string detail     = 3;
+    int64  uptime_ms  = 4;
+}
+
+message ControlCommand {
+    string command = 1;
+    string target  = 2;
+    map<string, string> params = 3;
+}
+
+message PostTradeEvent {
+    int64  order_id    = 1;
+    int64  account_id  = 2;
+    string oms_id      = 3;
+    string gw_id       = 4;
+    int64  timestamp_ms = 5;
+    map<string, string> meta = 6;
+}

@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use zk_proto_rs::{
-    exch_gw::{
+use zk_proto_rs::zk::{
+    exch_gw::v1::{
         order_report_entry::Report, ExchangeOrderStatus, OrderIdLinkageReport, OrderInfo,
         OrderReport, OrderReportEntry, OrderReportType, OrderStateReport, TradeReport,
     },
-    rtmd::TickData,
-    tqrpc_exch_gw::{ExchCancelOrderRequest, ExchSendOrderRequest},
+    rtmd::v1::TickData,
+    gateway::v1::{CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest},
 };
 
 use crate::{
@@ -130,8 +130,8 @@ impl SimulatorCore {
 // --- report builders ---
 
 fn make_rejected_report(order_id: i64, exch_id: String, ts: i64) -> OrderReport {
-    let exec_report = zk_proto_rs::exch_gw::ExecReport {
-        exec_type: zk_proto_rs::exch_gw::ExchExecType::Rejected as i32,
+    let exec_report = zk_proto_rs::zk::exch_gw::v1::ExecReport {
+        exec_type: zk_proto_rs::zk::exch_gw::v1::ExchExecType::Rejected as i32,
         ..Default::default()
     };
     let entry = OrderReportEntry {

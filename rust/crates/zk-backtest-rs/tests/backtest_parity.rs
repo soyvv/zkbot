@@ -5,10 +5,10 @@
 
 use std::sync::{Arc, Mutex};
 
-use zk_proto_rs::{
-    common::{BuySellType, InstrumentRefData},
-    oms::{OrderStatus, OrderUpdateEvent, PositionUpdateEvent},
-    rtmd::{PriceLevel, TickData},
+use zk_proto_rs::zk::{
+    common::v1::{BuySellType, InstrumentRefData},
+    oms::v1::{OrderStatus, OrderUpdateEvent, PositionUpdateEvent},
+    rtmd::v1::{PriceLevel, TickData},
 };
 use zk_strategy_sdk_rs::{
     context::StrategyContext,
@@ -444,8 +444,8 @@ fn test_strategy_queries_position_in_callback() {
         progress_callback: None,
     };
     let mut bt = Backtester::new(config);
-    let pos_event = zk_proto_rs::oms::PositionUpdateEvent {
-        position_snapshots: vec![zk_proto_rs::oms::Position {
+    let pos_event = zk_proto_rs::zk::oms::v1::PositionUpdateEvent {
+        position_snapshots: vec![zk_proto_rs::zk::oms::v1::Position {
             account_id: 100,
             instrument_code: sym.to_string(),
             ..Default::default()

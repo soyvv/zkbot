@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyTuple};
-use zk_proto_rs::common::BuySellType;
+use zk_proto_rs::zk::common::v1::BuySellType;
 use zk_strategy_sdk_rs::{
     context::StrategyContext,
     models::{SAction, StrategyLog, StrategyOrder, TimerSchedule, TimerSubscription},

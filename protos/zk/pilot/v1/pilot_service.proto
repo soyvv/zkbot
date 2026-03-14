@@ -1,0 +1,52 @@
+syntax = "proto3";
+package zk.pilot.v1;
+
+import "zk/common/v1/common.proto";
+
+// Pilot — control plane for managing services, strategies, and instances.
+
+message ListServicesRequest {
+    string service_type = 1;  // filter; empty = all
+}
+
+message ServiceEntry {
+    string service_id   = 1;
+    string service_type = 2;
+    string instance_id  = 3;
+    string address      = 4;
+    string state        = 5;
+    int64  registered_at_ms = 6;
+}
+
+message ListServicesResponse {
+    repeated ServiceEntry services = 1;
+    zk.common.v1.PaginationResponse pagination = 2;
+}
+
+message SendCommandRequest {
+    string target_service_id = 1;
+    zk.common.v1.ControlCommand command = 2;
+    zk.common.v1.AuditMeta audit_meta = 3;
+}
+
+message ListInstancesRequest {
+    string strategy_id = 1;
+}
+
+message InstanceEntry {
+    string instance_id  = 1;
+    string strategy_id  = 2;
+    string state        = 3;
+    int64  started_at_ms = 4;
+}
+
+message ListInstancesResponse {
+    repeated InstanceEntry instances = 1;
+}
+
+service PilotService {
+    rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+    rpc SendCommand(SendCommandRequest) returns (zk.common.v1.CommandAck);
+    rpc ListInstances(ListInstancesRequest) returns (ListInstancesResponse);
+    rpc HealthCheck(zk.common.v1.DummyRequest) returns (zk.common.v1.ServiceHealthResponse);
+}

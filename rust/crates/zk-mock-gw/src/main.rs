@@ -1,4 +1,5 @@
 mod fill;
+mod zk_gateway;
 mod gateway;
 mod proto;
 mod state;
@@ -10,6 +11,8 @@ use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::gateway::MockGatewayHandler;
+use crate::zk_gateway::ZkGatewayHandler;
+use crate::proto::zk_gw_v1::gateway_service_server::GatewayServiceServer;
 use crate::proto::tqrpc_exch_gw::exchange_gateway_service_server::ExchangeGatewayServiceServer;
 use crate::state::MockGwState;
 
@@ -51,6 +54,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    // ── NATS KV self-registration ─────────────────────────────────────────────
+    // Register under `svc.gw.{gw_id}` so OMS can discover this gateway.
+    // OMS watches this prefix and connects via gRPC using the address in PG.
+    if let Some(ref nats) = nats_client {
+        let kv_prefix = std::env::var("ZK_GATEWAY_KV_PREFIX")
+            .unwrap_or_else(|_| "svc.gw".to_string());
+        let kv_key = format!("{kv_prefix}.{gw_id}");
+        let kv_val_str = format!(
+            r#"{{"service_type":"GW","gw_id":"{gw_id}","grpc_port":{grpc_port}}}"#
+        );
+        let kv_val = bytes::Bytes::from(kv_val_str.clone());
+
+        let js = async_nats::jetstream::new(nats.clone());
+        let bucket = "zk-svc-registry-v1";
+        let store = match js.get_key_value(bucket).await {
+            Ok(s) => s,
+            Err(_) => js
+                .create_key_value(async_nats::jetstream::kv::Config {
+                    bucket: bucket.to_string(),
+                    max_age: std::time::Duration::from_secs(90),
+                    ..Default::default()
+                })
+                .await
+                .expect("KV bucket create failed"),
+        };
+        store
+            .put(&kv_key, kv_val.clone())
+            .await
+            .expect("KV put failed");
+        info!(kv_key, "registered in NATS KV");
+
+        // Heartbeat — re-put every 15 s so the TTL-based entry stays alive.
+        let kv_key2 = kv_key.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
+            loop {
+                ticker.tick().await;
+                if let Err(e) = store.put(&kv_key2, kv_val.clone()).await {
+                    tracing::warn!(kv_key = kv_key2, error = %e, "KV heartbeat failed");
+                }
+            }
+        });
+    }
+
     // ── State ─────────────────────────────────────────────────────────────────
     let balances: HashMap<String, f64> = MockGwState::parse_balances(&balances_str);
     let state = Arc::new(Mutex::new(MockGwState::new(
@@ -65,8 +112,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
     info!(%addr, "gRPC server listening");
 
+    let zk_handler = ZkGatewayHandler { state: Arc::clone(&state) };
     tonic::transport::Server::builder()
         .add_service(ExchangeGatewayServiceServer::new(MockGatewayHandler { state }))
+        .add_service(GatewayServiceServer::new(zk_handler))
         .serve(addr)
         .await?;
 

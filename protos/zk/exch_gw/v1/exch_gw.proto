@@ -1,0 +1,196 @@
+syntax = "proto3";
+package zk.exch_gw.v1;
+
+import "zk/common/v1/common.proto";
+
+// ===== Enums (from exch-gateway.proto, values preserved) =====
+
+enum FeeUnitType {
+    FEE_TYPE_UNSPECIFIED = 0;
+    FEE_FIAT = 1;
+    FEE_VALUE_COIN = 2;
+    FEE_GAS_COIN = 3;
+}
+
+enum OrderReportType {
+    ORDER_REP_TYPE_UNSPECIFIED = 0;
+    ORDER_REP_TYPE_TRADE = 1;
+    ORDER_REP_TYPE_STATE = 2;
+    ORDER_REP_TYPE_FEE = 3;
+    ORDER_REP_TYPE_LINKAGE = 4;
+    ORDER_REP_TYPE_EXEC = 5;
+}
+
+enum ExchangeOrderStatus {
+    EXCH_ORDER_STATUS_UNSPECIFIED = 0;
+    EXCH_ORDER_STATUS_BOOKED = 1;
+    EXCH_ORDER_STATUS_PARTIAL_FILLED = 2;
+    EXCH_ORDER_STATUS_FILLED = 3;
+    EXCH_ORDER_STATUS_CANCELLED = 4;
+    EXCH_ORDER_STATUS_EXCH_REJECTED = 5;
+    EXCH_ORDER_STATUS_EXPIRED = 6;
+}
+
+enum ExchExecType {
+    EXCH_EXEC_TYPE_UNSPECIFIED = 0;
+    EXCH_EXEC_TYPE_REJECTED = 1;
+    EXCH_EXEC_TYPE_CANCEL_REJECT = 2;
+    EXCH_EXEC_TYPE_REPLACED = 3;
+    EXCH_EXEC_TYPE_RESTATED = 4;
+}
+
+enum OrderSourceType {
+    ORDER_SOURCE_UNSPECIFIED = 0;
+    ORDER_SOURCE_TQ = 1;
+    ORDER_SOURCE_NON_TQ = 2;
+    ORDER_SOURCE_UNKNOWN = 3;
+}
+
+enum MarginModeType {
+    MARGIN_UNSPECIFIED = 0;
+    MARGIN_CROSS = 1;
+    MARGIN_ISOLATED = 2;
+    MARGIN_UNKNOWN = 3;
+}
+
+enum GatewayEventType {
+    GW_EVENT_STARTED = 0;
+    GW_EVENT_EXCH_DISCONNECTED = 1;
+}
+
+// ===== Messages (from exch-gateway.proto, field numbers preserved) =====
+
+message OrderInfo {
+    string exch_order_ref = 1;
+    string client_order_id = 2;
+    string instrument = 3;
+    string exch_account_id = 4;
+    zk.common.v1.BuySellType buy_sell_type = 5;
+    double place_qty = 6;
+    double place_price = 7;
+}
+
+// deprecated; use zk.common.v1.Rejection instead
+message ExchErrorInfo {
+    int32 error_code = 1;
+    string error_message = 2;
+}
+
+message OrderReport {
+    string exch_order_ref = 1;
+    int64 order_id = 2;
+    string exchange = 3;
+    repeated OrderReportEntry order_report_entries = 4;
+    int64 account_id = 5;
+    int64 update_timestamp = 6;
+    string extra_order_id = 7;
+    OrderSourceType order_source_type = 8;
+    int64 gw_received_at_ns = 9;  // local_ns() at GW gRPC handler entry; 0 if not set
+}
+
+message OrderReportEntry {
+    OrderReportType report_type = 1;
+    oneof report {
+        TradeReport trade_report = 7;
+        OrderStateReport order_state_report = 8;
+        OrderIdLinkageReport order_id_linkage_report = 9;
+        FeeReport fee_report = 10;
+        ExecReport exec_report = 11;
+    }
+}
+
+message OrderIdLinkageReport {
+    string exch_order_ref = 1;
+    int64 order_id = 2;
+}
+
+message OrderStateReport {
+    ExchangeOrderStatus exch_order_status = 1;
+    double filled_qty = 2;
+    double unfilled_qty = 3;
+    double avg_price = 4;
+    OrderInfo order_info = 6;
+}
+
+message TradeReport {
+    string exch_trade_id = 1;
+    double filled_qty = 2;
+    double filled_price = 3;
+    zk.common.v1.FillType fill_type = 4;
+    int64 filled_ts = 5;
+    double exch_pnl = 6;
+    OrderInfo order_info = 7;
+}
+
+message FeeReport {
+    FeeUnitType fee_unit_type = 1;
+    double fee_qty = 2;
+    string fee_symbol = 3;
+    zk.common.v1.FeeType fee_type = 4;
+    int64 fee_ts = 5;
+    string inst_symbol = 6;
+}
+
+message ExecReport {
+    string exec_id = 1;
+    ExchExecType exec_type = 2;
+    string exec_message = 3;
+    ExchErrorInfo error_info = 4;  // deprecated
+    zk.common.v1.Rejection rejection_info = 5;
+}
+
+message PositionReport {
+    string instrument_code = 1;
+    zk.common.v1.InstrumentType instrument_type = 2;
+    zk.common.v1.LongShortType long_short_type = 3;
+    string exch_account_code = 4;
+    double qty = 5;
+    double avail_qty = 6;
+    double value = 7;
+    int64 update_timestamp = 13;
+    string message_raw = 14;
+    int64 account_id = 15;
+    zk.common.v1.MarginPositionInfo margin_pos_info = 22;
+}
+
+message BalanceUpdate {
+    repeated PositionReport balances = 1;
+}
+
+message GatewaySystemEvent {
+    string gw_name = 1;
+    GatewayEventType event_type = 2;
+    string service_endpoint = 3;
+    int64 event_timestamp = 4;
+}
+
+message AccountSummaryEntry {
+    string account_code = 1;
+    string cash_asset = 2;
+    double total_avail_value = 3;
+    double total_value = 4;
+    double total_frozen_value = 5;
+    double unrealized_pnl = 6;
+    double leverage = 7;
+    MarginModeType margin_mode_type = 8;
+    double total_margin = 9;
+    int64 update_timestamp = 14;
+    string original_info = 15;
+    double buying_power = 16;
+    double maintenance_margin = 17;
+    double net_liquidation_value = 18;
+    zk.common.v1.AccountType account_type = 19;
+}
+
+message AccountSettingEntry {
+    string exch_account_id = 1;
+    double long_leverage = 2;
+    double short_leverage = 3;
+    MarginModeType margin_mode_type = 4;
+    string instrument = 5;
+    zk.common.v1.BrokerType broker_type = 6;
+    zk.common.v1.AccountType account_type = 7;
+    string base_currency = 8;
+    string regulatory_info = 9;
+    map<string, string> extra_settings = 10;
+}

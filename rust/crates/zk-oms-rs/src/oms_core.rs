@@ -1,11 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use tracing::{error, info, warn};
-use zk_proto_rs::{
-    common::{BuySellType, Rejection, RejectionReason, RejectionSource},
-    exch_gw::OrderReport,
-    tqrpc_exch_gw::{ExchBatchCancelOrdersRequest, ExchBatchSendOrdersRequest},
-    oms::{ExecType, OrderRequest, OrderStatus},
+use zk_proto_rs::zk::{
+    common::v1::{BuySellType, Rejection, RejectionReason, RejectionSource},
+    exch_gw::v1::OrderReport,
+    gateway::v1::{
+        BatchCancelOrdersRequest as ExchBatchCancelOrdersRequest,
+        BatchSendOrdersRequest as ExchBatchSendOrdersRequest,
+    },
+    oms::v1::{ExecType, OrderRequest, OrderStatus},
 };
 
 use crate::{
@@ -291,7 +294,12 @@ impl OmsCore {
             // Send to gateway
             let gw_req = oms_order.gw_req.clone().expect("gw_req always set on non-error order");
             let gw_key = ctx.gw_config.as_ref().map(|g| g.gw_key.clone()).unwrap_or_default();
-            actions.push(OmsAction::SendOrderToGw { gw_key, request: gw_req });
+            actions.push(OmsAction::SendOrderToGw {
+                gw_key,
+                request: gw_req,
+                order_id: oms_order.order_id,
+                order_created_at: oms_order.order_state.created_at,
+            });
 
             // Apply balance changes if bookkeeping is on
             if let (Some(fc), Some(pc)) = (fund_change, pos_change) {
@@ -360,7 +368,7 @@ impl OmsCore {
         }
 
         // Deduplicate balance updates (keep last per account+symbol)
-        let mut last_by_account: HashMap<i64, zk_proto_rs::oms::PositionUpdateEvent> = HashMap::new();
+        let mut last_by_account: HashMap<i64, zk_proto_rs::zk::oms::v1::PositionUpdateEvent> = HashMap::new();
         for action in balance_actions {
             if let OmsAction::PublishBalanceUpdate(pue) = action {
                 let account_id = pue.account_id;
@@ -378,7 +386,7 @@ impl OmsCore {
     // Cancel
     // ------------------------------------------------------------------
 
-    fn process_cancel(&mut self, req: zk_proto_rs::oms::OrderCancelRequest) -> Vec<OmsAction> {
+    fn process_cancel(&mut self, req: zk_proto_rs::zk::oms::v1::OrderCancelRequest) -> Vec<OmsAction> {
         let order_id = req.order_id;
         info!(order_id, "processing cancel request");
 
@@ -448,7 +456,7 @@ impl OmsCore {
         }
 
         // Build extra info required by exchange
-        let mut extra = zk_proto_rs::common::ExtraData::default();
+        let mut extra = zk_proto_rs::zk::common::v1::ExtraData::default();
         if let Some(gw_cfg) = &ctx.gw_config {
             for field in &gw_cfg.cancel_required_fields {
                 let order = self.order_mgr.get_order_by_id(order_id).unwrap();
@@ -465,7 +473,7 @@ impl OmsCore {
             }
         }
 
-        let gw_cancel = zk_proto_rs::tqrpc_exch_gw::ExchCancelOrderRequest {
+        let gw_cancel = zk_proto_rs::zk::gateway::v1::CancelOrderRequest {
             exch_order_ref: exch_order_ref.clone(),
             order_id,
             exch_specific_params: Some(extra),
@@ -477,7 +485,7 @@ impl OmsCore {
         vec![OmsAction::SendCancelToGw { gw_key, request: gw_cancel }]
     }
 
-    fn batch_process_cancels(&mut self, reqs: Vec<zk_proto_rs::oms::OrderCancelRequest>) -> Vec<OmsAction> {
+    fn batch_process_cancels(&mut self, reqs: Vec<zk_proto_rs::zk::oms::v1::OrderCancelRequest>) -> Vec<OmsAction> {
         info!(n = reqs.len(), "batch processing cancels");
         let mut cancel_by_gw: HashMap<String, Vec<OmsAction>> = HashMap::new();
         let mut other_actions: Vec<OmsAction> = Vec::new();
@@ -529,7 +537,7 @@ impl OmsCore {
 
         // Handle external / non-TQ orders
         if self.handle_external_orders {
-            use zk_proto_rs::exch_gw::OrderSourceType;
+            use zk_proto_rs::zk::exch_gw::v1::OrderSourceType;
             let account_id = if report.account_id != 0 {
                 report.account_id
             } else {
@@ -674,7 +682,7 @@ impl OmsCore {
     // Balance update from gateway
     // ------------------------------------------------------------------
 
-    fn process_balance_update(&mut self, update: zk_proto_rs::exch_gw::BalanceUpdate) -> Vec<OmsAction> {
+    fn process_balance_update(&mut self, update: zk_proto_rs::zk::exch_gw::v1::BalanceUpdate) -> Vec<OmsAction> {
         let ts = gen_timestamp_ms();
         if let Some(account_id) = self.balance_mgr.merge_gw_balance_update(&update, ts) {
             let exch_ts = update.balances.first().map(|b| b.update_timestamp).unwrap_or(ts);
@@ -769,7 +777,7 @@ impl OmsCore {
                         for r in reports {
                             let mut r = r.clone();
                             r.order_source_type =
-                                zk_proto_rs::exch_gw::OrderSourceType::OrderSourceNonTq as i32;
+                                zk_proto_rs::zk::exch_gw::v1::OrderSourceType::OrderSourceNonTq as i32;
                             to_replay.push((gw_key.clone(), r));
                         }
                     }

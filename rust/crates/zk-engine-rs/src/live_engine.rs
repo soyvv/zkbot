@@ -15,7 +15,7 @@
 /// use zk_engine_rs::live_engine::LiveEngine;
 /// use zk_engine_rs::action_dispatcher::NoopDispatcher;
 /// use zk_engine_rs::engine_event::EngineEvent;
-/// use zk_proto_rs::common::InstrumentRefData;
+/// use zk_proto_rs::zk::common::v1::InstrumentRefData;
 ///
 /// #[tokio::main]
 /// async fn main() {
@@ -37,7 +37,7 @@
 /// ```
 use tokio::sync::mpsc;
 
-use zk_proto_rs::common::InstrumentRefData;
+use zk_proto_rs::zk::common::v1::InstrumentRefData;
 use zk_strategy_sdk_rs::{
     models::{SAction, TimerSubscription},
     runner::StrategyRunner,

@@ -1,7 +1,7 @@
-use zk_proto_rs::{
-    common::InstrumentRefData,
-    oms::{OrderUpdateEvent, PositionUpdateEvent},
-    rtmd::{Kline, RealtimeSignal, TickData},
+use zk_proto_rs::zk::{
+    common::v1::InstrumentRefData,
+    oms::v1::{OrderUpdateEvent, PositionUpdateEvent},
+    rtmd::v1::{Kline, RealtimeSignal, TickData},
 };
 
 use crate::{

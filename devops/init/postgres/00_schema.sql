@@ -349,6 +349,16 @@ create table mon.active_session (
 
 create index idx_active_session_logical on mon.active_session(logical_id, status);
 
+-- Reconciler lookup: find session by kv_key when a KV Delete/Purge event fires.
+create index idx_active_session_kv_key
+  on mon.active_session(kv_key)
+  where status = 'active';
+
+-- At most one active session per (logical_id, instance_type) — DB-level guardrail.
+create unique index idx_active_session_unique_active
+  on mon.active_session (logical_id, instance_type)
+  where status = 'active';
+
 create table mon.registration_audit (
   audit_id          bigserial primary key,
   token_jti         text,

@@ -1,4 +1,7 @@
-use zk_proto_rs::{exch_gw::OrderReport, tqrpc_exch_gw::ExchSendOrderRequest};
+use zk_proto_rs::zk::{
+    exch_gw::v1::OrderReport,
+    gateway::v1::SendOrderRequest as ExchSendOrderRequest,
+};
 
 /// In-flight order tracked by the simulator.
 #[derive(Debug, Clone)]
@@ -36,6 +39,6 @@ pub struct SimResult {
 #[derive(Debug, Clone)]
 pub struct BtOmsOutput {
     pub ts_ms: i64,
-    pub order_update: Option<zk_proto_rs::oms::OrderUpdateEvent>,
-    pub position_update: Option<zk_proto_rs::oms::PositionUpdateEvent>,
+    pub order_update: Option<zk_proto_rs::zk::oms::v1::OrderUpdateEvent>,
+    pub position_update: Option<zk_proto_rs::zk::oms::v1::PositionUpdateEvent>,
 }

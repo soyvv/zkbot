@@ -1,0 +1,43 @@
+syntax = "proto3";
+package zk.pilot.v1;
+
+// Bootstrap request/response for NATS subjects:
+//   zk.bootstrap.register   — service registers with Pilot on startup
+//   zk.bootstrap.deregister — service deregisters on clean shutdown
+//
+// Design notes:
+//   - Client does NOT supply instance_id; Pilot assigns the lowest available
+//     Snowflake worker id from cfg.instance_id_lease (engines only).
+//   - Token is a pre-provisioned plaintext secret distributed by admin via
+//     the Pilot HTTP admin API (POST /admin/tokens).
+
+message BootstrapRegisterRequest {
+    string token         = 1;  // plaintext token issued by admin
+    string logical_id    = 2;  // e.g. "oms_dev_1", "engine_prod_3"
+    string instance_type = 3;  // "gw" | "oms" | "engine" | "mdgw" | "rec"
+    string env           = 4;  // "dev" | "prod"
+    map<string, string> runtime_info = 5;  // hostname, version, git_sha, etc.
+}
+
+message BootstrapRegisterResponse {
+    string owner_session_id  = 1;  // UUID; embedded in KV heartbeat CAS writes
+    string kv_key            = 2;  // e.g. "svc.oms.oms_dev_1"
+    string lock_key          = 3;  // e.g. "lock.oms.oms_dev_1"
+    int64  lease_ttl_ms      = 4;
+    int32  instance_id       = 5;  // Pilot-assigned Snowflake worker id; 0 if not an engine
+    string scoped_credential = 6;  // NATS cred string; empty in dev/direct mode
+    string status            = 7;  // "OK" | "TOKEN_EXPIRED" | "DUPLICATE" | "NO_INSTANCE_ID_AVAILABLE" | "ERROR"
+    string error_message     = 8;
+}
+
+message BootstrapDeregisterRequest {
+    string owner_session_id = 1;
+    string logical_id       = 2;
+    string instance_type    = 3;
+    string env              = 4;
+}
+
+message BootstrapDeregisterResponse {
+    bool   success      = 1;
+    string error_message = 2;
+}

@@ -6,3 +6,6 @@ description = "Generated protobuf types for zkbot (prost)"
 
 [dependencies]
 prost = { workspace = true }
+
+[build-dependencies]
+prost-build = "0.13"

@@ -1,0 +1,23 @@
+syntax = "proto3";
+package zk.discovery.v1;
+
+// Used as the value payload in NATS KV service-registry entries.
+
+message TransportEndpoint {
+    string protocol  = 1;  // grpc | nats | custom
+    string address   = 2;  // host:port
+    string authority = 3;  // DNS/service authority for TLS SNI
+}
+
+message ServiceRegistration {
+    string            service_type    = 1;
+    string            service_id      = 2;
+    string            instance_id     = 3;
+    TransportEndpoint endpoint        = 4;
+    repeated int64    account_ids     = 5;
+    string            venue           = 6;
+    repeated string   capabilities    = 7;
+    int64             lease_expiry_ms = 8;
+    int64             updated_at_ms   = 9;
+    map<string, string> attrs         = 10;
+}

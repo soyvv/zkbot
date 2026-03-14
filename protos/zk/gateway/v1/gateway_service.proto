@@ -1,0 +1,212 @@
+syntax = "proto3";
+package zk.gateway.v1;
+
+import "zk/common/v1/common.proto";
+import "zk/exch_gw/v1/exch_gw.proto";
+
+// ===== Request/response messages (from rpc-exch-gateway.proto, field numbers preserved) =====
+
+message SendOrderRequest {
+    int64 correlation_id = 1;
+    string exch_account_id = 2;
+    string instrument = 3;
+    zk.common.v1.BuySellType buysell_type = 4;
+    zk.common.v1.OpenCloseType openclose_type = 5;
+    zk.common.v1.BasicOrderType order_type = 6;
+    double scaled_price = 7;
+    double scaled_qty = 8;
+    double leverage = 9;
+    int64 timestamp = 10;
+    zk.common.v1.ExtraData exch_specific_params = 11;
+    zk.common.v1.TimeInForceType time_inforce_type = 12;
+    repeated zk.common.v1.ExtraOrderTagType extra_order_tags = 13;
+}
+
+message BatchSendOrdersRequest {
+    repeated SendOrderRequest order_requests = 1;
+}
+
+message ExchOrder {
+    string order_ref = 1;
+    string instrument = 2;
+    zk.common.v1.BuySellType buysell_type = 3;
+    zk.common.v1.OpenCloseType openclose_type = 4;
+    zk.common.v1.BasicOrderType order_type = 5;
+    zk.exch_gw.v1.OrderReport order_report = 6;
+    double leverage = 11;
+    int64 timestamp = 12;
+    string exch_order_original = 13;
+}
+
+message CancelOrderRequest {
+    string exch_order_ref = 1;
+    int64 order_id = 2;
+    zk.common.v1.ExtraData exch_specific_params = 3;
+    int64 timestamp = 4;
+}
+
+message BatchCancelOrdersRequest {
+    repeated CancelOrderRequest cancel_requests = 1;
+}
+
+message AmendOrderRequest {
+    string exch_order_ref = 1;
+    // TBA
+}
+
+message GatewayCommandRequest {
+    enum CommandType {
+        CMD_TYPE_UNSPECIFIED = 0;
+        CMD_TYPE_RECONNECT_EXCH = 1;
+        CMD_TYPE_PUBLISH_ACCOUNT = 2;
+        CMD_TYPE_USER_DEFINED = 3;
+    }
+    CommandType command_type = 1;
+    string command_source_id = 2;
+    string command_payload = 3;
+}
+
+message GatewayResponse {
+    enum Status {
+        GW_RESP_STATUS_UNSPECIFIED = 0;
+        GW_RESP_STATUS_SUCCESS = 1;
+        GW_RESP_STATUS_FAIL = 2;
+    }
+    int64 timestamp = 1;
+    Status status = 2;
+    int64 error_code = 4;       // deprecated
+    string message = 5;         // deprecated
+    zk.common.v1.Rejection rejection_info = 6;
+}
+
+message SingleOrderQuery {
+    string exch_order_ref = 1;
+    int64 order_id = 2;
+    string symbol = 3;
+    string exch_account = 4;
+}
+
+message QueryAccountRequest {
+    repeated string explicit_symbols = 1;
+}
+
+message AccountResponse {
+    string exch_account_code = 1;
+    zk.exch_gw.v1.BalanceUpdate balance_update = 4;
+    int64 timestamp = 3;
+}
+
+message QueryPositionRequest {}
+
+message PositionResponse {}
+
+message QueryOpenOrderRequest {
+    string exch_account_code = 1;
+}
+
+message QueryOrderDetailRequest {
+    repeated SingleOrderQuery order_queries = 1;
+}
+
+message OrderDetailResponse {
+    repeated ExchOrder orders = 1;
+}
+
+message QueryTradeDetailRequest {
+    string exch_account_id = 1;
+    string instrument_code = 2;
+    int64 start_ts = 3;
+    int64 end_ts = 4;
+    int64 limit = 5;
+}
+
+message HistoryTradeRecord {
+    string exch_order_ref = 1;
+    zk.exch_gw.v1.OrderInfo order_info = 2;
+    zk.exch_gw.v1.TradeReport trade = 3;
+    zk.exch_gw.v1.FeeReport fee = 4;
+    repeated zk.exch_gw.v1.FeeReport extra_fees = 5;
+    int64 timestamp = 6;
+    string idx = 7;
+}
+
+message TradeDetailResponse {
+    repeated HistoryTradeRecord history_trades = 1;
+}
+
+message QueryFeeRequest {
+    string instrument_code = 1;
+    int64 start_ts = 2;
+    int64 end_ts = 3;
+    string exch_account_id = 4;
+    zk.common.v1.FeeType fee_types = 5;
+    int64 limit = 6;
+}
+
+message FeeResponse {
+    repeated zk.exch_gw.v1.FeeReport fees = 1;
+}
+
+message QueryOrderTradesRequest {
+    string exch_order_ref = 1;
+    string instrument_exch = 2;
+}
+
+message OrderTradesResponse {
+    string order_id = 1;
+    string exch_order_ref = 2;
+    string instrument_exch = 3;
+    zk.common.v1.BuySellType buysell_type = 4;
+    repeated ExchTrade exch_trades = 5;
+}
+
+message ExchTrade {
+    zk.exch_gw.v1.TradeReport trade_report = 1;
+    zk.exch_gw.v1.FeeReport fee_report = 2;
+}
+
+message GenericRequest {
+    string request_json = 1;
+}
+
+message GenericResponse {
+    string response_json = 1;
+}
+
+message AccountSettingRequest {
+    zk.exch_gw.v1.AccountSettingEntry account_setting_entry = 1;
+}
+
+message AccountSettingUpdateResponse {
+    bool margin_mode_changed = 1;
+    bool leverage_changed = 2;
+    string err_msg = 3;
+}
+
+message QueryAccountSettingRequest {
+    string exch_account_id = 1;
+    string instrument = 2;
+}
+
+message AccountSettingResponse {
+    zk.exch_gw.v1.AccountSettingEntry account_setting_entry = 1;
+    string original_info = 2;
+}
+
+// GatewayService — replaces legacy ExchangeGatewayService in tqrpc_exch_gw.
+service GatewayService {
+    rpc PlaceOrder(SendOrderRequest) returns (GatewayResponse);
+    rpc BatchPlaceOrders(BatchSendOrdersRequest) returns (GatewayResponse);
+    rpc CancelOrder(CancelOrderRequest) returns (GatewayResponse);
+    rpc BatchCancelOrders(BatchCancelOrdersRequest) returns (GatewayResponse);
+
+    rpc QueryAccountBalance(QueryAccountRequest) returns (AccountResponse);
+    rpc QueryPosition(QueryPositionRequest) returns (PositionResponse);
+    rpc QueryOrderDetails(QueryOrderDetailRequest) returns (OrderDetailResponse);
+    rpc QueryAccountFees(QueryFeeRequest) returns (FeeResponse);
+    rpc QueryOrderTrades(QueryOrderTradesRequest) returns (OrderTradesResponse);
+
+    rpc GenericRpcCall(GenericRequest) returns (GenericResponse);
+
+    rpc HealthCheck(zk.common.v1.DummyRequest) returns (zk.common.v1.ServiceHealthResponse);
+}

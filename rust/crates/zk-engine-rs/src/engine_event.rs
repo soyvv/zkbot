@@ -6,9 +6,9 @@
 /// them serially, one at a time (no concurrent strategy calls).
 use std::collections::HashMap;
 
-use zk_proto_rs::{
-    oms::{OrderUpdateEvent, PositionUpdateEvent},
-    rtmd::{Kline, RealtimeSignal, TickData},
+use zk_proto_rs::zk::{
+    oms::v1::{OrderUpdateEvent, PositionUpdateEvent},
+    rtmd::v1::{Kline, RealtimeSignal, TickData},
 };
 
 #[derive(Debug, Clone)]

@@ -1,8 +1,11 @@
 use zk_proto_rs::{
-    common::InstrumentRefData,
-    tqrpc_exch_gw::{ExchCancelOrderRequest, ExchSendOrderRequest, ExchBatchSendOrdersRequest, ExchBatchCancelOrdersRequest},
+    zk::{
+        common::v1::InstrumentRefData,
+        exch_gw::v1::{BalanceUpdate, OrderReport},
+        gateway::v1::{CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest, BatchSendOrdersRequest as ExchBatchSendOrdersRequest, BatchCancelOrdersRequest as ExchBatchCancelOrdersRequest},
+        oms::v1::{ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest, OrderUpdateEvent, PositionUpdateEvent, Position, Trade},
+    },
     ods::{GwConfigEntry, OmsRouteEntry},
-    oms::{ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest, OrderUpdateEvent, PositionUpdateEvent, Position, Trade},
 };
 use crate::config::InstrumentTradingConfig;
 
@@ -38,7 +41,7 @@ pub struct OmsOrder {
 
 impl OmsOrder {
     pub fn is_in_terminal_state(&self) -> bool {
-        use zk_proto_rs::oms::OrderStatus;
+        use zk_proto_rs::zk::oms::v1::OrderStatus;
         matches!(
             OrderStatus::try_from(self.order_state.order_status),
             Ok(OrderStatus::Filled)
@@ -63,7 +66,7 @@ pub struct OmsPosition {
 
 impl OmsPosition {
     pub fn new(account_id: i64, symbol: impl Into<String>, instrument_type: i32, is_short: bool, is_from_exch: bool) -> Self {
-        use zk_proto_rs::common::LongShortType;
+        use zk_proto_rs::zk::common::v1::LongShortType;
         let symbol = symbol.into();
         let mut pos_state = Position::default();
         pos_state.account_id = account_id;
@@ -128,8 +131,8 @@ pub enum OmsMessage {
     BatchPlaceOrders(Vec<OrderRequest>),
     CancelOrder(OrderCancelRequest),
     BatchCancelOrders(Vec<OrderCancelRequest>),
-    GatewayOrderReport(zk_proto_rs::exch_gw::OrderReport),
-    BalanceUpdate(zk_proto_rs::exch_gw::BalanceUpdate),
+    GatewayOrderReport(OrderReport),
+    BalanceUpdate(BalanceUpdate),
     RecheckOrder(OrderRecheckRequest),
     RecheckCancel(CancelRecheckRequest),
     Panic { account_id: i64 },
@@ -151,6 +154,8 @@ pub enum OmsAction {
     SendOrderToGw {
         gw_key: String,
         request: ExchSendOrderRequest,
+        order_id: i64,          // for latency tracking
+        order_created_at: i64,  // Order.created_at in ms (= OrderRequest.timestamp)
     },
     /// Send a batch of orders to the gateway (if the exchange supports it).
     BatchSendOrdersToGw {

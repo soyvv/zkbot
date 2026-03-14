@@ -1,0 +1,278 @@
+syntax = "proto3";
+package zk.oms.v1;
+
+import "zk/common/v1/common.proto";
+
+// ===== Enums (from oms.proto, values preserved) =====
+
+enum OrderStatus {
+    ORDER_STATUS_UNSPECIFIED = 0;
+    ORDER_STATUS_PENDING = 1;
+    ORDER_STATUS_BOOKED = 2;
+    ORDER_STATUS_PARTIALLY_FILLED = 3;
+    ORDER_STATUS_FILLED = 4;
+    ORDER_STATUS_CANCELLED = 5;
+    ORDER_STATUS_REJECTED = 6;
+}
+
+enum ExecType {
+    EXEC_TYPE_UNSPECIFIED = 0;
+    EXEC_TYPE_CANCEL = 1;
+    EXEC_TYPE_PLACING_ORDER = 2;
+}
+
+// ===== OMS error / response types (merged from tqrpc_oms) =====
+
+enum OMSErrorType {
+    OMS_ERR_TYPE_UNSPECIFIED = 0;
+    OMS_ERR_TYPE_INVALID_REQ = 2;
+    OMS_ERR_TYPE_REQUEST_REJECTED = 3;
+    OMS_ERR_TYPE_LIMIT_EXCEEDED = 4;
+    OMS_ERR_TYPE_INTERNAL_ERROR = 5;
+}
+
+// ===== Domain messages (from oms.proto, field numbers preserved) =====
+
+message Account {
+    int64 account_id = 1;
+    string account_code = 2;
+    string exch_account_code = 3;
+    zk.common.v1.ExtraData per_account_setting = 4;
+}
+
+message OrderRequest {
+    int64 order_id = 1;
+    int64 account_id = 2;
+    string instrument_code = 3;
+    zk.common.v1.BuySellType buy_sell_type = 4;
+    zk.common.v1.OpenCloseType open_close_type = 5;
+    zk.common.v1.BasicOrderType order_type = 6;
+    double price = 7;
+    double qty = 8;
+    string source_id = 9;
+    int64 timestamp = 10;
+    double leverage = 11;
+    zk.common.v1.ExtraData extra_properties = 12;
+    zk.common.v1.TimeInForceType time_inforce_type = 13;
+    repeated zk.common.v1.ExtraOrderTagType extra_order_tags = 14;
+}
+
+message OrderCancelRequest {
+    int64 order_id = 1;
+    string exch_order_ref = 2;
+    zk.common.v1.ExtraData extra_info_required = 3;
+    string sourceId = 7;
+    int64 timestamp = 8;
+}
+
+message Order {
+    int64 order_id = 1;
+    string exch_order_ref = 2;
+    int32 snapshot_version = 3;
+    string instrument = 4;
+    zk.common.v1.BuySellType buy_sell_type = 5;
+    zk.common.v1.OpenCloseType open_close_type = 6;
+    double price = 7;
+    double qty = 8;
+    double filled_qty = 9;
+    double filled_avg_price = 10;
+    string error_msg = 11;
+    string source_id = 12;
+    int64 created_at = 13;
+    int64 updated_at = 14;
+    OrderStatus order_status = 15;
+    string gw_key = 16;
+    string instrument_exch = 17;
+    int64 account_id = 18;
+}
+
+message Fee {
+    int64 order_id = 1;
+    string fee_symbol = 2;
+    double fee_amount = 3;
+    zk.common.v1.FeeType fee_type = 4;
+    int64 fee_ts = 5;
+}
+
+message Trade {
+    int64 order_id = 1;
+    string ext_order_ref = 2;
+    string ext_trade_id = 3;
+    double filled_qty = 4;
+    double filled_price = 5;
+    int64 filled_ts = 6;
+    zk.common.v1.BuySellType buy_sell_type = 7;
+    string instrument = 8;
+    int64 account_id = 9;
+    zk.common.v1.FillType fill_type = 10;
+    repeated Fee fees = 11;
+    double exch_pnl = 12;
+}
+
+message ExecMessage {
+    int64 order_id = 1;
+    string exch_order_ref = 2;
+    int64 timestamp = 3;
+    ExecType exec_type = 4;
+    bool exec_success = 5;
+    string error_msg = 6;
+    zk.common.v1.Rejection rejection_info = 7;
+}
+
+message Position {
+    int64 account_id = 1;
+    string instrument_code = 2;
+    zk.common.v1.LongShortType long_short_type = 3;
+    zk.common.v1.InstrumentType instrument_type = 4;
+    double total_qty = 5;
+    double frozen_qty = 6;
+    double avail_qty = 7;
+    int64 sync_timestamp = 8;
+    int64 update_timestamp = 9;
+    bool is_from_exch = 10;
+    string exch_data_raw = 11;
+    double contract_size = 12;
+    zk.common.v1.MarginPositionInfo margin_pos_info = 13;
+    bool contract_size_adjusted = 14;
+}
+
+message OrderUpdateEvent {
+    int64 order_id = 1;
+    int64 account_id = 2;
+    Order order_snapshot = 3;
+    Trade last_trade = 4;
+    Fee last_fee = 5;
+    ExecMessage exec_message = 6;
+    int64 timestamp = 7;
+    string order_source_id = 8;
+    Trade order_inferred_trade = 9;
+    int64 gw_report_timestamp_ns = 10;  // = OrderReport.update_timestamp × 1e6; 0 if not a GW report
+    int64 gw_received_at_ns = 11;       // = OrderReport.gw_received_at_ns; 0 if not a GW report
+}
+
+message PositionUpdateEvent {
+    int64 account_id = 1;
+    repeated Position position_snapshots = 2;
+    int64 timestamp = 4;
+}
+
+message OMSSystemEvent {
+    int64 timestamp = 1;
+    string oms_id = 2;
+    string event_type = 3;
+    string event_message = 4;
+}
+
+// ===== RPC request/response messages (merged from tqrpc_oms, field numbers preserved) =====
+
+message OMSResponse {
+    enum Status {
+        OMS_RESP_STATUS_UNSPECIFIED = 0;
+        OMS_RESP_STATUS_SUCCESS = 1;
+        OMS_RESP_STATUS_FAIL = 2;
+    }
+    int64 timestamp = 1;
+    Status status = 2;
+    OMSErrorType error_type = 3;
+    string message = 4;
+}
+
+message PlaceOrderRequest {
+    OrderRequest order_request = 1;
+    zk.common.v1.AuditMeta audit_meta = 2;
+    string idempotency_key = 3;
+}
+
+message CancelOrderRequest {
+    OrderCancelRequest order_cancel_request = 1;
+    zk.common.v1.AuditMeta audit_meta = 2;
+    string idempotency_key = 3;
+}
+
+message BatchPlaceOrdersRequest {
+    repeated OrderRequest order_requests = 1;
+    zk.common.v1.AuditMeta audit_meta = 2;
+}
+
+message BatchCancelOrdersRequest {
+    repeated OrderCancelRequest order_cancel_requests = 1;
+    zk.common.v1.AuditMeta audit_meta = 2;
+}
+
+message AlgoOrderRequest {
+    int64 algo_order_id = 1;
+    repeated OrderRequest order_requests = 2;
+    string algo_type = 3;
+    string algo_config = 4;
+}
+
+message CancelAlgoOrderRequest {
+    int64 algo_order_id = 1;
+}
+
+message QueryAccountRequest {
+    int64 account_id = 1;
+    bool query_gw = 2;
+    zk.common.v1.PaginationRequest pagination = 3;
+}
+
+message AccountResponse {
+    int64 account_id = 1;
+    repeated Position account_balance_entries = 2;
+    int64 timestamp = 3;
+}
+
+message QueryPositionRequest {
+    int64 account_id = 1;
+    bool query_gw = 2;
+}
+
+message PositionResponse {
+    repeated Position positions = 1;
+}
+
+message QueryOpenOrderRequest {
+    int64 account_id = 1;
+    bool query_gw = 2;
+    zk.common.v1.PaginationRequest pagination = 3;
+}
+
+message QueryOrderDetailRequest {
+    repeated string order_refs = 1;
+    bool query_gw = 2;
+}
+
+message OrderDetailResponse {
+    repeated Order orders = 1;
+    zk.common.v1.PaginationResponse pagination = 2;
+}
+
+message QueryTradeDetailRequest {
+    repeated string order_refs = 1;
+    bool query_gw = 2;
+    zk.common.v1.PaginationRequest pagination = 3;
+}
+
+message TradeDetailResponse {
+    repeated Trade trades = 1;
+    zk.common.v1.PaginationResponse pagination = 2;
+}
+
+message QueryInstrumentRefdataRequest {
+    int64 account_id = 1;
+    repeated string instruments = 2;
+}
+
+message QueryInstrumentRefdataResponse {
+    repeated zk.common.v1.InstrumentRefData instrument_refdata = 1;
+}
+
+message PanicRequest {
+    int64 panic_account_id = 1;
+    string panic_message = 2;
+    string panic_source = 3;
+}
+
+message DontPanicRequest {
+    int64 panic_account_id = 1;
+}

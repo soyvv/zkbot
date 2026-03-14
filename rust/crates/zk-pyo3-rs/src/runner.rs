@@ -32,9 +32,9 @@ use zk_backtest_rs::{
     event_queue::BtEventKind,
     match_policy::{FirstComeFirstServedMatchPolicy, ImmediateMatchPolicy},
 };
-use zk_proto_rs::{
-    common::{BuySellType, InstrumentRefData},
-    rtmd::{kline::KlineType, Kline},
+use zk_proto_rs::zk::{
+    common::v1::{BuySellType, InstrumentRefData},
+    rtmd::v1::{kline::KlineType, Kline},
 };
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};

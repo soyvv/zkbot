@@ -1,0 +1,29 @@
+syntax = "proto3";
+package zk.monitor.v1;
+
+message NotificationEvent {
+    string severity     = 1;  // INFO | WARN | CRITICAL
+    string source       = 2;
+    string channel      = 3;
+    string message      = 4;
+    int64  timestamp_ms = 5;
+    map<string, string> tags = 6;
+}
+
+message ReconResult {
+    string recon_type     = 1;  // ORDER | BALANCE | POSITION | TRADE
+    int64  account_id     = 2;
+    string oms_id         = 3;
+    int32  mismatch_count = 4;
+    string detail         = 5;
+    int64  run_at_ms      = 6;
+}
+
+message AlertRule {
+    string rule_id    = 1;
+    string metric     = 2;
+    string condition  = 3;  // e.g., "> 100"
+    string severity   = 4;
+    string channel    = 5;
+    bool   enabled    = 6;
+}

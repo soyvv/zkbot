@@ -87,7 +87,7 @@ message ExchErrorInfo {
 message OrderReport {
     string exchange = 3;
     int64 account_id = 5;
-     
+
     string exch_order_ref = 1; // required
     int64 order_id = 2; // optional
     string extra_order_id = 7; // optional
@@ -95,6 +95,7 @@ message OrderReport {
 
     repeated OrderReportEntry order_report_entries = 4;
     int64 update_timestamp = 6;
+    int64 gw_received_at_ns = 9;  // local_ns() at GW handler entry; 0 if not set
 }
 
 

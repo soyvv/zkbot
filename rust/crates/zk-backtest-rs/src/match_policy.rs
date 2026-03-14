@@ -1,4 +1,4 @@
-use zk_proto_rs::{common::BuySellType, rtmd::TickData};
+use zk_proto_rs::zk::{common::v1::BuySellType, rtmd::v1::TickData};
 
 use crate::models::{MatchResult, SimOrder};
 

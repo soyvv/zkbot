@@ -15,6 +15,11 @@ bytes     = "1"
 # config — env-var loading into typed structs
 envy = "0.4"
 
+# Proto types (for service-registry discovery decoding)
+prost        = { workspace = true }
+futures      = "0.3"
+zk-proto-rs  = { path = "../zk-proto-rs" }
+
 # NATS messaging + JetStream KV
 async-nats = "0.37"
 

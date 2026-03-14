@@ -39,7 +39,7 @@ Add the following modules to `zkbot/rust/crates/zk-infra-rs/src/`:
 #### `nats.rs` — NATS connection and pub/sub helpers
 - `NatsConfig { url, creds_path, max_reconnects }`
 - `connect(config: &NatsConfig) -> Result<async_nats::Client>`
-- `subject_builder` module: typed helpers to construct topic strings per [05-api-contracts.md](../05-api-contracts.md)
+- `subject_builder` module: typed helpers to construct topic strings per [api_contracts.md](../../system-arch/api_contracts.md)
   - `oms_order_update(oms_id, account_id) -> String`
   - `oms_balance_update(oms_id, asset) -> String`
   - `oms_position_update(oms_id, instrument) -> String`
@@ -81,7 +81,7 @@ Add the following modules to `zkbot/rust/crates/zk-infra-rs/src/`:
 
 #### `metrics.rs` — Prometheus metrics registry
 - `init_metrics_server(port: u16)` — starts metrics HTTP endpoint
-- Common histogram/counter constructors matching the metric names in [09-ops-design.md](../09-ops-design.md)
+- Common histogram/counter constructors matching the metric names in [ops.md](../../system-arch/ops.md)
 
 #### `tracing.rs` — OpenTelemetry init
 - `init_tracing(service_name: &str)` — sets up JSON logging + OTel SDK

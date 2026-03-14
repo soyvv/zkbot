@@ -7,6 +7,26 @@ Implement:
 2. **Pilot bootstrap subjects** — NATS request/reply handlers (`zk.bootstrap.register` etc.) for first-registration authorization
 3. **`instance_id` lease management** — `cfg.instance_id_lease` table + Pilot validation to prevent Snowflake ID collisions
 
+## Design Principle
+
+Keep the service discovery mechanism stable and business-agnostic.
+
+That means:
+
+- the NATS KV registry should expose a generic `ServiceRegistration` contract
+- Pilot should interpret business meaning from control-plane metadata
+- service-specific policies should live in Pilot configuration/validation, not in the registry protocol itself
+
+Examples of registration kinds Pilot may support:
+
+- `gw`
+- `oms`
+- `strategy`
+- `oms+gw`
+- `oms+gw+strategy`
+
+The registry/discovery path should not require a separate protocol for each of these combinations.
+
 ## Prerequisites
 
 - Phase 1 complete (`zk-infra-rs`, proto)
@@ -57,6 +77,11 @@ Heartbeat loop (internal):
 - `lease_expiry_ms: i64`
 - `updated_at_ms: i64`
 
+Architecture reference:
+
+- [Service Discovery](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/service_discovery.md)
+- [Topology Registration](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/topology_registration.md)
+
 ### 4.2 Pilot bootstrap NATS handlers
 
 Location: `zkbot/services/zk-pilot/` (Python, as part of the Pilot service skeleton)
@@ -71,12 +96,14 @@ For Phase 4 this is a **minimal standalone bootstrap service** that handles regi
 async def handle_register(msg: NatsMsg):
     req = BootstrapRegisterRequest.parse(msg.data)
     # 1. validate token (check cfg.service_token table in PG)
-    # 2. check for duplicate logical_id (same instance_type+logical_id already active)
-    # 3. if instance_type == 'engine': validate instance_id lease via cfg.instance_id_lease
-    # 4. generate owner_session_id (UUID)
-    # 5. issue scoped NATS credential (or return existing shared cred for dev)
-    # 6. record session in cfg.bootstrap_session (for audit/revocation)
-    # 7. reply with BootstrapRegisterResponse
+    # 2. load logical_instance metadata / registration profile from Pilot DB
+    # 3. check duplicate policy for the logical identity
+    # 4. apply type-specific rules from metadata/profile
+    #    (engine lease, strategy singleton, composite role constraints, etc.)
+    # 5. generate owner_session_id (UUID)
+    # 6. issue scoped NATS credential (or return existing shared cred for dev)
+    # 7. record session / audit state
+    # 8. reply with BootstrapRegisterResponse
     await msg.respond(response.serialize())
 ```
 
@@ -125,6 +152,10 @@ create table cfg.instance_id_lease (
 );
 ```
 
+Architecture reference:
+
+- [Topology Registration](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/topology_registration.md)
+
 #### Token validation
 
 For dev/test: `cfg.service_token` is pre-seeded with known tokens (from `01_seed.sql`).
@@ -159,6 +190,11 @@ Auto-expiry: a cleanup job runs every minute:
 DELETE FROM cfg.instance_id_lease WHERE leased_until < now();
 ```
 
+Generalization rule:
+
+- `instance_id` leasing is an engine-specific Pilot policy layered on top of the generic bootstrap/session model
+- adding new registration kinds should not require changing the generic KV discovery contract
+
 ### 4.3 `KvDiscoveryClient` — `zk-infra-rs`
 
 Location: `zkbot/rust/crates/zk-infra-rs/src/nats_kv_discovery.rs`
@@ -182,6 +218,10 @@ impl KvDiscoveryClient {
     pub fn on_change(&self, prefix: &str, callback: impl Fn(KeyChange) + Send + 'static);
 }
 ```
+
+Architecture reference:
+
+- [Service Discovery](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/service_discovery.md)
 
 ## Tests
 

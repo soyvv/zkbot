@@ -2,8 +2,10 @@ use std::collections::HashMap;
 
 use tracing::error;
 use zk_proto_rs::{
-    common::{InstrumentRefData, LongShortType},
-    exch_gw::BalanceUpdate,
+    zk::{
+        common::v1::{InstrumentRefData, LongShortType},
+        exch_gw::v1::BalanceUpdate,
+    },
     ods::{GwConfigEntry, OmsRouteEntry},
 };
 
@@ -108,7 +110,7 @@ impl BalanceManager {
             let pos = OmsPosition::new(
                 account_id,
                 symbol,
-                zk_proto_rs::common::InstrumentType::InstTypeSpot as i32,
+                zk_proto_rs::zk::common::v1::InstrumentType::InstTypeSpot as i32,
                 is_short,
                 use_exch_data,
             );
@@ -280,9 +282,9 @@ impl BalanceManager {
         account_id: i64,
         use_exch_data: bool,
         ts: i64,
-    ) -> zk_proto_rs::oms::PositionUpdateEvent {
+    ) -> zk_proto_rs::zk::oms::v1::PositionUpdateEvent {
         let positions = self.get_balances_for_account(account_id, use_exch_data);
-        let mut event = zk_proto_rs::oms::PositionUpdateEvent::default();
+        let mut event = zk_proto_rs::zk::oms::v1::PositionUpdateEvent::default();
         event.account_id = account_id;
         event.position_snapshots = positions.iter().map(|p| p.position_state.clone()).collect();
         event.timestamp = ts;
@@ -296,7 +298,7 @@ impl BalanceManager {
         symbols: &[String],
         use_exch_data: bool,
         ts: i64,
-    ) -> zk_proto_rs::oms::PositionUpdateEvent {
+    ) -> zk_proto_rs::zk::oms::v1::PositionUpdateEvent {
         let src = if use_exch_data { &self.exch_balances } else { &self.balances };
         let snapshots: Vec<_> = symbols
             .iter()
@@ -304,7 +306,7 @@ impl BalanceManager {
             .map(|p| p.position_state.clone())
             .collect();
 
-        let mut event = zk_proto_rs::oms::PositionUpdateEvent::default();
+        let mut event = zk_proto_rs::zk::oms::v1::PositionUpdateEvent::default();
         event.account_id = account_id;
         event.position_snapshots = snapshots;
         event.timestamp = ts;

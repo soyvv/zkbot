@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-use zk_proto_rs::common::InstrumentRefData;
+use zk_proto_rs::zk::common::v1::InstrumentRefData;
 use zk_strategy_sdk_rs::{
     context::StrategyContext,
     models::{SAction, TimerSchedule},
@@ -80,11 +80,11 @@ impl ProgressTracker {
 pub struct BacktestResult {
     /// (ts_ms, strategy_order) for each placement emitted by the strategy.
     pub order_placements: Vec<(i64, zk_strategy_sdk_rs::models::StrategyOrder)>,
-    pub order_updates: Vec<zk_proto_rs::oms::OrderUpdateEvent>,
-    pub position_updates: Vec<zk_proto_rs::oms::PositionUpdateEvent>,
+    pub order_updates: Vec<zk_proto_rs::zk::oms::v1::OrderUpdateEvent>,
+    pub position_updates: Vec<zk_proto_rs::zk::oms::v1::PositionUpdateEvent>,
     pub logs: Vec<zk_strategy_sdk_rs::models::StrategyLog>,
     /// All fills extracted from `OrderUpdateEvent.last_trade`.
-    pub trades: Vec<zk_proto_rs::oms::Trade>,
+    pub trades: Vec<zk_proto_rs::zk::oms::v1::Trade>,
 }
 
 // ---------------------------------------------------------------------------

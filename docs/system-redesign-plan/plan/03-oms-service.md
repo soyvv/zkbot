@@ -20,6 +20,12 @@ Wrap `zk-oms-rs` in a production-ready gRPC service binary (`zk-oms-svc`) that:
 
 Location: `zkbot/rust/crates/zk-oms-svc/`
 
+Architecture reference:
+
+- [OMS Service](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/oms_service.md)
+- [Gateway Service](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/gateway_service.md)
+- [Service Discovery](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/service_discovery.md)
+
 #### `main.rs` — bootstrap
 1. load `OmsSvcConfig` from env (`ZK_NATS_URL`, `ZK_PG_URL`, `ZK_REDIS_URL`, `ZK_OMS_ID`, `ZK_GRPC_PORT`)
 2. init tracing + metrics
@@ -35,23 +41,6 @@ Location: `zkbot/rust/crates/zk-oms-svc/`
 12. start periodic tasks (order resync 60s, balance resync 60s, cleanup 10min)
 
 #### `oms_state.rs` — OmsCore actor + read replica
-
-The OMS service uses a **single-writer actor + read replica** pattern to separate mutation from reads without locking `OmsCore`.
-
-```
-                   mpsc::Sender<OmsCommand>
-PlaceOrder gRPC ──────────────────────────────────► OmsCore writer task (single)
-CancelOrder gRPC ─────────────────────────────────►   process_message()
-NATS report sub ──────────────────────────────────►   dispatch GW / NATS / Redis
-                                                       take_snapshot()
-                                                       replica.store(Arc::new(snap))
-                                                               │
-                                                    ArcSwap<OmsSnapshot>
-                                                               │
-QueryOpenOrders gRPC ◄──── replica.load() ◄──────────────────┘
-QueryBalances gRPC   ◄──── replica.load()
-QueryPositions gRPC  ◄──── replica.load()
-```
 
 ```rust
 // Shared read replica type
@@ -103,11 +92,9 @@ impl OmsCore {
 }
 ```
 
-`arc-swap` is a pure concurrency primitive (no I/O). `replica.store()` is a single atomic pointer swap. `replica.load()` returns an `Arc<OmsSnapshot>` — the reader holds a ref to the snapshot at that instant; a concurrent writer swap does not invalidate it.
-
 #### `grpc_handler.rs` — `OMSService` implementation
 
-Implement all RPCs from [05-api-contracts.md](../05-api-contracts.md) §2.1.
+Implement all RPCs from [api_contracts.md](../../system-arch/api_contracts.md) §2.1.
 
 The handler struct holds both the command sender (for mutations) and the read replica (for queries):
 

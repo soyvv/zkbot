@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 use zk_engine_rs::{EngineEvent, LiveEngine, RecordingDispatcher};
-use zk_proto_rs::{
-    common::{BuySellType, InstrumentRefData},
-    rtmd::{Kline, TickData},
+use zk_proto_rs::zk::{
+    common::v1::{BuySellType, InstrumentRefData},
+    rtmd::v1::{Kline, TickData},
 };
 use zk_strategy_sdk_rs::{
     context::StrategyContext,
@@ -33,7 +33,7 @@ impl Strategy for BarCountStrategy {
         })]
     }
 
-    fn on_bar(&mut self, _bar: &zk_proto_rs::rtmd::Kline, _ctx: &StrategyContext) -> Vec<SAction> {
+    fn on_bar(&mut self, _bar: &zk_proto_rs::zk::rtmd::v1::Kline, _ctx: &StrategyContext) -> Vec<SAction> {
         *self.bar_count.lock().unwrap() += 1;
         vec![]
     }

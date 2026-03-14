@@ -98,17 +98,53 @@ POST   /v1/oms/{oms_id}/reload          -- trigger ReloadConfig on live OMS
 - call `OMSService::ReloadConfig(ReloadConfigRequest{})`
 - return result
 
-#### MDGW subscription endpoints
+#### RTMD gateway subscription endpoints
 
 ```
-GET    /v1/mdgw/subscriptions           -- list subscriptions
-POST   /v1/mdgw/subscriptions           -- add subscription (upsert by venue+instrument)
-DELETE /v1/mdgw/subscriptions/{id}      -- disable subscription
-POST   /v1/mdgw/subscriptions/reload    -- trigger reload on MDGW for venue
+GET    /v1/mdgw/subscriptions                    -- list control-plane policy/default subscriptions
+POST   /v1/mdgw/subscriptions                    -- add or update control-plane policy/default
+DELETE /v1/mdgw/subscriptions/{id}               -- disable control-plane policy/default
+POST   /v1/mdgw/subscriptions/reload             -- trigger reload for venue or logical RTMD gateway
+GET    /v1/mdgw/subscriptions/effective          -- inspect effective desired set for a target
 ```
+
+Pilot is not the runtime hub for RTMD subscription changes.
+
+Runtime clients should publish live subscription interest directly through NATS-side mechanisms,
+and RTMD gateways should react to that quickly. Pilot owns the control-plane policy/default layer
+and should observe the live subscription state for topology/debugging.
+
+Recommended separation:
+
+- `zk.svc.registry.v1` for service discovery/liveness
+- `zk.rtmd.subs.v1` for dynamic RTMD subscription leases
+
+Recommended request fields:
+
+- `venue`
+- `instrument_exch`
+- `channel_types`
+- `kline_intervals`
+- `requested_by`
+- `target_logical_id` (optional; used for embedded or logical-instance-scoped RTMD runtimes)
+- `scope_kind`: `global` | `logical_instance`
+
+Policy/default rule:
+
+- `global` rows contribute to the shared venue-wide RTMD gateway set
+- `logical_instance` rows contribute only to the targeted standalone or embedded RTMD runtime
+- Pilot may merge policy/default rows into one control-plane view per `(venue, target scope)`
 
 `POST /v1/mdgw/subscriptions/reload`:
-- publish `zk.control.mdgw.<venue>.reload` on NATS
+
+- if `target_logical_id` is provided: publish `zk.control.mdgw.<target_logical_id>.reload`
+- else: publish `zk.control.mdgw.<venue>.reload`
+
+`GET /v1/mdgw/subscriptions/effective`:
+
+- resolves the current merged view for a given `venue` and optional `target_logical_id`
+- should include both live runtime interest and Pilot policy/default context where possible
+- useful for debugging standalone and embedded RTMD gateway behavior without making Pilot the live hub
 
 #### Refdata endpoints
 
@@ -121,7 +157,7 @@ GET    /v1/refdata/instruments/{venue}/{instrument_exch}  -- single instrument
 
 Language: Python (grpcio)
 
-Implement all RPCs from [05-api-contracts.md](../05-api-contracts.md) §2.4:
+Implement all RPCs from [api_contracts.md](../../system-arch/api_contracts.md) §2.4:
 
 **Control:**
 - `StartEngine`: calls internal process manager or Kubernetes API to start engine pod
@@ -148,6 +184,7 @@ Promote the Phase 4 minimal bootstrap service into the full Pilot process:
 Pilot watches `zk.svc.registry.v1` bucket and caches all `ServiceRegistration` entries in memory. Used by:
 - `QueryServiceTopology` gRPC
 - `ReloadOmsConfig` (to resolve OMS gRPC endpoint)
+- RTMD gateway reload targeting and liveness checks
 - Operator dashboard (via REST `/v1/topology`)
 
 ```python
@@ -202,7 +239,8 @@ class PilotLeaderElection:
 - `test_strategy_inst_post_registers_execution`: POST with valid strategy_key → assert `cfg.strategy_execution` row created, config returned
 - `test_strategy_inst_post_instance_id_conflict`: POST with already-leased `instance_id` → assert 409 response
 - `test_strategy_inst_delete_releases_lease`: DELETE → assert `cfg.instance_id_lease` row removed
-- `test_mdgw_reload_publishes_nats_event`: POST `/v1/mdgw/subscriptions/reload` → assert NATS `zk.control.mdgw.<venue>.reload` published
+- `test_mdgw_reload_publishes_targeted_nats_event`: POST `/v1/mdgw/subscriptions/reload` with `target_logical_id` → assert NATS `zk.control.mdgw.<logical_id>.reload` published
+- `test_mdgw_effective_set_merges_requests`: multiple desired rows for the same scope → assert Pilot returns a merged effective subscription set
 - `test_topology_watcher_resolves_oms_endpoint`: populate KV with OMS entry → assert `get_oms_endpoint(oms_id)` returns correct address
 - `test_leader_election_single_instance_acquires`: single Pilot instance → `is_leader()` returns `True` within 5s
 - `test_leader_election_failover`: simulate primary Pilot crash → secondary acquires within 10s + 5s TTL
@@ -225,6 +263,10 @@ class PilotLeaderElection:
 - `test_pilot_topology_rest`:
   1. start OMS + mock-gw + Pilot
   2. GET `/v1/topology` → assert both `svc.oms.*` and `svc.gw.*` present in response
+- `test_pilot_rtmd_reload_targets_embedded_runtime`:
+  1. start Pilot and an engine registered as `engine+mdgw`
+  2. POST `/v1/mdgw/subscriptions/reload` with the engine's RTMD logical target
+  3. assert `zk.control.mdgw.<logical_id>.reload` is published and observed by the embedded runtime
 - `test_pilot_ha_leader_failover` (requires two Pilot replicas):
   1. start two Pilot instances
   2. confirm one is leader
@@ -238,7 +280,8 @@ class PilotLeaderElection:
 - [ ] `DELETE /v1/strat/strategy-inst` works: row deregistered, lease released
 - [ ] `GET /v1/topology` returns live NATS KV entries
 - [ ] `POST /v1/oms/{oms_id}/reload` calls OMS gRPC `ReloadConfig`
-- [ ] `POST /v1/mdgw/subscriptions/reload` publishes NATS control event
+- [ ] `POST /v1/mdgw/subscriptions/reload` can target either a venue-wide RTMD gateway or a logical embedded runtime
+- [ ] Pilot can return the effective desired RTMD subscription set for debugging and reconciliation
 - [ ] Bootstrap NATS subjects functional (from Phase 4 stub promoted to full Pilot)
 - [ ] Leader election: single Pilot acquires leadership within 5s
 - [ ] HA failover: second Pilot acquires leadership within 15s after primary fails

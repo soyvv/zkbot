@@ -12,7 +12,7 @@
 ///   on_order_update, on_timer are also tried as fallbacks.
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use zk_proto_rs::{oms::OrderUpdateEvent, rtmd::Kline};
+use zk_proto_rs::zk::{oms::v1::OrderUpdateEvent, rtmd::v1::Kline};
 use zk_strategy_sdk_rs::{
     context::StrategyContext,
     models::{SAction, TimerEvent},
