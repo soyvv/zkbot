@@ -141,6 +141,9 @@ impl<S: Strategy, D: ActionDispatcher> LiveEngine<S, D> {
             EngineEvent::Tick(t) => self.runner.on_tick(&mut self.strategy, &t),
             EngineEvent::Bar(b) => self.runner.on_bar(&mut self.strategy, &b),
             EngineEvent::OrderUpdate(oue) => self.runner.on_order_update(&mut self.strategy, &oue),
+            EngineEvent::BalanceUpdate(bue) => {
+                self.runner.on_balance_update(&mut self.strategy, &bue)
+            }
             EngineEvent::PositionUpdate(pue) => {
                 self.runner.on_position_update(&mut self.strategy, &pue)
             }

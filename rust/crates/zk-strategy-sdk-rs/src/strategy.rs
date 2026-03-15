@@ -1,5 +1,5 @@
 use zk_proto_rs::zk::{
-    oms::v1::{OrderUpdateEvent, PositionUpdateEvent},
+    oms::v1::{BalanceUpdateEvent, OrderUpdateEvent, PositionUpdateEvent},
     rtmd::v1::{Kline, RealtimeSignal, TickData},
 };
 
@@ -53,7 +53,12 @@ pub trait Strategy: Send + 'static {
         vec![]
     }
 
-    /// Position / balance update.
+    /// Balance update — asset inventory (cash/spot).
+    fn on_balance_update(&mut self, _update: &BalanceUpdateEvent, _ctx: &StrategyContext) -> Vec<SAction> {
+        vec![]
+    }
+
+    /// Position update — instrument exposure (derivatives only).
     fn on_position_update(&mut self, _update: &PositionUpdateEvent, _ctx: &StrategyContext) -> Vec<SAction> {
         vec![]
     }

@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use zk_proto_rs::zk::{
     common::v1::InstrumentRefData,
-    oms::v1::{Order, OrderStatus, OrderUpdateEvent, Position, PositionUpdateEvent},
+    oms::v1::{Balance, BalanceUpdateEvent, Order, OrderStatus, OrderUpdateEvent, Position, PositionUpdateEvent},
 };
 
 use crate::models::{StrategyCancel, StrategyOrder};
@@ -22,8 +22,10 @@ pub struct AccountState {
     pub terminal_orders: HashMap<i64, Order>,
     /// Order IDs for which a cancel has been submitted.
     pub pending_cancels: HashSet<i64>,
-    /// Latest known position per instrument code.
-    pub balances: HashMap<String, Position>,
+    /// Asset-level balances (cash / spot inventory), keyed by asset name.
+    pub balances: HashMap<String, Balance>,
+    /// Instrument-level positions (derivatives exposure), keyed by instrument code.
+    pub positions: HashMap<String, Position>,
 }
 
 impl AccountState {
@@ -35,6 +37,7 @@ impl AccountState {
             terminal_orders: HashMap::new(),
             pending_cancels: HashSet::new(),
             balances: HashMap::new(),
+            positions: HashMap::new(),
         }
     }
 }
@@ -60,9 +63,11 @@ pub struct StrategyContext {
     order_id_to_account: HashMap<i64, i64>,
     pub symbol_refs: HashMap<String, InstrumentRefData>,
     pub current_ts_ms: i64,
-    /// Monotonic counter incremented every time position/balance state changes.
+    /// Monotonic counter incremented every time balance state changes.
     /// Callers can cache this value and skip balance re-snapshotting when unchanged.
     pub balance_generation: u64,
+    /// Monotonic counter incremented every time position state changes.
+    pub position_generation: u64,
     /// Arbitrary init data injected by the runtime before `on_init` fires.
     /// Mirrors Python `tq.__tq_init_output__` / `tq.get_custom_init_data()`.
     init_data: Option<Box<dyn Any + Send + 'static>>,
@@ -84,6 +89,7 @@ impl StrategyContext {
             symbol_refs,
             current_ts_ms: 0,
             balance_generation: 0,
+            position_generation: 0,
             init_data: None,
         }
     }
@@ -149,14 +155,24 @@ impl StrategyContext {
         }
     }
 
-    /// Update balance tracking from an OMS position update event.
-    pub fn on_position_update(&mut self, pue: &PositionUpdateEvent) {
-        for pos in &pue.position_snapshots {
-            if let Some(acc) = self.account_states.get_mut(&pos.account_id) {
-                acc.balances.insert(pos.instrument_code.clone(), pos.clone());
+    /// Update balance state (cash/spot inventory). Only touches `acc.balances`.
+    pub fn on_balance_update(&mut self, bue: &BalanceUpdateEvent) {
+        if let Some(acc) = self.account_states.get_mut(&bue.account_id) {
+            for bal in &bue.balance_snapshots {
+                acc.balances.insert(bal.asset.clone(), bal.clone());
             }
         }
         self.balance_generation += 1;
+    }
+
+    /// Update position state (derivatives exposure). Only touches `acc.positions`.
+    pub fn on_position_update(&mut self, pue: &PositionUpdateEvent) {
+        for pos in &pue.position_snapshots {
+            if let Some(acc) = self.account_states.get_mut(&pos.account_id) {
+                acc.positions.insert(pos.instrument_code.clone(), pos.clone());
+            }
+        }
+        self.position_generation += 1;
     }
 
     // -----------------------------------------------------------------------
@@ -202,19 +218,27 @@ impl StrategyContext {
     pub fn get_position(&self, account_id: i64, symbol: &str) -> Option<&Position> {
         self.account_states
             .get(&account_id)
-            .and_then(|acc| acc.balances.get(symbol))
+            .and_then(|acc| acc.positions.get(symbol))
     }
 
     pub fn get_symbol_info(&self, symbol: &str) -> Option<&InstrumentRefData> {
         self.symbol_refs.get(symbol)
     }
 
-    /// All balances held by `account_id` (symbol → Position snapshot).
+    /// All balances held by `account_id` (asset → Balance snapshot).
     pub fn get_balances_map(
         &self,
         account_id: i64,
-    ) -> Option<&HashMap<String, Position>> {
+    ) -> Option<&HashMap<String, Balance>> {
         self.account_states.get(&account_id).map(|acc| &acc.balances)
+    }
+
+    /// All positions held by `account_id` (instrument → Position snapshot).
+    pub fn get_positions_map(
+        &self,
+        account_id: i64,
+    ) -> Option<&HashMap<String, Position>> {
+        self.account_states.get(&account_id).map(|acc| &acc.positions)
     }
 
     /// All registered account IDs.

@@ -135,14 +135,16 @@ impl BacktestOms {
                     results.push(BtOmsOutput {
                         ts_ms: ts_ms + 1,
                         order_update: Some(*oue),
+                        balance_update: None,
                         position_update: None,
                     });
                 }
-                OmsAction::PublishBalanceUpdate(pue) => {
+                OmsAction::PublishBalanceUpdate(bue) => {
                     results.push(BtOmsOutput {
                         ts_ms: ts_ms + 1,
                         order_update: None,
-                        position_update: Some(*pue),
+                        balance_update: Some(*bue),
+                        position_update: None,
                     });
                 }
                 // Persist and batch actions are no-ops in backtest
@@ -169,14 +171,16 @@ impl BacktestOms {
                         outputs.push(BtOmsOutput {
                             ts_ms: ts + 2,
                             order_update: Some(*oue),
+                            balance_update: None,
                             position_update: None,
                         });
                     }
-                    OmsAction::PublishBalanceUpdate(pue) => {
+                    OmsAction::PublishBalanceUpdate(bue) => {
                         outputs.push(BtOmsOutput {
                             ts_ms: ts + 2,
                             order_update: None,
-                            position_update: Some(*pue),
+                            balance_update: Some(*bue),
+                            position_update: None,
                         });
                     }
                     _ => {}

@@ -19,20 +19,14 @@ use zk_strategy_sdk_rs::{
 // ZkBalance — minimal position snapshot exposed to Python strategies
 // ---------------------------------------------------------------------------
 
-/// Per-symbol balance snapshot returned by `ZkQuantAdapter.get_account_balance()`.
-/// Exposes the fields that ETS (and similar strategies) read:
-///   `balance.total_qty`, `balance.long_short_type`.
-/// `long_short_type` is a raw int32 matching the proto enum value, which Python
-/// `IntEnum`-based `common.LongShortType` supports in equality comparisons.
+/// Per-asset balance snapshot returned by `ZkQuantAdapter.get_account_balance()`.
+/// Exposes the fields from the `Balance` proto (cash/spot inventory).
 #[pyclass(name = "ZkBalance")]
 #[derive(Clone)]
 pub struct ZkBalance {
-    /// Total position quantity (absolute value; sign comes from long_short_type).
+    /// Total quantity held.
     #[pyo3(get)]
     pub total_qty: f64,
-    /// Proto enum int32 for LongShortType (LsLong=1, LsShort=2).
-    #[pyo3(get)]
-    pub long_short_type: i32,
     /// Frozen (locked) quantity.
     #[pyo3(get)]
     pub frozen_qty: f64,
@@ -74,14 +68,13 @@ impl ZkQuantAdapter {
             if let Some(map) = ctx.get_balances_map(acc_id) {
                 let acc_map = map
                     .iter()
-                    .map(|(sym, pos)| {
+                    .map(|(asset, bal)| {
                         (
-                            sym.clone(),
+                            asset.clone(),
                             ZkBalance {
-                                total_qty: pos.total_qty,
-                                long_short_type: pos.long_short_type,
-                                frozen_qty: pos.frozen_qty,
-                                avail_qty: pos.avail_qty,
+                                total_qty: bal.total_qty,
+                                frozen_qty: bal.frozen_qty,
+                                avail_qty: bal.avail_qty,
                             },
                         )
                     })
@@ -125,14 +118,13 @@ impl ZkQuantAdapter {
                 if let Some(map) = ctx.get_balances_map(acc_id) {
                     let acc_map = map
                         .iter()
-                        .map(|(sym, pos)| {
+                        .map(|(asset, bal)| {
                             (
-                                sym.clone(),
+                                asset.clone(),
                                 ZkBalance {
-                                    total_qty: pos.total_qty,
-                                    long_short_type: pos.long_short_type,
-                                    frozen_qty: pos.frozen_qty,
-                                    avail_qty: pos.avail_qty,
+                                    total_qty: bal.total_qty,
+                                    frozen_qty: bal.frozen_qty,
+                                    avail_qty: bal.avail_qty,
                                 },
                             )
                         })

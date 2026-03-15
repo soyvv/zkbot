@@ -81,6 +81,7 @@ pub struct BacktestResult {
     /// (ts_ms, strategy_order) for each placement emitted by the strategy.
     pub order_placements: Vec<(i64, zk_strategy_sdk_rs::models::StrategyOrder)>,
     pub order_updates: Vec<zk_proto_rs::zk::oms::v1::OrderUpdateEvent>,
+    pub balance_updates: Vec<zk_proto_rs::zk::oms::v1::BalanceUpdateEvent>,
     pub position_updates: Vec<zk_proto_rs::zk::oms::v1::PositionUpdateEvent>,
     pub logs: Vec<zk_strategy_sdk_rs::models::StrategyLog>,
     /// All fills extracted from `OrderUpdateEvent.last_trade`.
@@ -206,7 +207,7 @@ impl Backtester {
             // but do NOT update ctx.current_ts_ms, preserving the originating bar
             // time so that strategy calls to tq.get_current_ts() match Python behaviour.
             let actions = match &event.kind {
-                BtEventKind::OrderUpdate(_) | BtEventKind::PositionUpdate(_) => {
+                BtEventKind::OrderUpdate(_) | BtEventKind::BalanceUpdate(_) | BtEventKind::PositionUpdate(_) => {
                     let timer_actions = self.runner.drain_timers_at(strategy, ts);
                     self.dispatch_actions(timer_actions, ts);
                     // Use _preserve_ts variants: ctx.on_order_update / ctx.on_position_update
@@ -220,6 +221,10 @@ impl Backtester {
                             }
                             self.result.order_updates.push(oue.clone());
                             self.runner.on_order_update_preserve_ts(strategy, &oue)
+                        }
+                        BtEventKind::BalanceUpdate(bue) => {
+                            self.result.balance_updates.push(bue.clone());
+                            self.runner.on_balance_update(strategy, &bue)
                         }
                         BtEventKind::PositionUpdate(pue) => {
                             self.result.position_updates.push(pue.clone());
@@ -301,6 +306,9 @@ impl Backtester {
         for out in outputs {
             if let Some(oue) = out.order_update {
                 self.queue.push(out.ts_ms, BtEventKind::OrderUpdate(oue));
+            }
+            if let Some(bue) = out.balance_update {
+                self.queue.push(out.ts_ms, BtEventKind::BalanceUpdate(bue));
             }
             if let Some(pue) = out.position_update {
                 self.queue.push(out.ts_ms, BtEventKind::PositionUpdate(pue));

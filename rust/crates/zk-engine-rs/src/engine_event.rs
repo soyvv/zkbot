@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use zk_proto_rs::zk::{
-    oms::v1::{OrderUpdateEvent, PositionUpdateEvent},
+    oms::v1::{BalanceUpdateEvent, OrderUpdateEvent, PositionUpdateEvent},
     rtmd::v1::{Kline, RealtimeSignal, TickData},
 };
 
@@ -20,7 +20,9 @@ pub enum EngineEvent {
     Bar(Kline),
     /// Order fill, rejection, or status change from OMS.
     OrderUpdate(OrderUpdateEvent),
-    /// Balance / position snapshot from OMS.
+    /// Asset inventory (cash/spot) update from OMS.
+    BalanceUpdate(BalanceUpdateEvent),
+    /// Instrument exposure (derivatives) update from OMS.
     PositionUpdate(PositionUpdateEvent),
     /// External real-time signal.
     Signal(RealtimeSignal),

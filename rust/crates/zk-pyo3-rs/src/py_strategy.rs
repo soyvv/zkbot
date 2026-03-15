@@ -54,7 +54,7 @@ impl PyStrategyAdapter {
     ///
     /// The adapter is allocated once (via `Py::new`) and reused every subsequent call.
     /// Balances are only re-snapshotted when `ctx.balance_generation` has changed,
-    /// which happens exclusively in `on_position_update` — not on `on_bar`.
+    /// which happens exclusively in `on_balance_update` / `on_position_update` — not on `on_bar`.
     fn with_adapter<F>(&mut self, py: Python<'_>, ctx: &StrategyContext, f: F) -> Vec<SAction>
     where
         F: FnOnce(&mut Self, Python<'_>, &Bound<'_, ZkQuantAdapter>) -> PyResult<()>,

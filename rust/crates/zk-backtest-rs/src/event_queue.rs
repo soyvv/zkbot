@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use zk_proto_rs::zk::{
-    oms::v1::{OrderUpdateEvent, PositionUpdateEvent},
+    oms::v1::{BalanceUpdateEvent, OrderUpdateEvent, PositionUpdateEvent},
     rtmd::v1::{Kline, RealtimeSignal, TickData},
 };
 
@@ -15,7 +15,8 @@ pub enum BtEventKind {
     Tick(TickData),                        // priority 10
     Signal(RealtimeSignal),                // priority 9
     Bar(Kline),                            // priority 8
-    PositionUpdate(PositionUpdateEvent),   // priority 7
+    BalanceUpdate(BalanceUpdateEvent),     // priority 7 (asset inventory)
+    PositionUpdate(PositionUpdateEvent),   // priority 7 (derivatives exposure)
     OrderUpdate(OrderUpdateEvent),         // priority 6
     Timer(TimerEvent),                     // priority 5
 }
@@ -26,6 +27,7 @@ impl BtEventKind {
             BtEventKind::Tick(_) => 10,
             BtEventKind::Signal(_) => 9,
             BtEventKind::Bar(_) => 8,
+            BtEventKind::BalanceUpdate(_) => 7,
             BtEventKind::PositionUpdate(_) => 7,
             BtEventKind::OrderUpdate(_) => 6,
             BtEventKind::Timer(_) => 5,

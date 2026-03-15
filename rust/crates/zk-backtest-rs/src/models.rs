@@ -40,5 +40,6 @@ pub struct SimResult {
 pub struct BtOmsOutput {
     pub ts_ms: i64,
     pub order_update: Option<zk_proto_rs::zk::oms::v1::OrderUpdateEvent>,
+    pub balance_update: Option<zk_proto_rs::zk::oms::v1::BalanceUpdateEvent>,
     pub position_update: Option<zk_proto_rs::zk::oms::v1::PositionUpdateEvent>,
 }

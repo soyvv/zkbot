@@ -1,6 +1,6 @@
 use zk_proto_rs::zk::{
     common::v1::InstrumentRefData,
-    oms::v1::{OrderUpdateEvent, PositionUpdateEvent},
+    oms::v1::{BalanceUpdateEvent, OrderUpdateEvent, PositionUpdateEvent},
     rtmd::v1::{Kline, RealtimeSignal, TickData},
 };
 
@@ -81,6 +81,16 @@ impl StrategyRunner {
         self.ctx.on_order_update(oue);
         self.ctx.current_ts_ms = saved_ts;
         strategy.on_order_update(oue, &self.ctx)
+    }
+
+    /// Updates `ctx` with balance snapshots first, then calls the strategy callback.
+    pub fn on_balance_update<S: Strategy>(
+        &mut self,
+        strategy: &mut S,
+        bue: &BalanceUpdateEvent,
+    ) -> Vec<SAction> {
+        self.ctx.on_balance_update(bue);
+        strategy.on_balance_update(bue, &self.ctx)
     }
 
     /// Updates `ctx` with position snapshots first, then calls the strategy callback.
