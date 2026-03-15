@@ -221,6 +221,18 @@ impl StrategyContext {
             .and_then(|acc| acc.positions.get(symbol))
     }
 
+    /// Single balance lookup by asset name.
+    pub fn get_balance(&self, account_id: i64, asset: &str) -> Option<&Balance> {
+        self.account_states
+            .get(&account_id)
+            .and_then(|acc| acc.balances.get(asset))
+    }
+
+    /// Convenience: return `total_qty` from a balance entry for the given asset.
+    pub fn get_spot_inventory(&self, account_id: i64, asset: &str) -> Option<f64> {
+        self.get_balance(account_id, asset).map(|b| b.total_qty)
+    }
+
     pub fn get_symbol_info(&self, symbol: &str) -> Option<&InstrumentRefData> {
         self.symbol_refs.get(symbol)
     }
@@ -269,4 +281,123 @@ fn is_terminal(status: i32) -> bool {
         OrderStatus::try_from(status),
         Ok(OrderStatus::Filled) | Ok(OrderStatus::Cancelled) | Ok(OrderStatus::Rejected)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_ctx() -> StrategyContext {
+        StrategyContext::new(&[100], &[])
+    }
+
+    fn make_balance_update(account_id: i64, asset: &str, total_qty: f64) -> BalanceUpdateEvent {
+        BalanceUpdateEvent {
+            account_id,
+            balance_snapshots: vec![Balance {
+                account_id,
+                asset: asset.to_string(),
+                total_qty,
+                frozen_qty: 0.0,
+                avail_qty: total_qty,
+                ..Default::default()
+            }],
+            timestamp: 1000,
+        }
+    }
+
+    fn make_position_update(account_id: i64, instrument: &str, total_qty: f64) -> PositionUpdateEvent {
+        PositionUpdateEvent {
+            account_id,
+            position_snapshots: vec![Position {
+                account_id,
+                instrument_code: instrument.to_string(),
+                total_qty,
+                ..Default::default()
+            }],
+            timestamp: 1000,
+        }
+    }
+
+    #[test]
+    fn balance_update_populates_balances_not_positions() {
+        let mut ctx = make_ctx();
+        ctx.on_balance_update(&make_balance_update(100, "USDT", 5000.0));
+
+        assert!(ctx.get_balance(100, "USDT").is_some());
+        assert_eq!(ctx.get_balance(100, "USDT").unwrap().total_qty, 5000.0);
+        // Must NOT touch positions
+        assert!(ctx.get_positions_map(100).unwrap().is_empty());
+    }
+
+    #[test]
+    fn position_update_populates_positions_not_balances() {
+        let mut ctx = make_ctx();
+        ctx.on_position_update(&make_position_update(100, "BTC-USDT-PERP", 1.5));
+
+        assert!(ctx.get_position(100, "BTC-USDT-PERP").is_some());
+        assert_eq!(ctx.get_position(100, "BTC-USDT-PERP").unwrap().total_qty, 1.5);
+        // Must NOT touch balances
+        assert!(ctx.get_balances_map(100).unwrap().is_empty());
+    }
+
+    #[test]
+    fn get_balance_returns_correct_entry() {
+        let mut ctx = make_ctx();
+        ctx.on_balance_update(&make_balance_update(100, "BTC", 2.0));
+        ctx.on_balance_update(&make_balance_update(100, "ETH", 10.0));
+
+        assert_eq!(ctx.get_balance(100, "BTC").unwrap().total_qty, 2.0);
+        assert_eq!(ctx.get_balance(100, "ETH").unwrap().total_qty, 10.0);
+        assert!(ctx.get_balance(100, "SOL").is_none());
+        assert!(ctx.get_balance(999, "BTC").is_none());
+    }
+
+    #[test]
+    fn get_position_returns_correct_entry() {
+        let mut ctx = make_ctx();
+        ctx.on_position_update(&make_position_update(100, "BTC-USDT-PERP", 3.0));
+
+        assert_eq!(ctx.get_position(100, "BTC-USDT-PERP").unwrap().total_qty, 3.0);
+        assert!(ctx.get_position(100, "ETH-USDT-PERP").is_none());
+    }
+
+    #[test]
+    fn get_spot_inventory_returns_total_qty() {
+        let mut ctx = make_ctx();
+        ctx.on_balance_update(&make_balance_update(100, "USDT", 1500.0));
+
+        assert_eq!(ctx.get_spot_inventory(100, "USDT"), Some(1500.0));
+        assert_eq!(ctx.get_spot_inventory(100, "BTC"), None);
+    }
+
+    #[test]
+    fn balance_generation_incremented_only_by_balance_updates() {
+        let mut ctx = make_ctx();
+        assert_eq!(ctx.balance_generation, 0);
+        assert_eq!(ctx.position_generation, 0);
+
+        ctx.on_balance_update(&make_balance_update(100, "USDT", 100.0));
+        assert_eq!(ctx.balance_generation, 1);
+        assert_eq!(ctx.position_generation, 0);
+
+        ctx.on_balance_update(&make_balance_update(100, "BTC", 1.0));
+        assert_eq!(ctx.balance_generation, 2);
+        assert_eq!(ctx.position_generation, 0);
+    }
+
+    #[test]
+    fn position_generation_incremented_only_by_position_updates() {
+        let mut ctx = make_ctx();
+        assert_eq!(ctx.balance_generation, 0);
+        assert_eq!(ctx.position_generation, 0);
+
+        ctx.on_position_update(&make_position_update(100, "BTC-USDT-PERP", 1.0));
+        assert_eq!(ctx.position_generation, 1);
+        assert_eq!(ctx.balance_generation, 0);
+
+        ctx.on_position_update(&make_position_update(100, "ETH-USDT-PERP", 5.0));
+        assert_eq!(ctx.position_generation, 2);
+        assert_eq!(ctx.balance_generation, 0);
+    }
 }
