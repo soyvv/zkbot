@@ -43,3 +43,4 @@ Cargo.lock
 .DS_Store
 project_memo.md
 .gitignore
+.worktrees/
