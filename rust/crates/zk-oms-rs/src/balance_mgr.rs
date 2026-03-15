@@ -5,6 +5,7 @@ use zk_proto_rs::{
     zk::{
         common::v1::{InstrumentRefData, LongShortType},
         exch_gw::v1::BalanceUpdate,
+        oms::v1::{Balance, BalanceUpdateEvent},
     },
     ods::{GwConfigEntry, OmsRouteEntry},
 };
@@ -289,6 +290,34 @@ impl BalanceManager {
         event.position_snapshots = positions.iter().map(|p| p.position_state.clone()).collect();
         event.timestamp = ts;
         event
+    }
+
+    /// Build a full balance snapshot for an account using the new `Balance` proto type.
+    pub fn build_balance_snapshot(
+        &self,
+        account_id: i64,
+        use_exch_data: bool,
+        ts: i64,
+    ) -> BalanceUpdateEvent {
+        let positions = self.get_balances_for_account(account_id, use_exch_data);
+        BalanceUpdateEvent {
+            account_id,
+            balance_snapshots: positions
+                .iter()
+                .map(|p| Balance {
+                    account_id,
+                    asset: p.position_state.instrument_code.clone(),
+                    total_qty: p.position_state.total_qty,
+                    frozen_qty: p.position_state.frozen_qty,
+                    avail_qty: p.position_state.avail_qty,
+                    sync_timestamp: p.position_state.sync_timestamp,
+                    update_timestamp: p.position_state.update_timestamp,
+                    is_from_exch: p.position_state.is_from_exch,
+                    exch_data_raw: p.position_state.exch_data_raw.clone(),
+                })
+                .collect(),
+            timestamp: ts,
+        }
     }
 
     /// Build a partial position snapshot for a set of symbols.

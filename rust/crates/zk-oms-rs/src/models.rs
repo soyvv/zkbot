@@ -3,7 +3,7 @@ use zk_proto_rs::{
         common::v1::InstrumentRefData,
         exch_gw::v1::{BalanceUpdate, OrderReport},
         gateway::v1::{CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest, BatchSendOrdersRequest as ExchBatchSendOrdersRequest, BatchCancelOrdersRequest as ExchBatchCancelOrdersRequest},
-        oms::v1::{ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest, OrderUpdateEvent, PositionUpdateEvent, Position, Trade},
+        oms::v1::{BalanceUpdateEvent, ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest, OrderUpdateEvent, PositionUpdateEvent, Position, Trade},
     },
     ods::{GwConfigEntry, OmsRouteEntry},
 };
@@ -175,7 +175,7 @@ pub enum OmsAction {
     /// Publish an order state update (to NATS etc.).
     PublishOrderUpdate(Box<OrderUpdateEvent>),
     /// Publish a balance / position update.
-    PublishBalanceUpdate(Box<PositionUpdateEvent>),
+    PublishBalanceUpdate(Box<BalanceUpdateEvent>),
     /// Persist order state (to Redis etc.).
     PersistOrder {
         order: Box<OmsOrder>,

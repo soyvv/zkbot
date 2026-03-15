@@ -16,8 +16,8 @@ service OMSService {
     rpc Panic(PanicRequest) returns (OMSResponse);
     rpc DontPanic(DontPanicRequest) returns (OMSResponse);
 
-    rpc QueryAccountBalance(QueryAccountRequest) returns (AccountResponse);
     rpc QueryPosition(QueryPositionRequest) returns (PositionResponse);
+    rpc QueryBalances(QueryBalancesRequest) returns (QueryBalancesResponse);
     rpc QueryOpenOrders(QueryOpenOrderRequest) returns (OrderDetailResponse);
     rpc QueryOrderDetails(QueryOrderDetailRequest) returns (OrderDetailResponse);
     rpc QueryTradeDetails(QueryTradeDetailRequest) returns (TradeDetailResponse);

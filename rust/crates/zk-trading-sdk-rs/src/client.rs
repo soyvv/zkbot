@@ -7,13 +7,12 @@ use async_nats::jetstream;
 use zk_proto_rs::zk::common::v1::{
     AuditMeta, BasicOrderType, BuySellType, OpenCloseType, TimeInForceType,
 };
-use zk_proto_rs::zk::exch_gw::v1::BalanceUpdate;
 use zk_proto_rs::zk::oms::v1::{
-    AccountResponse,
+    Balance as ProtoBalance, BalanceUpdateEvent, QueryBalancesRequest,
     oms_response, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest,
     Order as ProtoOrder, OrderCancelRequest, OrderRequest, OrderUpdateEvent as ProtoOrderUpdateEvent,
     PlaceOrderRequest, Position as ProtoPosition, PositionUpdateEvent as ProtoPositionUpdateEvent,
-    QueryAccountRequest, QueryOpenOrderRequest, QueryPositionRequest,
+    QueryOpenOrderRequest, QueryPositionRequest,
 };
 use zk_proto_rs::zk::rtmd::v1::{
     FundingRate as ProtoFundingRate, Kline as ProtoKline, OrderBook as ProtoOrderBook,
@@ -179,17 +178,16 @@ impl TradingClient {
         Ok(response.positions)
     }
 
-    pub async fn query_balances(&self, account_id: i64) -> Result<AccountResponse, SdkError> {
+    pub async fn query_balances(&self, account_id: i64) -> Result<Vec<ProtoBalance>, SdkError> {
         let mut client = self.oms_client(account_id).await?;
         let response = client
-            .query_account_balance(QueryAccountRequest {
+            .query_balances(QueryBalancesRequest {
                 account_id,
                 query_gw: false,
-                pagination: None,
             })
             .await?
             .into_inner();
-        Ok(response)
+        Ok(response.balances)
     }
 
     pub async fn subscribe_order_updates<F>(&self, handler: F) -> tokio::task::JoinHandle<()>
@@ -217,23 +215,27 @@ impl TradingClient {
     }
 
     /// Subscribe to balance updates from OMS instances.
-    ///
-    /// **DEFERRED / NOT YET FUNCTIONAL.**
-    ///
-    /// The `BalanceUpdateEvent` proto message does not exist yet. The current OMS runtime
-    /// publishes `PositionUpdateEvent` on the `zk.oms.<oms_id>.balance_update` topic, which
-    /// is a known payload-type mismatch (`api_contracts.md` line 267 specifies
-    /// `oms.BalanceUpdateEvent`). Until the proto is created and the OMS publisher is updated,
-    /// this method will silently decode-fail on every message.
-    ///
-    /// Tracked as a deferred proto/OMS task.
-    pub async fn subscribe_balance_updates<F>(&self, _asset: &str, _handler: F) -> tokio::task::JoinHandle<()>
+    pub async fn subscribe_balance_updates<F>(&self, asset: &str, handler: F) -> tokio::task::JoinHandle<()>
     where
-        F: Fn(BalanceUpdate) + Send + Sync + 'static,
+        F: Fn(BalanceUpdateEvent) + Send + Sync + 'static,
     {
-        // No-op: BalanceUpdateEvent proto does not exist; decoding would always fail.
-        // Return a handle that completes immediately.
-        tokio::spawn(async {})
+        let handler = Arc::new(handler);
+        let nc = self.nats.clone();
+        let subjects = self.balance_update_subjects(asset).await;
+        tokio::spawn(async move {
+            let mut handles = Vec::new();
+            for subject in subjects {
+                handles.push(spawn_protobuf_subscription(
+                    nc.clone(),
+                    subject,
+                    |bue: BalanceUpdateEvent| bue,
+                    handler.clone(),
+                ));
+            }
+            for handle in handles {
+                let _ = handle.await;
+            }
+        })
     }
 
     pub async fn subscribe_position_updates<F>(&self, instrument: &str, handler: F) -> tokio::task::JoinHandle<()>

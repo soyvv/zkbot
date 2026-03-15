@@ -284,7 +284,7 @@ async fn process_command(
             }
             OmsAction::PublishBalanceUpdate(event) => {
                 balances_dirty = true;
-                nats.publish_position_update(&event).await;
+                nats.publish_balance_update(&event).await;
             }
             OmsAction::SendOrderToGw { gw_key, request, order_id, order_created_at } => {
                 let t3 = system_time_ns(); // hot path: one syscall before send

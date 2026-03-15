@@ -28,7 +28,7 @@ use zk_proto_rs::{
             OrderReportType, OrderStateReport, PositionReport, TradeReport,
             order_report_entry::Report,
         },
-        oms::v1::{OrderCancelRequest, OrderRequest, OrderStatus, OrderUpdateEvent, PositionUpdateEvent},
+        oms::v1::{BalanceUpdateEvent, OrderCancelRequest, OrderRequest, OrderStatus, OrderUpdateEvent},
     },
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
 };
@@ -280,7 +280,7 @@ fn find_order_update(actions: &[OmsAction]) -> Option<&OrderUpdateEvent> {
     })
 }
 
-fn find_balance_update(actions: &[OmsAction]) -> Option<&PositionUpdateEvent> {
+fn find_balance_update(actions: &[OmsAction]) -> Option<&BalanceUpdateEvent> {
     actions.iter().find_map(|a| match a {
         OmsAction::PublishBalanceUpdate(e) => Some(e.as_ref()),
         _ => None,
@@ -521,5 +521,5 @@ fn test_gateway_balance_update_publishes_position() {
 
     let pue = find_balance_update(&actions).expect("expected PublishBalanceUpdate");
     assert_eq!(pue.account_id, ACCOUNT_1);
-    assert!(!pue.position_snapshots.is_empty(), "position snapshot must not be empty");
+    assert!(!pue.balance_snapshots.is_empty(), "balance snapshot must not be empty");
 }

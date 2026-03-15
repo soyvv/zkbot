@@ -33,10 +33,11 @@ use tonic::{Request, Response, Status};
 use zk_proto_rs::zk::{
     common::v1::{DummyRequest, ServiceHealthResponse},
     oms::v1::{
-        AccountResponse, AlgoOrderRequest, BatchCancelOrdersRequest,
+        AlgoOrderRequest, Balance, BatchCancelOrdersRequest,
         BatchPlaceOrdersRequest, CancelAlgoOrderRequest, DontPanicRequest,
         OmsResponse, OmsErrorType, OrderDetailResponse, PanicRequest, PlaceOrderRequest,
-        CancelOrderRequest, PositionResponse, QueryAccountRequest, QueryInstrumentRefdataRequest,
+        CancelOrderRequest, PositionResponse, QueryBalancesRequest, QueryBalancesResponse,
+        QueryInstrumentRefdataRequest,
         QueryInstrumentRefdataResponse, QueryOpenOrderRequest, QueryOrderDetailRequest,
         QueryPositionRequest, QueryTradeDetailRequest, TradeDetailResponse,
     },
@@ -181,24 +182,34 @@ impl OmsService for OmsGrpcHandler {
 
     // ── Queries (lock-free read replica) ─────────────────────────────────────
 
-    async fn query_account_balance(
+    async fn query_balances(
         &self,
-        request: Request<QueryAccountRequest>,
-    ) -> Result<Response<AccountResponse>, Status> {
+        request: Request<QueryBalancesRequest>,
+    ) -> Result<Response<QueryBalancesResponse>, Status> {
         let req  = request.into_inner();
         let snap = self.replica.load();
         let ts   = gen_timestamp_ms();
 
-        let positions: Vec<_> = snap
+        let balances: Vec<_> = snap
             .balances
             .get(&req.account_id)
-            .map(|acct| acct.values().map(|p| p.position_state.clone()).collect())
+            .map(|acct| acct.values().map(|p| Balance {
+                account_id: req.account_id,
+                asset: p.position_state.instrument_code.clone(),
+                total_qty: p.position_state.total_qty,
+                frozen_qty: p.position_state.frozen_qty,
+                avail_qty: p.position_state.avail_qty,
+                sync_timestamp: p.position_state.sync_timestamp,
+                update_timestamp: p.position_state.update_timestamp,
+                is_from_exch: p.position_state.is_from_exch,
+                exch_data_raw: p.position_state.exch_data_raw.clone(),
+            }).collect())
             .unwrap_or_default();
 
-        Ok(Response::new(AccountResponse {
-            account_id:              req.account_id,
-            account_balance_entries: positions,
-            timestamp:               ts,
+        Ok(Response::new(QueryBalancesResponse {
+            account_id: req.account_id,
+            balances,
+            timestamp:  ts,
         }))
     }
 

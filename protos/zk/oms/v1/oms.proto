@@ -136,6 +136,24 @@ message Position {
     bool contract_size_adjusted = 14;
 }
 
+message Balance {
+    int64 account_id = 1;
+    string asset = 2;               // e.g. "USDT", "BTC"
+    double total_qty = 3;
+    double frozen_qty = 4;
+    double avail_qty = 5;
+    int64 sync_timestamp = 6;
+    int64 update_timestamp = 7;
+    bool is_from_exch = 8;
+    string exch_data_raw = 9;
+}
+
+message BalanceUpdateEvent {
+    int64 account_id = 1;
+    repeated Balance balance_snapshots = 2;
+    int64 timestamp = 3;
+}
+
 message OrderUpdateEvent {
     int64 order_id = 1;
     int64 account_id = 2;
@@ -210,18 +228,6 @@ message CancelAlgoOrderRequest {
     int64 algo_order_id = 1;
 }
 
-message QueryAccountRequest {
-    int64 account_id = 1;
-    bool query_gw = 2;
-    zk.common.v1.PaginationRequest pagination = 3;
-}
-
-message AccountResponse {
-    int64 account_id = 1;
-    repeated Position account_balance_entries = 2;
-    int64 timestamp = 3;
-}
-
 message QueryPositionRequest {
     int64 account_id = 1;
     bool query_gw = 2;
@@ -229,6 +235,17 @@ message QueryPositionRequest {
 
 message PositionResponse {
     repeated Position positions = 1;
+}
+
+message QueryBalancesRequest {
+    int64 account_id = 1;
+    bool query_gw = 2;
+}
+
+message QueryBalancesResponse {
+    int64 account_id = 1;
+    repeated Balance balances = 2;
+    int64 timestamp = 3;
 }
 
 message QueryOpenOrderRequest {

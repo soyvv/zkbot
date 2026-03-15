@@ -306,10 +306,10 @@ impl OmsCore {
                 let updated_symbols = self.balance_mgr.apply_changes(&[fc, pc], ts);
                 let tc = ctx.trading_config.as_ref().unwrap();
                 if tc.publish_balance_on_book {
-                    let pue = self.balance_mgr.build_position_snapshot_for_symbols(
-                        req.account_id, &updated_symbols, false, ts,
+                    let bue = self.balance_mgr.build_balance_snapshot(
+                        req.account_id, false, ts,
                     );
-                    actions.push(OmsAction::PublishBalanceUpdate(Box::new(pue)));
+                    actions.push(OmsAction::PublishBalanceUpdate(Box::new(bue)));
                 }
             }
         }
@@ -367,16 +367,16 @@ impl OmsCore {
             }
         }
 
-        // Deduplicate balance updates (keep last per account+symbol)
-        let mut last_by_account: HashMap<i64, zk_proto_rs::zk::oms::v1::PositionUpdateEvent> = HashMap::new();
+        // Deduplicate balance updates (keep last per account)
+        let mut last_by_account: HashMap<i64, zk_proto_rs::zk::oms::v1::BalanceUpdateEvent> = HashMap::new();
         for action in balance_actions {
-            if let OmsAction::PublishBalanceUpdate(pue) = action {
-                let account_id = pue.account_id;
-                last_by_account.insert(account_id, *pue);
+            if let OmsAction::PublishBalanceUpdate(bue) = action {
+                let account_id = bue.account_id;
+                last_by_account.insert(account_id, *bue);
             }
         }
-        for pue in last_by_account.into_values() {
-            other_actions.push(OmsAction::PublishBalanceUpdate(Box::new(pue)));
+        for bue in last_by_account.into_values() {
+            other_actions.push(OmsAction::PublishBalanceUpdate(Box::new(bue)));
         }
 
         other_actions
@@ -624,10 +624,12 @@ impl OmsCore {
                 if let Some(balance_changes) = self.calc_balance_changes_for_report(ctx, &report) {
                     let updated = self.balance_mgr.apply_changes(&balance_changes, ts);
                     let account_id = ctx.account_id;
-                    let pue = self.balance_mgr.build_position_snapshot_for_symbols(
-                        account_id, &updated, false, ts,
-                    );
-                    actions.push(OmsAction::PublishBalanceUpdate(Box::new(pue)));
+                    if !updated.is_empty() {
+                        let bue = self.balance_mgr.build_balance_snapshot(
+                            account_id, false, ts,
+                        );
+                        actions.push(OmsAction::PublishBalanceUpdate(Box::new(bue)));
+                    }
                 }
             }
         }
@@ -686,8 +688,8 @@ impl OmsCore {
         let ts = gen_timestamp_ms();
         if let Some(account_id) = self.balance_mgr.merge_gw_balance_update(&update, ts) {
             let exch_ts = update.balances.first().map(|b| b.update_timestamp).unwrap_or(ts);
-            let pue = self.balance_mgr.build_position_snapshot(account_id, true, exch_ts);
-            return vec![OmsAction::PublishBalanceUpdate(Box::new(pue))];
+            let bue = self.balance_mgr.build_balance_snapshot(account_id, true, exch_ts);
+            return vec![OmsAction::PublishBalanceUpdate(Box::new(bue))];
         }
         vec![]
     }
