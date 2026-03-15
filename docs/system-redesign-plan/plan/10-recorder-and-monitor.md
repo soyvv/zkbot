@@ -1,4 +1,4 @@
-# Phase 7: Recorder + Reconciliation + Monitor
+# Phase 9: Recorder + Reconciliation + Monitor
 
 ## Goal
 
@@ -9,8 +9,8 @@ Implement three Python services:
 
 ## Prerequisites
 
-- Phase 2 complete (OMS gRPC service publishing NATS events)
-- Phase 6 complete (Engine publishing strategy NATS events)
+- Phase 3 complete (OMS gRPC service publishing NATS events)
+- Phase 7 complete (Engine publishing strategy NATS events)
 - docker-compose stack running (NATS, PG, Mongo, Redis)
 
 ## Deliverables

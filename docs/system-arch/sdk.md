@@ -27,6 +27,7 @@ zk-trading-sdk-rs/
     oms.rs         -- OMS gRPC channel pool + command/query wrappers
     stream.rs      -- NATS subscription helpers (order/balance/rtmd)
     rtmd_sub.rs    -- RTMD interest lease helpers + subject mapping
+    refdata.rs     -- RefdataSdk client/cache/invalidation logic
     id_gen.rs      -- local Snowflake order-ID generator (replaces ODS gen_order_id)
     model.rs       -- SDK domain types wrapping proto types
     config.rs      -- TradingClientConfig, env-var loader
@@ -61,8 +62,12 @@ client.subscribe_klines(instrument_id: &str, interval: &str, handler: impl Fn(Kl
 client.subscribe_funding(instrument_id: &str, handler: impl Fn(FundingRate) + Send + 'static) -> JoinHandle
 client.subscribe_orderbook(instrument_id: &str, handler: impl Fn(OrderBook) + Send + 'static) -> JoinHandle
 
-// Refdata (queries PostgreSQL via Pilot REST or direct read)
-client.query_instrument_refdata(instrument_id: &str) -> Result<InstrumentRefdata>
+// RefdataSdk access
+client.refdata() -> &RefdataSdk
+
+// RefdataSdk
+refdata.query_instrument_refdata(instrument_id: &str) -> Result<InstrumentRefdata>
+refdata.query_market_status(venue: &str, market: &str) -> Result<MarketStatus>
 ```
 
 RTMD subscriptions should follow the dedicated RTMD subscription protocol, not the service
@@ -71,12 +76,39 @@ discovery protocol. See [rtmd_subscription_protocol.md](rtmd_subscription_protoc
 Client-facing RTMD APIs should use ZK symbol conventions (`instrument_id`) as the primary input.
 The SDK resolves venue-native transport fields from refdata before constructing NATS subjects.
 
+Refdata lookup should use a dedicated `RefdataSdk` inside the SDK stack rather than ad hoc direct
+PostgreSQL or mixed client logic.
+
+SDK note:
+
+- hot-path SDK lookups should use the compact/canonical refdata disclosure level rather than the
+  richest expanded view
+- refdata should be loaded on demand rather than bulk-preloaded by default
+
+### 2.2A RefdataSdk
+
+`TradingClient` should use a dedicated `RefdataSdk` component directly.
+
+Responsibilities of `RefdataSdk`:
+
+- resolve the shared refdata service endpoint
+- issue gRPC refdata queries
+- maintain the local in-memory refdata and market-status cache
+- subscribe to refdata invalidation/deprecation topics
+- perform active reload after invalidation
+
+Why split it out:
+
+- keeps `TradingClient` focused on OMS/RTMD user flows
+- keeps refdata cache and invalidation behavior reusable
+- allows a future standalone refdata-oriented SDK/client without redesigning the trading client
+
 ### 2.3 Startup behavior
 
 Replaces `TQClient.create_client()` multi-step ODS dance:
 
 1. connect to NATS at `ZK_NATS_URL`
-2. fetch and cache initial `zk.svc.registry.v1` KV snapshot
+2. fetch and cache initial `zk-svc-registry-v1` KV snapshot
 3. for each account_id in `ZK_ACCOUNT_IDS`:
    - scan `svc.oms.*` KV entries for entries whose `account_ids` contain the account
    - map `account_id → oms_id → gRPC endpoint`
@@ -95,6 +127,19 @@ For RTMD:
 5. subscribe directly to the deterministic `zk.rtmd.*` subject
 
 No Pilot lookup or service-discovery lookup is needed for subject construction.
+
+For refdata via `RefdataSdk`:
+
+1. resolve the refdata service endpoint from `svc.refdata.*` if a shared service is deployed
+2. load refdata through the refdata gRPC service into an in-memory cache
+3. subscribe to `zk.control.refdata.updated`
+4. mark affected cached entries invalid or deprecated by `instrument_id`, venue, or watermark
+5. actively reload the affected canonical entries from the refdata gRPC service
+
+The SDK should maintain a local refdata cache because subject mapping and symbol resolution are
+runtime-hot operations.
+
+`TradingClient` should call into `RefdataSdk` rather than owning separate refdata query/cache logic.
 
 ### 2.4 Order ID generation and instance_id registration
 
@@ -138,8 +183,8 @@ create table cfg.instance_id_lease (
 | `ZK_ENV` | yes | environment namespace (`prod`, `staging`, `dev`) |
 | `ZK_ACCOUNT_IDS` | yes | comma-separated account IDs |
 | `ZK_CLIENT_INSTANCE_ID` | yes | unique Snowflake instance id for order-id generation |
-| `ZK_DISCOVERY_BUCKET` | no | override KV bucket name (default: `zk.svc.registry.v1`) |
-| `ZK_PILOT_GRPC` | no | Pilot gRPC address for refdata queries |
+| `ZK_DISCOVERY_BUCKET` | no | override KV bucket name (default: `zk-svc-registry-v1`) |
+| `ZK_REFDATA_GRPC` | no | Refdata gRPC address override |
 
 ### 2.6 Retry and failover
 
@@ -147,6 +192,25 @@ create table cfg.instance_id_lease (
 - on NATS KV endpoint update: drain in-flight requests on old channel, connect to new endpoint
 - circuit breaker per OMS gRPC channel: open after N consecutive failures, half-open probe after timeout
 - NATS subscriptions: at-least-once with client-side idempotency on `correlation_id`
+
+Refdata cache behavior:
+
+- reads should use the local SDK cache when valid
+- cache misses and invalidated entries should be loaded from the refdata gRPC service
+- `zk.control.refdata.updated` should trigger targeted invalidation or deprecation, followed by SDK
+  initiated refresh
+- if the refdata service is temporarily unavailable, existing cache entries may continue to serve
+  reads until TTL or explicit invalidation policy forces refresh
+- if data is stale, the caller decides how to react; the SDK should not delete a mapping only
+  because freshness degraded
+
+Market-status cache behavior:
+
+- TradFi market open/close status should also be loaded from the refdata gRPC service
+- `zk.control.market_status.updated` should trigger targeted invalidation or refresh for affected
+  venue/market session state
+- strategy or OMS session-gating logic should not independently invent market calendar truth when the
+  refdata service is available
 
 ## 3. Python SDK
 

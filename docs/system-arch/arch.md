@@ -4,6 +4,11 @@ This is the entry point for the architecture docs.
 
 Topic-specific design notes live alongside it:
 
+- [Bootstrap And Runtime Config](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/bootstrap_and_runtime_config.md)
+- [Auth And Authorization](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/auth.md)
+- [Architecture Reconciliation Notes](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/reconcile.md)
+- [Error Handling](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/error_handling.md)
+- [Venue Integration Modules](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/venue_integration.md)
 - [Service Discovery](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/service_discovery.md)
 - [RTMD Subscription Protocol](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/rtmd_subscription_protocol.md)
 - [API Contracts](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/api_contracts.md)
@@ -69,10 +74,10 @@ Topic-specific design notes live alongside it:
 
 ### 5.1 Strategy Engine
 
-- Runs one or more strategies (embedded or standalone runtime mode).
+- Runs one strategy execution runtime per process in the default managed model.
 - Consumes market/account/order events from NATS.
 - Sends order/cancel/query intents to OMS via gRPC.
-- Exposes lifecycle and health gRPC endpoints.
+- May expose an engine control endpoint when inbound runtime control is needed.
 
 ### 5.2 OMS (Order Management + Risk)
 
@@ -94,7 +99,7 @@ Topic-specific design notes live alongside it:
 ### 5.4 MarketData Gateway
 
 - Venue-scoped market-data ingestion and normalization.
-- Uses dynamic subscription intent from control/data plane.
+- Uses direct live RTMD interest leases plus Pilot-managed policy/default state.
 - Publishes normalized ticks/bars/orderbook streams on NATS.
 
 ### 5.5 Recorder + Reconciliation
@@ -115,7 +120,9 @@ Topic-specific design notes live alongside it:
 
 - `svc.gw.<gw_id>`: gateway transport/account declaration
 - `svc.oms.<oms_id>`: OMS transport declaration
-- `svc.engine.<engine_id>`: engine transport declaration (optional for inbound control)
+- `svc.engine.<strategy_key>`: engine transport declaration keyed by stable logical strategy identity
+- `svc.mdgw.<logical_id>`: RTMD gateway declaration
+- `svc.refdata.<logical_id>`: refdata query service declaration
 - `svc.sim.<sim_id>`: simulator declaration
 
 Each record includes:
@@ -127,17 +134,15 @@ Each record includes:
 
 ### 6.2 Startup Sequence
 
-1. Gateway starts and registers `svc.gw.*` with account + transport metadata.
-2. OMS starts:
-   - loads account/OMS config from PostgreSQL
-   - discovers required gateways from `svc.gw.*`
-   - establishes connectivity to selected gateways
-   - registers `svc.oms.<oms_id>` gRPC metadata
-3. Engine starts:
-   - loads strategy config to select target `oms_id`
-   - resolves `svc.oms.<oms_id>`
-   - opens gRPC channel to OMS
-4. Pilot/monitor/recorder services watch KV for live topology changes.
+All managed services follow the shared bootstrap contract:
+
+1. Service starts with minimal deployment config and bootstrap token.
+2. Service bootstraps with Pilot over NATS request/reply.
+3. Pilot authorizes startup and returns effective runtime config plus registration metadata.
+4. Service fetches required secrets directly from Vault when applicable.
+5. Service initializes runtime dependencies and registers its live endpoint in KV.
+6. Other services resolve endpoints from KV and connect over the declared transport.
+7. Pilot/monitor/recorder services watch KV for live topology changes.
 
 ## 7. Data Ownership And Storage Boundaries
 
@@ -171,6 +176,7 @@ Single SDK to abstract OMS and market-data capabilities with minimal config.
   - NATS bootstrap URL
 - SDK responsibilities:
   - discover OMS endpoint via NATS KV
+  - use `RefdataSdk` for refdata and market-status lookup
   - establish gRPC channels
   - expose high-level order/query/subscribe APIs
   - hide retries, failover, and schema translation
@@ -202,10 +208,11 @@ All modes preserve the same protobuf contracts and domain semantics.
 ## 11. Security Model
 
 - Vault is the source of truth for exchange/API/private key secrets.
-- Services use short-lived auth to fetch secrets and cache locally with TTL.
+- Bootstrap tokens are deployment-distributed startup credentials used only to reach Pilot.
+- Services that need private credentials fetch them directly from Vault after bootstrap.
 - Transport security: TLS for gRPC and NATS.
-- Vault stores only exchange account credentials (API keys, private keys) used by Trading Gateways.
-- All other services use env-supplied config; no Vault access needed.
+- Vault stores exchange account credentials and any other runtime secrets referenced by `secret_ref`.
+- Pilot returns `secret_ref` metadata, not secret values.
 
 ## 12. Observability And SLOs
 
@@ -214,20 +221,73 @@ All modes preserve the same protobuf contracts and domain semantics.
   - command latency (p50/p95/p99)
   - event lag and queue depth
   - reconciliation mismatch counts
-  - discovery churn and reconnect rates
+- discovery churn and reconnect rates
 - Structured logs with correlation ids (`strategy_id`, `order_id`, `account_id`, `oms_id`, `gw_id`).
 
-## 13. Logical View
+## 13. Service Dependency Graph
+
+```mermaid
+flowchart TD
+    Pilot["Pilot"] -->|"bootstrap/config/topology"| Engine["Strategy Engine"]
+    Pilot -->|"bootstrap/config/topology"| OMS["OMS"]
+    Pilot -->|"bootstrap/config/topology"| GW["Trading Gateway"]
+    Pilot -->|"bootstrap/config/topology"| MDGW["Market Data Gateway"]
+    Pilot -->|"operator query/aggregation"| Ref["Refdata Service"]
+
+    Engine -->|"gRPC orders/queries"| OMS
+    Engine -->|"uses"| SDK["TradingClient / SDK"]
+    SDK -->|"uses"| RefSdk["RefdataSdk"]
+    RefSdk -->|"gRPC refdata queries"| Ref
+
+    SDK -->|"resolve oms via KV"| KV["NATS KV"]
+    OMS -->|"gRPC gateway commands/queries"| GW
+    MDGW -->|"NATS RTMD streams"| Engine
+    MDGW -->|"uses refdata for symbol/session context"| Ref
+
+    GW -->|"venue connectivity"| Venue["Venue / Broker"]
+    MDGW -->|"venue market data"| Venue
+    Ref -->|"venue metadata + market calendars"| Venue
+
+    GW -->|"register/watch"| KV
+    OMS -->|"register/watch"| KV
+    Engine -->|"register/watch"| KV
+    MDGW -->|"register/watch"| KV
+    Ref -->|"register/watch"| KV
+    Pilot -->|"watch/reconcile"| KV
+
+    OMS -->|"config/state"| PG["PostgreSQL"]
+    Pilot -->|"config/control state"| PG
+    Ref -->|"canonical refdata + market status"| PG
+    OMS -->|"operational cache"| Redis["Redis"]
+    Recorder["Recorder/Reconciliation"] -->|"append/query"| Mongo["MongoDB"]
+    OMS -->|"events"| Recorder
+    OMS -->|"events"| Mon["Trading Monitor"]
+    Engine -->|"strategy logs/events"| Recorder
+
+    GW -->|"Vault secrets"| Vault["Vault"]
+```
+
+Notes:
+
+- Pilot is on the bootstrap and control path, not the hot trading or RTMD path.
+- Refdata is a shared canonical query service, but callers still own local cache and staleness policy.
+- `TradingClient` should use `RefdataSdk` directly for instrument and market-status lookup.
+
+## 14. Logical View
 
 ```mermaid
 flowchart LR
-    Pilot["ZK Pilot (Control Plane)"] -->|gRPC control/query| Engine["Strategy Engine"]
-    Pilot -->|gRPC control/query| OMS["OMS"]
-    Pilot -->|REST/UI| Users["Users/UI"]
+    Pilot["ZK Pilot (Control Plane)"] -->|REST/UI| Users["Users/UI"]
+    Pilot -->|bootstrap/config| Engine["Strategy Engine"]
+    Pilot -->|bootstrap/config| OMS["OMS"]
+    Pilot -->|bootstrap/config| GW["Trading Gateways"]
+    Pilot -->|bootstrap/config| MDGW["MarketData Gateways"]
+    Pilot -->|bootstrap/config| Ref["Refdata Service"]
 
     Engine -->|gRPC orders/queries| OMS
     OMS -->|gateway command transport| GW["Trading Gateways"]
     MDGW["MarketData Gateways"] -->|NATS market streams| Engine
+    Ref["Refdata Service"] -->|gRPC refdata queries| Engine
     OMS -->|NATS order/trade/balance events| Rec["Recorder/Reconciliation"]
     OMS -->|NATS risk/account events| Mon["Trading Monitor"]
     Engine -->|NATS strategy events/logs| Rec
@@ -238,17 +298,21 @@ flowchart LR
     KV <-->|watch| Pilot
 
     PG["PostgreSQL"] <-->|config + state| OMS
-    PG <-->|refdata/config| Pilot
+    PG <-->|control/config| Pilot
+    PG <-->|canonical refdata| Ref
     Mongo["MongoDB (events)"] <-->|append/query| Rec
     Redis["Redis (operational cache)"] <-->|cache/projection| OMS
     Vault["Vault"] -->|secrets| GW
+    Vault -->|secrets when needed| OMS
+    Vault -->|secrets when needed| MDGW
+    Vault -->|secrets when needed| Ref
 ```
 
-## 14. Reusable Rust-Port Components
+## 15. Reusable Rust-Port Components
 
 The redesign should directly reuse existing Rust crates and only add transport/integration adapters where needed.
 
-### 14.1 Reuse map
+### 15.1 Reuse map
 
 - `zk-oms-rs`:
   - reuse as OMS domain core (order lifecycle, balances/positions, risk/config handling).

@@ -22,6 +22,11 @@ not a hand-rolled stub.
 
 Location: `zkbot/rust/crates/zk-mock-gw/`
 
+Architecture reference:
+
+- [Gateway Service](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/gateway_service.md)
+- [Gateway Simulator](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/gateway_simulator.md)
+
 #### Config (env vars)
 
 | Variable | Default | Purpose |

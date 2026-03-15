@@ -16,6 +16,9 @@ Responsibilities:
 - reconcile venue subscriptions against live subscription interest plus Pilot-managed policy/defaults
 - register an `mdgw` role in KV when acting as a shared RTMD publisher
 
+The bootstrap flow should follow the shared contract in
+[Bootstrap And Runtime Config](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/bootstrap_and_runtime_config.md).
+
 ## Registration
 
 RTMD gateways use the generic registry contract. The service-specific meaning is carried in Pilot
@@ -153,6 +156,10 @@ The RTMD runtime should be factored into reusable components:
 - control/reload loop
 
 These components are shared by standalone RTMD gateways and embedded AIO runtimes.
+
+The venue-specific RTMD adaptor should be resolved through the shared venue-integration mechanism
+described in
+[Venue Integration Modules](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/venue_integration.md).
 
 Suggested split:
 

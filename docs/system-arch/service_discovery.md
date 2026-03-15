@@ -111,6 +111,41 @@ Guidelines:
 - higher-level clients such as `TradingClient` or Pilot workflows apply business-specific resolution rules
 - singleton policy, composite-role semantics, and strategy ownership should not be encoded into the generic discovery client
 
+## Bootstrap Config And Secret Contract
+
+Bootstrap should return the effective runtime configuration needed to start a service, but it should
+not proxy raw secrets.
+
+This is a cross-service architecture rule. See
+[Bootstrap And Runtime Config](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/bootstrap_and_runtime_config.md).
+
+Recommended split:
+
+- deployment tooling provides only minimal bootstrap config such as Pilot/NATS/Vault endpoints and
+  workload-identity inputs
+- Pilot/bootstrap returns:
+  - logical identity and ownership/session grant
+  - effective generic runtime config
+  - service-specific config payload
+  - metadata such as `secret_ref`, account binding, venue scope, and capability flags
+- the runtime service retrieves secret material directly from Vault using its workload identity
+- Vault remains the source of truth for credentials and API secrets
+
+This keeps service discovery generic while preventing Pilot from becoming a secret-distribution hub.
+
+Configuration policy:
+
+- minimal deployment config is owned by deployment tooling
+- production runtime config should be managed by Pilot-backed control-plane tables
+- devops automation may seed those same tables during environment creation
+- local env/file overrides are acceptable for local development only
+
+Practical consequence for bootstrap:
+
+- a successful registration response may include effective config and secret references
+- the service should not proceed to live registration until required Vault-backed secrets have been fetched
+- failure to read required secrets should fail startup before the service becomes live in KV
+
 ## Sequence Diagrams
 
 ### 1. Normal bootstrap and steady-state heartbeat
@@ -151,6 +186,30 @@ sequenceDiagram
     C->>KV: watch(">")
     KV-->>C: initial snapshot + live updates
     C-->>C: maintain local cache
+```
+
+### 1A. Bootstrap with Pilot-managed config and Vault-managed secrets
+
+```mermaid
+sequenceDiagram
+    participant S as Service instance
+    participant P as zk-pilot bootstrap
+    participant DB as PostgreSQL config
+    participant V as Vault
+    participant KV as NATS KV registry
+
+    S->>P: zk.bootstrap.register(token, logical_id, instance_type, env, runtime_info)
+    P->>DB: validate token + load effective runtime config
+    DB-->>P: config + secret_ref metadata
+    P-->>S: grant + config + secret_ref
+
+    S->>V: authenticate with workload identity
+    V-->>S: vault session/token
+    S->>V: read(secret_ref)
+    V-->>S: secret material
+
+    S-->>S: initialize adaptor/runtime
+    S->>KV: put(kv_key, registration)
 ```
 
 ### 2. Restart after crash with KV-based stale-session recovery

@@ -1,4 +1,4 @@
-# Phase 9: Collocated Mode (2-layer / All-in-One)
+# Phase 11: Collocated Mode (2-layer / All-in-One)
 
 ## Goal
 
@@ -13,9 +13,9 @@ NATS is still used for external event publishing (Recorder, Monitor) and control
 
 ## Prerequisites
 
-- Phase 2 complete (`zk-oms-rs` domain crate; `OmsCore`)
-- Phase 3 complete (`VenueAdapter` trait for gateway; mock-gw available)
-- Phase 6 complete (`zk-engine-rs` domain crate; `Strategy` trait)
+- Phase 3 complete (`zk-oms-svc`; `zk-oms-rs` domain crate available)
+- Phase 4 complete (`VenueAdapter` trait for gateway; mock-gw validated)
+- Phase 7 complete (`zk-engine-rs` domain crate; `Strategy` trait)
 - Phase 1 complete (`zk-infra-rs` for NATS publishing and KV registration)
 
 ## Deliverables
@@ -119,7 +119,7 @@ ZK_MODE=2layer | ZK_MODE=all-in-one
    TradingClient::from_oms_channel(sender, nats, account_ids, instance_id)
    ```
 9. register `svc.oms.<oms_id>` and `svc.engine.<execution_id>` in NATS KV
-10. POST to Pilot REST `POST /v1/strat/strategy-inst`
+10. POST to Pilot REST `POST /v1/strategy-executions/start`
 11. init strategy via `zk-engine-rs`
 12. start engine event loop
 

@@ -12,6 +12,7 @@ from loguru import logger
 from .admin import router as admin_router
 from .bootstrap import KvReconciler, REGISTRY_BUCKET, make_handlers
 from .config import Config
+from .strategy_executions import router as strategy_router
 
 
 async def _main() -> None:
@@ -56,6 +57,7 @@ async def _main() -> None:
     app.state.pg_pool = pg_pool
     app.state.nats = nc
     app.include_router(admin_router)
+    app.include_router(strategy_router)
 
     @app.get("/health")
     async def health():

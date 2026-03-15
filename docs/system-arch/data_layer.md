@@ -77,15 +77,25 @@ create table cfg.oms_instance (
 create table cfg.gateway_instance (
   gw_id                         text primary key,
   venue                         text not null,
+  account_id                    bigint references cfg.account(account_id),
   broker_type                   text not null,
   account_type                  text not null,
   supports_batch_order          boolean not null default false,
   supports_batch_cancel         boolean not null default false,
   supports_order_query          boolean not null default true,
+  supports_balance_query        boolean not null default true,
   supports_position_query       boolean not null default true,
   supports_trade_history_query  boolean not null default true,
   supports_fee_query            boolean not null default true,
   cancel_required_fields        text[] not null default '{}',
+  grpc_bind_addr                text,
+  grpc_advertise_addr           text,
+  reconnect_policy              jsonb not null default '{}'::jsonb,
+  secret_ref                    text,
+  capability_metadata           jsonb not null default '{}'::jsonb,
+  adaptor_type                  text not null default 'default',
+  adaptor_mode                  text not null default 'streaming', -- streaming | query_after_action | periodic_query | hybrid
+  adaptor_config                jsonb not null default '{}'::jsonb,
   enabled                       boolean not null default true,
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
@@ -135,6 +145,7 @@ create table cfg.instrument_refdata (
   max_mkt_order_qty  numeric,
   price_precision    int,
   qty_precision      int,
+  lifecycle_status   text not null default 'active', -- active | disabled | deprecated
   disabled           boolean not null default false,
   extra_properties   jsonb not null default '{}'::jsonb,
   updated_at         timestamptz not null default now()
@@ -142,6 +153,23 @@ create table cfg.instrument_refdata (
 
 create index idx_instrument_refdata_venue_exch
   on cfg.instrument_refdata(venue, instrument_exch);
+
+Refdata lifecycle notes:
+
+- `cfg.instrument_refdata` is the canonical current-state table
+- loader refresh should detect add/change/disable/deprecate transitions rather than only blind overwrite
+- change notifications should be emitted only after the canonical row is committed
+- SDK and service caches should refresh from the canonical table via the refdata gRPC service
+
+Gateway config model:
+
+- generic gateway fields live in top-level columns (`gw_id`, `venue`, `account_id`, reconnect, transport, capability metadata)
+- adaptor-specific settings live in `adaptor_config`
+- `adaptor_type` selects the adaptor implementation
+- `adaptor_mode` selects the primary operating mode for event acquisition/recovery
+- `secret_ref` points to Vault-managed trading credentials; it is metadata, not secret material
+
+This keeps common control-plane behavior queryable while leaving venue-specific detail extensible.
 
 -- Per-account instrument config (OMS risk/trading limits)
 -- Replaces MongoDB refdata_account_mapping + oms_config

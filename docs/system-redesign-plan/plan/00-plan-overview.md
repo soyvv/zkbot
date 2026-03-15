@@ -10,11 +10,12 @@
 | 3 | — | OMS gRPC service | `zk-oms-svc` binary with full gRPC API + NATS pub | 1, 2 |
 | 4 | — | Real Trading Gateway | `zk-gw-svc`; OKX venue adapter, NATS report pub, KV registration | 1 |
 | 5 | — | Registry + Pilot bootstrap | NATS KV registry lib; Pilot bootstrap subjects; `instance_id` lease | 3, 4 |
-| 6 | — | trading_sdk | `TradingClient` with KV discovery, OMS gRPC pool, id_gen | 3, 5 |
-| 7 | — | Strategy Engine service | `zk-engine-svc`; Pilot REST startup/shutdown; Python worker | 6 |
-| 8 | — | Recorder + Monitor | trade write, snapshot, recon jobs, risk alert | 3, 7 |
-| 9 | — | Pilot service | REST + gRPC control plane; strategy lifecycle; MDGW subscription UI | 5, 7, 8 |
-| 10 | — | Collocated mode | `zk-collocated-svc`; `GatewayPlugin` trait; inter-thread channels | 3, 4, 7 |
+| 6 | — | Scaffolding services | `zk-pilot-scaffold` REST stub; `zk-refdata-svc` gRPC; KV registration | 3, 5 |
+| 7 | — | Trading SDK | `zk-trading-sdk-rs` with KV discovery, OMS gRPC pool, `RefdataSdk`, id_gen | 3, 5, 6 |
+| 8 | — | Strategy Engine service | `zk-engine-svc`; Pilot REST startup/shutdown; Python worker | 6, 7 |
+| 9 | — | Recorder + Monitor | trade write, snapshot, recon jobs, risk alert | 3, 8 |
+| 10 | — | Pilot service | Java/Go control plane; 7-domain REST API; strategy-executions lifecycle; runtime orchestrator adaptor | 5, 8, 9 |
+| 11 | — | Collocated mode | `zk-collocated-svc`; `GatewayPlugin` trait; inter-thread channels | 3, 4, 8 |
 
 **Why simulator first (Phase 2):** Every downstream phase needs a controllable order-fill loop
 for integration tests. Building `zk-mock-gw` before the OMS service means Phase 3 OMS tests
@@ -59,14 +60,12 @@ Each phase plan specifies:
 | [01-environment.md](01-environment.md) | 0 | docker-compose stack, local dev setup |
 | [02-proto-and-infra.md](02-proto-and-infra.md) | 1 | proto migration + `zk-infra-rs` modules |
 | [03-mock-gateway.md](03-mock-gateway.md) | 2 | `zk-mock-gw` trading simulator |
-| [04-oms-service.md](04-oms-service.md) | 3 | OMS gRPC service binary (was `03-oms-service.md`) |
-| [05-real-gateway-service.md](05-real-gateway-service.md) | 4 | Real trading gateway — OKX venue adapter (was `04-gateway-service.md`) |
-| [06-registry-and-pilot-bootstrap.md](06-registry-and-pilot-bootstrap.md) | 5 | NATS KV registry + Pilot bootstrap (was `05-...`) |
-| [07-trading-sdk.md](07-trading-sdk.md) | 6 | `zk-trading-sdk-rs` and Python bindings (was `06-...`) |
-| [08-engine-service.md](08-engine-service.md) | 7 | Strategy Engine service (was `07-...`) |
-| [09-recorder-and-monitor.md](09-recorder-and-monitor.md) | 8 | Recorder, Reconciliation, Monitor (was `08-...`) |
-| [10-pilot-service.md](10-pilot-service.md) | 9 | Pilot REST + gRPC control plane (was `09-...`) |
-| [11-collocated-mode.md](11-collocated-mode.md) | 10 | 2-layer / all-in-one binary (was `10-...`) |
-
-> Note: Files `03-oms-service.md` through `10-collocated-mode.md` retain their original names;
-> the table above reflects the new logical phase numbering. Rename files if desired for clarity.
+| [04-oms-service.md](04-oms-service.md) | 3 | OMS gRPC service binary |
+| [05-real-gateway-service.md](05-real-gateway-service.md) | 4 | Real trading gateway — OKX venue adapter; RTMD gateway |
+| [06-registry-and-pilot-bootstrap.md](06-registry-and-pilot-bootstrap.md) | 5 | NATS KV registry + Pilot bootstrap |
+| [07-scaffolding-services.md](07-scaffolding-services.md) | 6 | Pilot scaffold REST stub + Refdata gRPC service |
+| [08-trading-sdk.md](08-trading-sdk.md) | 7 | `zk-trading-sdk-rs` and Python bindings |
+| [09-engine-service.md](09-engine-service.md) | 8 | Strategy Engine service |
+| [10-recorder-and-monitor.md](10-recorder-and-monitor.md) | 9 | Recorder, Reconciliation, Monitor |
+| [11-pilot-service.md](11-pilot-service.md) | 10 | Pilot control plane — Java/Go; 7-domain REST API; runtime orchestrator |
+| [12-collocated-mode.md](12-collocated-mode.md) | 11 | 2-layer / all-in-one binary |

@@ -1,4 +1,4 @@
-# Phase 6: Strategy Engine Service
+# Phase 8: Strategy Engine Service
 
 ## Goal
 
@@ -8,6 +8,59 @@ Implement `zk-engine-svc` — the Rust strategy engine binary that:
 - runs Rust-native strategy instances via `zk-engine-rs` + `zk-strategy-sdk-rs`
 - optionally runs Python strategy scripts via `zk-pyo3-rs` Python worker mode
 - finalizes execution with Pilot on shutdown
+
+## Design Sketch
+
+`zk-engine-svc` should be a thin service wrapper around:
+
+- Pilot-owned execution claim and runtime config
+- `TradingClient` for OMS and RTMD runtime access
+- `RefdataSdk` for instrument and market-status lookup
+- `zk-engine-rs` for strategy event-loop/domain behavior
+- optional embedded RTMD publisher runtime when the engine is configured as `engine+mdgw`
+
+Recommended runtime composition:
+
+```text
+minimal deployment config
+        |
+        v
+Pilot bootstrap / execution claim
+        |
+        +-> execution_id
+        +-> strategy runtime config
+        +-> registration grants
+        +-> account/symbol bindings
+        |
+        v
+ TradingClient  ---->  RefdataSdk
+      |                    |
+      |                    +-> shared refdata service
+      +-> OMS discovery/query/stream
+      +-> RTMD stream + lease flow
+        |
+        v
+   zk-engine-rs event loop
+        |
+        +-> Rust strategy runtime
+        +-> Python worker runtime (optional)
+        +-> embedded RTMD publisher runtime (optional)
+```
+
+The engine should stay relatively thin:
+
+- Pilot owns singleton execution claim
+- generic service discovery remains in KV
+- `TradingClient` owns OMS/discovery/RTMD client behavior
+- `RefdataSdk` owns refdata and market-status cache/invalidation
+- the engine owns supervision, lifecycle, and strategy event dispatch
+
+Architecture references:
+
+- [Engine Service](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/engine_service.md)
+- [Bootstrap And Runtime Config](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/bootstrap_and_runtime_config.md)
+- [SDK](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/sdk.md)
+- [Service Discovery](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/service_discovery.md)
 
 ## Design constraints
 
@@ -23,6 +76,64 @@ Implication:
 - strategy singleton policy must be enforced by Pilot control-plane logic
 - `execution_id` should be execution metadata, not the discovery key
 - the KV registration contract should stay generic; Pilot should provide the logical identity and metadata/profile for the engine registration
+
+Additional constraints from later design work:
+
+5. bootstrap shape should match other services
+6. engine should use `TradingClient`, and `TradingClient` should use `RefdataSdk` directly
+7. hard shutdown recovery must rely on KV loss + Pilot reconciliation, not on graceful callbacks
+8. embedded RTMD mode must reuse the shared RTMD runtime design rather than inventing a separate engine-local protocol
+
+## Runtime Composition
+
+`zk-engine-svc` should be split into these main parts:
+
+- `main.rs`
+  - bootstrap, config loading, dependency wiring
+- `execution_claim.rs`
+  - Pilot start/stop/finalize flow
+- `strategy_runtime.rs`
+  - Rust strategy instantiation and lifecycle
+- `python_worker.rs`
+  - optional Python worker bridge
+- `engine_loop.rs`
+  - event dispatch and action execution
+- `supervisor.rs`
+  - fencing/discovery/degraded-state supervision
+- `grpc_handler.rs`
+  - optional `EngineService` gRPC surface
+- `embedded_rtmd.rs`
+  - optional shared RTMD runtime integration
+
+Design rule:
+
+- infra behavior should stay in infra/sdk components where possible
+- engine-specific code should focus on strategy lifecycle and event dispatch
+
+## Config Model
+
+The engine should follow the shared bootstrap/config split:
+
+- minimal deployment config
+  - enough to reach Pilot/NATS and identify the logical instance
+- Pilot-enriched runtime config
+  - strategy runtime config
+  - execution claim metadata
+  - account/symbol bindings
+  - registration grants
+  - embedded RTMD profile if applicable
+
+Recommended minimal deployment config:
+
+- `ZK_ENV`
+- `ZK_NATS_URL`
+- `ZK_STRATEGY_KEY`
+- bootstrap token or token path
+- optional `ZK_EXECUTION_MODE`
+- optional `ZK_SD_FAILURE_GRACE_MS`
+- optional Python/embedded-RTMD feature flags
+
+The engine should not treat local env/file config as the authoritative strategy runtime config.
 
 ## Execution supervision mode
 
@@ -68,14 +179,14 @@ Important rule:
 ## Prerequisites
 
 - Phase 1 complete (proto, `zk-infra-rs`)
-- Phase 2 complete (OMS gRPC service)
-- Phase 5 complete (`zk-trading-sdk-rs` with discovery and gRPC pool)
-- Phase 4 complete (Pilot bootstrap service with `instance_id` lease)
+- Phase 3 complete (OMS gRPC service)
+- Phase 6 complete (scaffolding Pilot REST for `strategy-executions` lifecycle; refdata gRPC endpoint discoverable in KV)
+- Phase 7 complete (`zk-trading-sdk-rs` with discovery, gRPC pool, and `RefdataSdk`)
 - docker-compose stack running (NATS, PG, OMS, mock-gw)
 
 ## Deliverables
 
-### 6.1 `zk-engine-svc` binary
+### 7.1 `zk-engine-svc` binary
 
 Location: `zkbot/rust/crates/zk-engine-svc/`
 
@@ -105,29 +216,33 @@ Mirrors `strat_service.py` startup sequence:
      - returns RTMD role/profile metadata when the runtime should act as an embedded RTMD gateway
    - on error or conflict: log and exit before initializing the runtime
 5. initialize `TradingClient` from `zk-trading-sdk-rs` with the returned `account_ids`
+   - the trading client internally initializes and uses `RefdataSdk`
+   - refdata and market-status lookup should go through `client.refdata()`
 6. resolve OMS gRPC endpoint via NATS KV (handled by `TradingClient::from_config`)
 7. open gRPC channel to OMS with backoff reconnect (handled by SDK)
-8. subscribe to NATS RTMD and account event topics per configured symbols/accounts
-9. initialize strategy runtime:
+8. resolve any needed instrument and market-session context through `RefdataSdk`
+9. subscribe to NATS RTMD and account event topics per configured symbols/accounts
+   - RTMD subject construction should rely on `RefdataSdk`-backed symbol resolution through the SDK
+10. initialize strategy runtime:
     - Rust strategy: instantiate from `zk-strategy-sdk-rs` registry by `strategy_key`
     - Python strategy: launch Python worker subprocess via `zk-pyo3-rs`; establish IPC channel
-10. if Pilot profile enables embedded RTMD gateway mode:
+11. if Pilot profile enables embedded RTMD gateway mode:
     - initialize shared RTMD runtime components (`RtmdVenueAdapter`, `SubscriptionManager`, `Publisher`)
     - fetch effective desired RTMD subscription set from Pilot
     - prepare an additional `mdgw` registration grant for the same process
-11. start `EngineService` gRPC server on `ZK_GRPC_PORT` (optional, for control plane queries)
-12. register in NATS KV using a stable logical key granted by Pilot
+12. start `EngineService` gRPC server on `ZK_GRPC_PORT` (optional, for control plane queries)
+13. register in NATS KV using a stable logical key granted by Pilot
     - preferred: `svc.engine.<strategy_key>`
     - `execution_id` is included in the registration payload, not used as the KV key
-13. if embedded RTMD gateway mode is enabled and this runtime publishes shared RTMD topics:
+14. if embedded RTMD gateway mode is enabled and this runtime publishes shared RTMD topics:
     - also register the RTMD role using the Pilot-granted `svc.mdgw.<logical_id>` key
-14. start engine supervision task:
+15. start engine supervision task:
     - always monitor registration fencing
     - monitor service discovery / registry client health
     - in `CONTROLLED` mode: terminate if discovery stays unhealthy longer than the configured grace window
     - in `BEST_EFFORT` mode: keep running but mark degraded
     - supervise embedded RTMD registration if present
-15. start engine event loop
+16. start engine event loop
 
 Architecture reference:
 
@@ -203,6 +318,11 @@ Event dispatch:
 - OMS `BalanceUpdateEvent` → `strategy.on_balance_update(event)`
 - timer events → `strategy.on_timer(timer_id)`
 
+Support lookups:
+
+- strategy code should use `trading_client.refdata()` for refdata and market-status lookup
+- engine should not embed a second refdata cache beside `RefdataSdk`
+
 Strategy actions:
 - `place_order(account_id, order)` → `trading_client.place_order(...)`
 - `cancel_order(account_id, cancel)` → `trading_client.cancel_order(...)`
@@ -239,7 +359,7 @@ Implement `zk.engine.v1.EngineService` for control plane use:
 - `QueryStrategyState`: return current strategy internal state snapshot
 - `QueryRuntimeMetrics`: return Prometheus-style metrics snapshot
 
-### 6.2 Python worker mode (`zk-pyo3-rs`)
+### 7.2 Python worker mode (`zk-pyo3-rs`)
 
 For Python strategy scripts in `ZK_EXT_SCRIPTS_DIR`:
 
@@ -256,7 +376,7 @@ class MyStrategy(StrategyBase):
     def on_timer(self, timer_id: str): ...
 ```
 
-### 6.3 `zk-engine-rs` domain crate
+### 7.3 `zk-engine-rs` domain crate
 
 Location: `zkbot/rust/crates/zk-engine-rs/`
 

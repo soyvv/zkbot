@@ -1,4 +1,4 @@
-# Phase 4: Registry + Pilot Bootstrap
+# Phase 5: Registry + Pilot Bootstrap
 
 ## Goal
 
@@ -30,8 +30,8 @@ The registry/discovery path should not require a separate protocol for each of t
 ## Prerequisites
 
 - Phase 1 complete (`zk-infra-rs`, proto)
-- Phase 2 complete (OMS service registers via `KvRegistryClient`)
-- Phase 3 complete (gateway service registers via `KvRegistryClient`)
+- Phase 3 complete (OMS service registers via `KvRegistryClient`)
+- Phase 4 complete (gateway service registers via `KvRegistryClient`)
 - docker-compose stack running (NATS JetStream, PostgreSQL)
 
 ## Deliverables

@@ -1,16 +1,19 @@
 # ZKBot API Contracts
 
-gRPC service endpoints, NATS topics, and NATS KV discovery contract.
+gRPC service endpoints, REST notes, NATS topics, and NATS KV discovery contract.
 
 ## 1. NATS KV Discovery Contract
 
-Bucket: `zk.svc.registry.v1`
+Bucket: `zk-svc-registry-v1`
+
+> Note: dashes are required — NATS KV bucket names cannot contain dots. Earlier docs used `zk.svc.registry.v1`; the implementation and all plan files use the dash form.
 
 Key format:
 - `svc.gw.<gw_id>` — trading gateway
 - `svc.oms.<oms_id>` — OMS instance
-- `svc.engine.<engine_id>` — strategy engine (optional, for inbound control)
-- `svc.mdgw.<venue>` — market data gateway
+- `svc.engine.<strategy_key>` — strategy engine keyed by stable logical strategy identity
+- `svc.mdgw.<logical_id>` — market data gateway
+- `svc.refdata.<logical_id>` — refdata query service
 - `svc.rec.<recorder_id>` — recorder instance
 
 Value: protobuf-encoded `zk.discovery.v1.ServiceRegistration` (see [proto.md](proto.md)).
@@ -28,7 +31,19 @@ Example (JSON representation):
   },
   "account_ids": [1234],
   "venue": "OKX",
-  "capabilities": ["place_order", "cancel_order", "batch_order", "query_balance", "query_order"],
+  "capabilities": [
+    "place_order",
+    "cancel_order",
+    "batch_order",
+    "query_balance",
+    "query_order",
+    "supports_streaming_order_events",
+    "supports_streaming_trade_events",
+    "supports_balance_query",
+    "supports_position_query",
+    "supports_trade_exactly_once_contract",
+    "supports_order_at_least_once_contract"
+  ],
   "lease_expiry_ms": 1760000000000,
   "updated_at_ms": 1759999995000
 }
@@ -103,6 +118,13 @@ OMS calls gateways directly. `trading_sdk` does not call gateways.
 | `CancelOrder` | `GwCancelOrderRequest` | `GwCommandAck` |
 | `BatchCancelOrders` | `GwBatchCancelOrdersRequest` | `GwCommandAck` |
 
+Gateway identity-linkage note:
+
+- `client_order_id` is generated upstream
+- the gateway must emit at least one early acknowledgment or event carrying both `client_order_id`
+  and the venue-native order id once both are known
+- OMS uses that linkage to persist the durable correlation
+
 **Queries** (mirrors current Python `GWSender.QueryOrderDetails` / `QueryAccountSummary`):
 
 | RPC | Request | Response |
@@ -137,6 +159,33 @@ Registration/discovery note:
 - RTMD gateway registration should advertise the query gRPC endpoint through the generic transport field
 - supported query families should be advertised in `capabilities` / registration metadata
 
+### 2.2B Refdata Service — `zk.refdata.v1.RefdataService`
+
+The refdata service is the canonical runtime query surface for instrument reference data.
+
+Progressive disclosure note:
+
+- refdata queries should support compact and richer disclosure levels from the same canonical source
+- Pilot/operator flows may request richer disclosure than hot-path SDK lookups
+- AI-oriented readers may request expanded metadata, but bounded structured responses should remain
+  the default
+
+**Queries:**
+
+| RPC | Request | Response |
+|---|---|---|
+| `QueryInstrumentRefdata` | `QueryInstrumentRefdataRequest` | `QueryInstrumentRefdataResponse` |
+| `QueryInstrumentByVenueSymbol` | `QueryInstrumentByVenueSymbolRequest` | `QueryInstrumentByVenueSymbolResponse` |
+| `ListInstruments` | `ListInstrumentsRequest` | `ListInstrumentsResponse` |
+| `QueryRefdataWatermark` | `QueryRefdataWatermarkRequest` | `QueryRefdataWatermarkResponse` |
+| `QueryMarketStatus` | `QueryMarketStatusRequest` | `QueryMarketStatusResponse` |
+| `QueryMarketCalendar` | `QueryMarketCalendarRequest` | `QueryMarketCalendarResponse` |
+
+Registration/discovery note:
+
+- refdata service registration should advertise the gRPC endpoint through the generic transport field
+- supported query families should be advertised in `capabilities`
+
 ### 2.3 Strategy Engine Service — `zk.engine.v1.EngineService`
 
 | RPC | Request | Response |
@@ -149,27 +198,25 @@ Registration/discovery note:
 | `QueryStrategyState` | `QueryStrategyStateRequest` | `QueryStrategyStateResponse` |
 | `QueryRuntimeMetrics` | `QueryRuntimeMetricsRequest` | `QueryRuntimeMetricsResponse` |
 
-### 2.4 Pilot Service — `zk.pilot.v1.PilotService`
+### 2.4 Pilot Control API
 
-**Control:**
+Pilot is a REST-first control-plane service in the current design.
 
-| RPC | Request | Response |
-|---|---|---|
-| `StartEngine` | `StartEngineRequest` | `CommandAck` |
-| `StopEngine` | `StopEngineRequest` | `CommandAck` |
-| `ReloadOmsConfig` | `ReloadOmsConfigRequest` | `CommandAck` |
+Contract note:
 
-**Queries:**
+- operator/admin flows such as manual trading, topology/config management, strategy lifecycle, risk
+  operations, and refdata admin should be exposed through REST
+- bootstrap registration remains a separate NATS request/reply contract
+- Pilot may aggregate or proxy data from OMS, refdata, and discovery, but it is not the runtime
+  liveness source of truth
 
-| RPC | Request | Response |
-|---|---|---|
-| `QueryServiceTopology` | `QueryServiceTopologyRequest` | `QueryServiceTopologyResponse` |
-| `QueryAccountBindings` | `QueryAccountBindingsRequest` | `QueryAccountBindingsResponse` |
-| `QueryRiskState` | `QueryRiskStateRequest` | `QueryRiskStateResponse` |
-| `QueryExecutionState` | `QueryExecutionStateRequest` | `QueryExecutionStateResponse` |
-| `QueryInstrumentRefdata` | `QueryInstrumentRefdataRequest` | `QueryInstrumentRefdataResponse` |
+The concrete REST surface is documented in
+[Pilot Service](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/pilot_service.md).
 
-Pilot also exposes a REST API for the operator UI backed by these gRPC endpoints.
+Pilot/refdata note:
+
+- Pilot may aggregate or proxy refdata queries for operator convenience
+- the dedicated refdata service remains the canonical runtime query service for SDK/service lookup
 
 Risk API design note:
 - Option A (preferred): split risk control/query details into a dedicated `risk-design.md`.
@@ -197,9 +244,14 @@ Bootstrap registration is NATS request/reply, so instances only need `ZK_NATS_UR
 - `kv_key`
 - `lock_key`
 - `lease_ttl_ms`
-- `scoped_runtime_credential`
 - `server_time_ms`
 - `status` / `error`
+
+Implementation note:
+
+- the current implementation returns ownership/session metadata and does not depend on a
+  scoped runtime credential
+- stricter per-key runtime credentials remain a possible later hardening step
 
 ## 3. NATS Topics
 
@@ -230,10 +282,21 @@ Migration from current Python topics:
 
 | Topic | Payload | Notes |
 |---|---|---|
-| `zk.gw.<gw_id>.report` | `exch_gw.OrderReport` | execution reports; OMS subscribes per bound gateway |
+| `zk.gw.<gw_id>.report` | `exch_gw.OrderReport` | normalized order/trade report stream; OMS subscribes per bound gateway |
 | `zk.gw.<gw_id>.balance` | `exch_gw.BalanceUpdate` | balance snapshots |
 | `zk.gw.<gw_id>.position` | `exch_gw.PositionUpdate` | position snapshots when venue supports explicit position stream |
 | `zk.gw.<gw_id>.system` | `exch_gw.GwSystemEvent` | startup, reconnect, errors |
+
+Gateway publication semantics:
+
+- trade/fill facts carried by the gateway report stream must be exactly once
+- order lifecycle events are at least once
+- if a balance or position update is published after an order/trade update, it must reflect that change
+- if a position transitions to zero, the gateway must publish that explicit zero-state transition even
+  when the venue omits it from the push stream
+
+If a later contract revision splits order and trade into separate topics, these semantics still
+apply by event family.
 
 ### 3.3 Strategy events
 

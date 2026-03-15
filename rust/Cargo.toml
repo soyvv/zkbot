@@ -10,6 +10,7 @@ members = [
     "crates/zk-pyo3-rs",
     "crates/zk-mock-gw",
     "crates/zk-oms-svc",
+    "crates/zk-trading-sdk-rs",
 ]
 resolver = "2"
 

@@ -20,6 +20,7 @@ members = [
     "zk-datamodel",
     "zk-pilot",
     "zk-refdata-loader",
+    "zk-refdata-svc",
     "zk-rpc",
     "zk-service",
     "zkbot",
@@ -3493,6 +3494,11 @@ dev = [
     { name = "pytest-asyncio" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.29" },
@@ -3507,6 +3513,9 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "httpx", specifier = ">=0.28.1" }]
 
 [[package]]
 name = "zk-refdata-loader"
@@ -3539,6 +3548,50 @@ requires-dist = [
     { name = "zk-datamodel", editable = "libs/zk-datamodel" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "zk-refdata-svc"
+version = "0.1.0"
+source = { editable = "services/zk-refdata-svc" }
+dependencies = [
+    { name = "asyncpg" },
+    { name = "grpcio" },
+    { name = "grpcio-tools" },
+    { name = "loguru" },
+    { name = "nats-py" },
+    { name = "protobuf" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asyncpg", specifier = ">=0.29" },
+    { name = "grpcio", specifier = ">=1.62" },
+    { name = "grpcio-tools", specifier = ">=1.62" },
+    { name = "loguru", specifier = ">=0.7" },
+    { name = "nats-py", specifier = ">=2.6" },
+    { name = "protobuf", specifier = ">=6.32.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+]
+provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+]
 
 [[package]]
 name = "zk-rpc"

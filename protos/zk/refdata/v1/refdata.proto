@@ -1,0 +1,69 @@
+syntax = "proto3";
+package zk.refdata.v1;
+
+// RefdataService — canonical instrument and market-status query service.
+// Consumers discover the endpoint via NATS KV (svc.refdata.*).
+service RefdataService {
+  rpc QueryInstrumentById          (QueryInstrumentByIdRequest)      returns (InstrumentRefdataResponse);
+  rpc QueryInstrumentByVenueSymbol (QueryByVenueSymbolRequest)       returns (InstrumentRefdataResponse);
+  rpc ListInstruments              (ListInstrumentsRequest)          returns (ListInstrumentsResponse);
+  rpc QueryRefdataWatermark        (QueryWatermarkRequest)           returns (WatermarkResponse);
+  rpc QueryMarketStatus            (QueryMarketStatusRequest)        returns (MarketStatusResponse);
+}
+
+enum DisclosureLevel {
+  DISCLOSURE_LEVEL_UNSPECIFIED = 0;
+  BASIC    = 1;
+  EXTENDED = 2;
+  FULL     = 3;
+}
+
+message QueryInstrumentByIdRequest {
+  string instrument_id  = 1;
+  DisclosureLevel level = 2;
+}
+
+message QueryByVenueSymbolRequest {
+  string venue           = 1;
+  string instrument_exch = 2;
+  DisclosureLevel level  = 3;
+}
+
+message ListInstrumentsRequest {
+  string venue          = 1;
+  bool   enabled_only   = 2;
+  DisclosureLevel level = 3;
+}
+
+message InstrumentRefdataResponse {
+  string instrument_id   = 1;
+  string venue           = 2;
+  string instrument_exch = 3;
+  string instrument_type = 4;
+  bool   disabled        = 5;
+  double price_tick_size = 6;
+  double qty_lot_size    = 7;
+  string base_asset      = 8;
+  string quote_asset     = 9;
+  int64  updated_at_ms   = 10;
+}
+
+message ListInstrumentsResponse {
+  repeated InstrumentRefdataResponse instruments = 1;
+}
+
+message QueryWatermarkRequest {}
+message WatermarkResponse {
+  int64 watermark_ms = 1;
+}
+
+message QueryMarketStatusRequest {
+  string venue  = 1;
+  string market = 2;
+}
+message MarketStatusResponse {
+  string venue           = 1;
+  string market          = 2;
+  string session_state   = 3;  // open | closed | halted | pre_open | special
+  int64  effective_at_ms = 4;
+}

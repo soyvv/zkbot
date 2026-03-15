@@ -6,12 +6,16 @@ Secrets and security, reliability, SLOs, and observability.
 
 ### 1.1 Scope
 
-Vault stores **only exchange account credentials** — API keys, API secrets, and private keys used by
-Trading Gateway instances to authenticate with exchanges.
+Vault is the source of truth for runtime secrets referenced by `secret_ref`.
 
-No other services (OMS, Engine, Pilot, Recorder, Monitor) use Vault. Their configs (DB connection
-strings, NATS URLs, etc.) are supplied via environment variables or config files using whatever
-deployment mechanism is in use (k8s secrets, env files, etc.).
+In the initial system this is expected to be primarily exchange account credentials used by trading
+gateways, but the shared bootstrap contract does not limit Vault usage to gateways only.
+
+Rule:
+
+- Pilot returns `secret_ref` metadata during bootstrap when a service needs private credentials
+- the runtime service fetches the secret directly from Vault
+- Pilot does not proxy raw secret material
 
 ### 1.2 Vault secret paths
 
@@ -25,12 +29,13 @@ One Vault access role per venue (or per gateway instance), scoped to only the `a
 - `gw-role-okx` → can read `kv/trading/gw/<okx_account_id>/*`
 - `gw-role-hyperliquid` → can read `kv/trading/gw/<hl_account_id>/*`
 
-### 1.3 Gateway secret lifecycle
+### 1.3 Secret retrieval lifecycle
 
-1. Gateway starts and authenticates to Vault (Kubernetes service account or AppRole)
-2. Reads account credentials for its bound `account_id` from the path above
-3. Caches credentials in-memory; re-reads on lease expiry or on `zk.control.reload.<gw_id>` NATS event
-4. Uses credentials to establish and maintain the exchange session
+1. Service bootstraps with Pilot and receives `secret_ref` metadata if needed
+2. Service authenticates to Vault (Kubernetes service account or AppRole)
+3. Service reads the required secret material from Vault
+4. Service caches credentials in-memory and re-reads on rotation or reload
+5. Service uses credentials to establish and maintain its external/session dependency
 
 Vault path versioning supports credential rotation without gateway restart.
 
@@ -81,8 +86,15 @@ Authoritative source remains exchange/gateway reconciliation output.
 On gateway restart or reconnect:
 - gateway re-registers `svc.gw.<gw_id>` in NATS KV
 - gateway publishes `zk.gw.<gw_id>.system` event with `GW_EVENT_STARTED`
+- gateway runs compensating balance/position snapshot queries
 - OMS receives event and triggers full order and balance resync for affected accounts
   (mirrors current Python `GW_EVENT_STARTED` handler in `oms_server.py`)
+
+Unified reconnect requirements:
+
+- reconnect retry/backoff policy is owned by the gateway service layer
+- adaptor only re-establishes venue connectivity and surfaces facts/errors
+- incremental stream continuity is not trusted across reconnect without compensating snapshot queries
 
 ### 2.6 Strategy engine failure
 
@@ -207,7 +219,7 @@ Discovery:
 Each gRPC service exposes `QueryHealth(QueryHealthRequest) returns (ServiceHealthResponse)`.
 `ServiceHealthResponse.status` values: `OK`, `DEGRADED`, `DOWN`.
 
-Pilot aggregates health from all discovered services and exposes them via REST and `QueryServiceTopology` gRPC.
+Pilot aggregates health from discovered services and exposes them through its REST control API.
 
 TODO:
 

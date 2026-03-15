@@ -15,6 +15,9 @@ OMS is the command and state authority for:
 
 OMS discovers gateways through the generic KV registry and does not depend on a separate ODS.
 
+OMS also owns the durable side of command idempotency, downstream deduplication, and broader
+gateway/account reconciliation policy. Those concerns should not be pushed into the gateway.
+
 ## Runtime Model
 
 OMS should use a single-writer actor plus read-replica pattern.
@@ -77,6 +80,14 @@ Mutation outputs:
 - a fresh immutable `OmsSnapshot`
 
 On gateway restart or reconnect, OMS should trigger a bounded resync for affected accounts.
+
+OMS notes:
+
+- if gateway-originated events require durable deduplication beyond transport guarantees, OMS should
+  own that logic
+- OMS should persist the mapping between `client_order_id` and venue-native order id using the first
+  linkage event or acknowledgment that contains both ids
+- command idempotency remains an OMS responsibility and is still deferred work
 
 ## Interfaces
 

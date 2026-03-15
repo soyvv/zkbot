@@ -137,6 +137,24 @@ services:
       mock-gw:
         condition: service_started
 
+  refdata-svc:
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile.refdata-svc
+    image: zk-refdata-svc:dev
+    ports:
+      - "50052:50052"
+    environment:
+      ZK_NATS_URL:            "nats://nats:4222"
+      ZK_PG_URL:              "postgres://zk:zk@postgres:5432/zkbot"
+      ZK_REFDATA_LOGICAL_ID:  "refdata_dev_1"
+      ZK_REFDATA_GRPC_PORT:   "50052"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   mongo_data:
