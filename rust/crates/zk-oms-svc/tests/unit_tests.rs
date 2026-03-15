@@ -145,7 +145,7 @@ async fn simple_test_writer_loop(
                 let Some(cmd) = cmd else { break; };
 
                 let (oms_msg, reply) = match cmd {
-                    OmsCommand::PlaceOrder { req, reply } =>
+                    OmsCommand::PlaceOrder { req, reply, .. } =>
                         (zk_oms_rs::models::OmsMessage::PlaceOrder(req), Some(reply)),
                     OmsCommand::CancelOrder { req, reply } =>
                         (zk_oms_rs::models::OmsMessage::CancelOrder(req), Some(reply)),
@@ -236,6 +236,7 @@ async fn test_place_order_updates_snapshot() {
 
     let order_id = 1001;
     let _resp = send_cmd(&cmd_tx, |reply| OmsCommand::PlaceOrder {
+        oms_received_ns: 0,
         req:   test_order_req(order_id, 9001),
         reply,
     }).await;
@@ -266,6 +267,7 @@ async fn test_duplicate_order_id_rejected_by_core() {
 
     let order_id = 2001;
     let _first = send_cmd(&cmd_tx, |reply| OmsCommand::PlaceOrder {
+        oms_received_ns: 0,
         req:   test_order_req(order_id, 9001),
         reply,
     }).await;
@@ -336,6 +338,7 @@ async fn test_snapshot_seq_increments() {
     let seq_before = replica.load().seq;
 
     send_cmd(&cmd_tx, |reply| OmsCommand::PlaceOrder {
+        oms_received_ns: 0,
         req:   test_order_req(3001, 9001),
         reply,
     }).await;
