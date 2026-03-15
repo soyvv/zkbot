@@ -75,19 +75,27 @@ The cache is rebuilt from the full KV snapshot (not incrementally patched) to ke
 simple. Trade-off: no automatic reconnection on OMS endpoint churn; long-lived subscription
 handles established before an OMS migration continue pointing at the old endpoint.
 
-### Balance subscription: deferred / not yet functional (gap)
+### Balance/Position separation
 
-`subscribe_balance_updates()` is a no-op stub. The `BalanceUpdateEvent` proto message does not
-exist in any `.proto` file. The current OMS runtime publishes `PositionUpdateEvent` on the
-`zk.oms.<oms_id>.balance_update` topic — a payload-type mismatch with the architecture contract
-(`api_contracts.md` line 267 specifies `oms.BalanceUpdateEvent`). Additionally, the topic shape
-has no asset suffix in the current impl (deferred per same doc).
+Balance (cash/spot inventory) and position (derivatives exposure) are fully separated across
+the stack. Key decisions:
 
-Until the proto is created and the OMS publisher is updated, balance subscriptions cannot work.
-The SDK accepts the call but returns an immediately-completing handle. Deferred tasks:
-1. Create `oms.BalanceUpdateEvent` proto message
-2. Update OMS to publish the correct type on the correct topic
-3. Wire the SDK to decode and dispatch
+- **`Balance` proto**: No `long_short_type` field. Pure cash inventory keyed by asset (USDT, BTC).
+  Fields: `account_id`, `asset`, `total_qty`, `frozen_qty`, `avail_qty`, timestamps, `is_from_exch`.
+- **`BalanceUpdateEvent` proto**: Published on `zk.oms.<oms_id>.balance_update` topic.
+- **OMS internal**: Keeps `OmsPosition` struct internally. Converts to `Balance` at publish/query
+  boundary via `build_balance_snapshot()`.
+- **`QueryAccountBalance` removed**: Replaced by `QueryBalances` RPC (request/response use
+  `Balance` type). Hard cut, no compatibility shim.
+- **Engine**: `EngineEvent::BalanceUpdate` and `EngineEvent::PositionUpdate` are independent
+  variants routed through separate runner methods. They never share a code path.
+- **Strategy SDK context**: `AccountState` has separate `balances: HashMap<String, Balance>` and
+  `positions: HashMap<String, Position>`. `on_balance_update` only touches `acc.balances`;
+  `on_position_update` only touches `acc.positions`. `balance_generation` and `position_generation`
+  are independent counters.
+- **Strategy trait**: `on_balance_update` and `on_position_update` are separate callbacks.
+- **Trading SDK**: `subscribe_balance_updates()` wired to decode `BalanceUpdateEvent` from OMS
+  NATS topic (no longer a stub).
 
 ### RTMD interest lease: not yet wired (gap)
 
