@@ -215,18 +215,12 @@ impl OmsService for OmsGrpcHandler {
 
     async fn query_position(
         &self,
-        request: Request<QueryPositionRequest>,
+        _request: Request<QueryPositionRequest>,
     ) -> Result<Response<PositionResponse>, Status> {
-        let req  = request.into_inner();
-        let snap = self.replica.load();
-
-        let positions: Vec<_> = snap
-            .balances
-            .get(&req.account_id)
-            .map(|acct| acct.values().map(|p| p.position_state.clone()).collect())
-            .unwrap_or_default();
-
-        Ok(Response::new(PositionResponse { positions }))
+        Err(Status::unimplemented(
+            "OMS position query not implemented after balance/position split; \
+             use QueryBalances for asset inventory",
+        ))
     }
 
     async fn query_open_orders(

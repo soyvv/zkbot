@@ -277,22 +277,7 @@ impl BalanceManager {
         Some(account_id)
     }
 
-    /// Build a full position snapshot for an account.
-    pub fn build_position_snapshot(
-        &self,
-        account_id: i64,
-        use_exch_data: bool,
-        ts: i64,
-    ) -> zk_proto_rs::zk::oms::v1::PositionUpdateEvent {
-        let positions = self.get_balances_for_account(account_id, use_exch_data);
-        let mut event = zk_proto_rs::zk::oms::v1::PositionUpdateEvent::default();
-        event.account_id = account_id;
-        event.position_snapshots = positions.iter().map(|p| p.position_state.clone()).collect();
-        event.timestamp = ts;
-        event
-    }
-
-    /// Build a full balance snapshot for an account using the new `Balance` proto type.
+    /// Build a full balance snapshot for an account using the `Balance` proto type.
     pub fn build_balance_snapshot(
         &self,
         account_id: i64,
@@ -320,25 +305,4 @@ impl BalanceManager {
         }
     }
 
-    /// Build a partial position snapshot for a set of symbols.
-    pub fn build_position_snapshot_for_symbols(
-        &self,
-        account_id: i64,
-        symbols: &[String],
-        use_exch_data: bool,
-        ts: i64,
-    ) -> zk_proto_rs::zk::oms::v1::PositionUpdateEvent {
-        let src = if use_exch_data { &self.exch_balances } else { &self.balances };
-        let snapshots: Vec<_> = symbols
-            .iter()
-            .filter_map(|s| src.get(&account_id)?.get(s))
-            .map(|p| p.position_state.clone())
-            .collect();
-
-        let mut event = zk_proto_rs::zk::oms::v1::PositionUpdateEvent::default();
-        event.account_id = account_id;
-        event.position_snapshots = snapshots;
-        event.timestamp = ts;
-        event
-    }
 }

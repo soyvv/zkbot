@@ -12,7 +12,10 @@
 ///   on_order_update, on_timer are also tried as fallbacks.
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use zk_proto_rs::zk::{oms::v1::OrderUpdateEvent, rtmd::v1::Kline};
+use zk_proto_rs::zk::{
+    oms::v1::{BalanceUpdateEvent, OrderUpdateEvent, PositionUpdateEvent},
+    rtmd::v1::Kline,
+};
 use zk_strategy_sdk_rs::{
     context::StrategyContext,
     models::{SAction, TimerEvent},
@@ -179,6 +182,46 @@ impl Strategy for PyStrategyAdapter {
                 } else {
                     Self::call_method(py, &s.py_strategy, "on_order_update", (py_oue, tq))
                 }
+            })
+        })
+    }
+
+    fn on_balance_update(
+        &mut self,
+        bue: &BalanceUpdateEvent,
+        ctx: &StrategyContext,
+    ) -> Vec<SAction> {
+        Python::with_gil(|py| {
+            let py_bue =
+                match rust_proto_to_py(py, bue, "zk_datamodel.oms", "BalanceUpdateEvent") {
+                    Ok(o) => o,
+                    Err(e) => {
+                        e.print(py);
+                        return vec![];
+                    }
+                };
+            self.with_adapter(py, ctx, |s, py, tq| {
+                Self::call_method(py, &s.py_strategy, "on_balanceupdate", (py_bue, tq))
+            })
+        })
+    }
+
+    fn on_position_update(
+        &mut self,
+        pue: &PositionUpdateEvent,
+        ctx: &StrategyContext,
+    ) -> Vec<SAction> {
+        Python::with_gil(|py| {
+            let py_pue =
+                match rust_proto_to_py(py, pue, "zk_datamodel.oms", "PositionUpdateEvent") {
+                    Ok(o) => o,
+                    Err(e) => {
+                        e.print(py);
+                        return vec![];
+                    }
+                };
+            self.with_adapter(py, ctx, |s, py, tq| {
+                Self::call_method(py, &s.py_strategy, "on_positionupdate", (py_pue, tq))
             })
         })
     }
