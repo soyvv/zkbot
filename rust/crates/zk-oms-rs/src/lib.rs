@@ -3,6 +3,8 @@ pub mod config;
 pub mod models;
 pub mod oms_core;
 pub mod order_mgr;
+pub mod position_mgr;
+pub mod reservation_mgr;
 #[cfg(feature = "replica")]
 pub mod snapshot;
 pub mod utils;

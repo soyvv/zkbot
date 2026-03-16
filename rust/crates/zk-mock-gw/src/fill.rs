@@ -4,8 +4,8 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::proto::exch_gw::{
-    order_report_entry::Report, ExchangeOrderStatus, OrderIdLinkageReport, OrderReport,
-    OrderReportEntry, OrderReportType, OrderSourceType, OrderStateReport, TradeReport,
+    order_report_entry::Report, BalanceUpdate, ExchangeOrderStatus, OrderIdLinkageReport,
+    OrderReport, OrderReportEntry, OrderReportType, OrderSourceType, OrderStateReport, TradeReport,
 };
 use crate::state::MockGwState;
 use prost::Message;
@@ -96,14 +96,14 @@ pub async fn simulate_fill(
         tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
     }
 
-    let (gw_id, account_id, qty, price, nats) = {
+    let (gw_id, account_id, qty, price, instrument, side, nats) = {
         let mut s = state.lock().await;
         match s.orders.remove(&exch_order_ref) {
             Some(order) => {
                 let gw_id = s.gw_id.clone();
                 let nats = s.nats_client.clone();
                 s.fill_tasks.remove(&exch_order_ref);
-                (gw_id, order.account_id, order.qty, order.price, nats)
+                (gw_id, order.account_id, order.qty, order.price, order.instrument.clone(), order.side, nats)
             }
             None => {
                 // Order was already cancelled.
@@ -147,6 +147,18 @@ pub async fn simulate_fill(
         },
     ];
     publish(&nats, &gw_id, report).await;
+
+    // Update balances and publish BalanceUpdate to NATS.
+    let balance_entries = {
+        let mut s = state.lock().await;
+        s.apply_fill_to_balances(&instrument, side, qty, price);
+        s.balance_snapshot()
+    };
+    let balance_subject = format!("zk.gw.{gw_id}.balance");
+    let balance_bytes = BalanceUpdate { balances: balance_entries }.encode_to_vec();
+    if let Err(e) = nats.publish(balance_subject.clone(), balance_bytes.into()).await {
+        warn!(balance_subject, error = %e, "failed to publish balance update");
+    }
 }
 
 /// Publish a CANCELLED OrderReport immediately.

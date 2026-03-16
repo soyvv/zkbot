@@ -79,14 +79,14 @@ Current implementation note: OMS core does not fully implement request idempoten
 
 **Queries:**
 
-| RPC | Request | Response |
-|---|---|---|
-| `QueryOpenOrders` | `QueryOpenOrdersRequest` | `QueryOpenOrdersResponse` |
-| `QueryOrder` | `QueryOrderRequest` | `QueryOrderResponse` |
-| `QueryTrades` | `QueryTradesRequest` | `QueryTradesResponse` |
-| `QueryPositions` | `QueryPositionsRequest` | `QueryPositionsResponse` |
-| `QueryBalances` | `QueryBalancesRequest` | `QueryBalancesResponse` |
-| `QueryHealth` | `QueryHealthRequest` | `ServiceHealthResponse` |
+| RPC | Request | Response | Notes |
+|---|---|---|---|
+| `QueryOpenOrders` | `QueryOpenOrdersRequest` | `QueryOpenOrdersResponse` | |
+| `QueryOrder` | `QueryOrderRequest` | `QueryOrderResponse` | |
+| `QueryTrades` | `QueryTradesRequest` | `QueryTradesResponse` | |
+| `QueryPosition` | `QueryPositionRequest` | `PositionResponse` | Compatibility — reads from balance ledger; prefer `QueryBalances` |
+| `QueryBalances` | `QueryBalancesRequest` | `QueryBalancesResponse` | Canonical balance query |
+| `QueryHealth` | `QueryHealthRequest` | `ServiceHealthResponse` | |
 
 **Streaming:**
 

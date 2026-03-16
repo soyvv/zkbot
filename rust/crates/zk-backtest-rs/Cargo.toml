@@ -6,6 +6,7 @@ description = "Deterministic replay engine, event ordering, simulator core, and 
 
 [dependencies]
 zk-proto-rs = { path = "../zk-proto-rs" }
+zk-sim-core = { path = "../zk-sim-core" }
 zk-domain-rs = { path = "../zk-domain-rs" }
 zk-oms-rs = { path = "../zk-oms-rs" }
 zk-strategy-sdk-rs = { path = "../zk-strategy-sdk-rs" }

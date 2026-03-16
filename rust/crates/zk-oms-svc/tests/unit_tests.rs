@@ -167,7 +167,12 @@ async fn simple_test_writer_loop(
                         core.reload_config(new_config);
                         let snap = {
                             let prev = replica.load();
-                            writer.publish(prev.balances.clone(), prev.exch_balances.clone(), gen_timestamp_ms())
+                            writer.publish(
+                                prev.managed_positions.clone(),
+                                prev.exch_positions.clone(),
+                                prev.exch_balances.clone(),
+                                gen_timestamp_ms(),
+                            )
                         };
                         replica.store(Arc::new(snap));
                         let _ = reply.send(oms_actor::ok_response("reloaded"));
@@ -178,25 +183,33 @@ async fn simple_test_writer_loop(
 
                 let actions = core.process_message(oms_msg);
                 let mut balances_dirty = false;
+                let mut positions_dirty = false;
                 for action in &actions {
                     match action {
                         OmsAction::PersistOrder { order, set_closed, .. } =>
                             writer.apply_persist_order(order, *set_closed),
                         OmsAction::PublishBalanceUpdate(_) => balances_dirty = true,
+                        OmsAction::PublishPositionUpdate(_) => positions_dirty = true,
                         _ => {}
                     }
                 }
 
-                let snap = if balances_dirty {
-                    writer.publish(
-                        core.balance_mgr.snapshot_balances(),
-                        core.balance_mgr.snapshot_exch_balances(),
-                        gen_timestamp_ms(),
+                let (managed_pos, exch_pos) = if positions_dirty {
+                    (
+                        core.position_mgr.snapshot_managed(),
+                        core.position_mgr.snapshot_exch(),
                     )
                 } else {
                     let prev = replica.load();
-                    writer.publish(prev.balances.clone(), prev.exch_balances.clone(), gen_timestamp_ms())
+                    (prev.managed_positions.clone(), prev.exch_positions.clone())
                 };
+                let exch_bal = if balances_dirty {
+                    core.balance_mgr.snapshot_exch_balances()
+                } else {
+                    let prev = replica.load();
+                    prev.exch_balances.clone()
+                };
+                let snap = writer.publish(managed_pos, exch_pos, exch_bal, gen_timestamp_ms());
                 replica.store(Arc::new(snap));
 
                 if let Some(tx) = reply {
@@ -462,6 +475,122 @@ fn test_config_defaults() {
     std::env::remove_var("ZK_OMS_ID");
     std::env::remove_var("ZK_REDIS_URL");
     std::env::remove_var("ZK_PG_URL");
+}
+
+// ── QueryPosition compatibility tests ────────────────────────────────────────
+
+/// Helper: build a snapshot with positions and balances populated.
+fn snapshot_with_positions() -> zk_oms_rs::snapshot::OmsSnapshot {
+    use std::collections::HashMap;
+    use zk_oms_rs::models::{ExchBalanceSnapshot, ExchPositionSnapshot, OmsManagedPosition};
+    use zk_proto_rs::zk::oms::v1::{Balance, Position};
+
+    // Managed positions
+    let mut managed_positions: HashMap<i64, HashMap<String, OmsManagedPosition>> = HashMap::new();
+    let mut acct_pos = HashMap::new();
+    let mut btc_pos = OmsManagedPosition::new(9001, "BTC-PERP", 2, false);
+    btc_pos.qty_total = 1.5;
+    btc_pos.qty_available = 1.5;
+    acct_pos.insert("BTC-PERP".to_string(), btc_pos);
+    managed_positions.insert(9001, acct_pos);
+
+    // Exchange positions
+    let mut exch_positions: HashMap<i64, HashMap<String, ExchPositionSnapshot>> = HashMap::new();
+    let mut acct_exch_pos = HashMap::new();
+    acct_exch_pos.insert(
+        "BTC-PERP".to_string(),
+        ExchPositionSnapshot {
+            account_id: 9001,
+            instrument_code: "BTC-PERP".to_string(),
+            symbol_exch: None,
+            position_state: Position {
+                account_id: 9001,
+                instrument_code: "BTC-PERP".to_string(),
+                total_qty: 1.4,
+                ..Default::default()
+            },
+            exch_data_raw: String::new(),
+            sync_ts: 0,
+        },
+    );
+    exch_positions.insert(9001, acct_exch_pos);
+
+    // Exchange balances
+    let mut exch_balances: HashMap<i64, HashMap<String, ExchBalanceSnapshot>> = HashMap::new();
+    let mut acct_bal = HashMap::new();
+    acct_bal.insert(
+        "USDT".to_string(),
+        ExchBalanceSnapshot {
+            account_id: 9001,
+            asset: "USDT".to_string(),
+            symbol_exch: None,
+            balance_state: Balance {
+                account_id: 9001,
+                asset: "USDT".to_string(),
+                total_qty: 10_000.0,
+                avail_qty: 10_000.0,
+                is_from_exch: true,
+                ..Default::default()
+            },
+            exch_data_raw: String::new(),
+            sync_ts: 0,
+        },
+    );
+    exch_balances.insert(9001, acct_bal);
+
+    zk_oms_rs::snapshot::OmsSnapshot {
+        orders: Default::default(),
+        open_order_ids_by_account: Default::default(),
+        panic_accounts: Default::default(),
+        managed_positions,
+        exch_positions,
+        exch_balances,
+        seq: 1,
+        snapshot_ts_ms: 0,
+    }
+}
+
+/// query_position(query_gw=false) returns OMS-managed positions.
+#[test]
+fn test_query_position_managed() {
+    let snap = snapshot_with_positions();
+    let positions: Vec<_> = snap
+        .managed_positions
+        .get(&9001)
+        .map(|acct| acct.values().map(|p| p.to_proto()).collect())
+        .unwrap_or_default();
+
+    assert_eq!(positions.len(), 1);
+    let btc = positions.iter().find(|p| p.instrument_code == "BTC-PERP").unwrap();
+    assert!((btc.total_qty - 1.5).abs() < f64::EPSILON);
+}
+
+/// query_position(query_gw=true) returns exchange-reported positions.
+#[test]
+fn test_query_position_from_exch() {
+    let snap = snapshot_with_positions();
+    let positions: Vec<_> = snap
+        .exch_positions
+        .get(&9001)
+        .map(|acct| acct.values().map(|p| p.position_state.clone()).collect())
+        .unwrap_or_default();
+
+    assert_eq!(positions.len(), 1);
+    let btc = positions.iter().find(|p| p.instrument_code == "BTC-PERP").unwrap();
+    assert!((btc.total_qty - 1.4).abs() < f64::EPSILON);
+}
+
+/// query_position for unknown account returns empty list (no error).
+#[test]
+fn test_query_position_unknown_account() {
+    let snap = snapshot_with_positions();
+    let positions: Vec<zk_proto_rs::zk::oms::v1::Position> = snap
+        .managed_positions
+        .get(&9999)
+        .map(|acct| acct.values().map(|p| p.to_proto()).collect())
+        .unwrap_or_default();
+
+    assert!(positions.is_empty());
 }
 
 // ── Integration tests (require dev docker-compose stack) ──────────────────────

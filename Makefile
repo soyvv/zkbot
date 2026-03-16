@@ -1,7 +1,8 @@
 .PHONY: gen lint test build publish \
         dev-up dev-up-full dev-down dev-reset dev-logs dev-ps \
         test-unit test-integration test-parity \
-        oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-redis-clear
+        oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-redis-clear \
+        gw-check gw-build gw-test gw-run
 
 gen:
 	buf generate protos
@@ -21,7 +22,7 @@ publish:
 
 # ── Local dev stack ───────────────────────────────────────────────────────────
 # Typical local workflow:
-#   make dev-up    → start infra (NATS/Redis/PG/Vault/mock-gw); oms-svc NOT started
+#   make dev-up    → start infra (NATS/Redis/PG/Vault/gw-sim); oms-svc NOT started
 #   make oms-run   → run OMS locally (cargo run, with hot-reload)
 #   make oms-e2e-bench
 #
@@ -30,7 +31,7 @@ publish:
 #
 COMPOSE := docker compose -f devops/docker-compose.yml
 
-dev-up: ## Start infra only (NATS, Redis, PG, Vault, mock-gw); run OMS locally with make oms-run
+dev-up: ## Start infra only (NATS, Redis, PG, Vault, gw-sim); run OMS locally with make oms-run
 	$(COMPOSE) up -d --build
 	devops/init/vault.sh
 	$(MAKE) oms-redis-clear
@@ -95,3 +96,26 @@ oms-run: ## Run OMS locally (requires dev stack up: make dev-up)
 
 oms-redis-clear: ## Delete all oms:{OMS_ID}:* keys from dev Redis (OMS_ID default: oms_dev_1)
 	./scripts/clear_oms_redis.sh
+
+# ── Gateway service ─────────────────────────────────────────────────────────
+gw-check:
+	cd rust && cargo check -p zk-gw-svc
+
+gw-build:
+	cd rust && cargo build --release -p zk-gw-svc
+
+gw-test:
+	cd rust && cargo test -p zk-gw-svc
+
+gw-run: ## Run gateway simulator locally (requires NATS: make dev-up)
+	cd rust && ZK_GW_ID=gw_sim_1 \
+	           ZK_VENUE=simulator \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_ACCOUNT_ID=9001 \
+	           ZK_MATCH_POLICY=fcfs \
+	           ZK_MOCK_BALANCES="BTC:10,USDT:100000,ETH:50" \
+	           ZK_GRPC_PORT=51051 \
+	           ZK_ADMIN_GRPC_PORT=51052 \
+	           ZK_ENABLE_ADMIN_CONTROLS=true \
+	           RUST_LOG=zk_gw_svc=debug,info \
+	           cargo run -p zk-gw-svc

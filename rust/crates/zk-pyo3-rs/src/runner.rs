@@ -63,14 +63,16 @@ impl RustBacktester {
     ///   account_ids             : list[int]
     ///   refdata                 : list[dict]  — each dict has keys matching InstrumentRefData fields
     ///   init_balances           : dict[int, dict[str, float]]  account_id → {symbol: qty}
+    ///   init_positions          : dict[int, dict[str, float]]  account_id → {instrument_code: qty}  (negative = short)
     ///   match_policy            : str  "immediate" (default) | "fcfs"
     ///   include_klines_in_result: bool  when True, pushed bars are included in the result dict
     #[new]
-    #[pyo3(signature = (account_ids, refdata, init_balances=None, match_policy="immediate", include_klines_in_result=false))]
+    #[pyo3(signature = (account_ids, refdata, init_balances=None, init_positions=None, match_policy="immediate", include_klines_in_result=false))]
     fn new(
         account_ids: Vec<i64>,
         refdata: Vec<Bound<'_, PyDict>>,
         init_balances: Option<Bound<'_, PyDict>>,
+        init_positions: Option<Bound<'_, PyDict>>,
         match_policy: &str,
         include_klines_in_result: bool,
     ) -> PyResult<Self> {
@@ -83,6 +85,10 @@ impl RustBacktester {
             .map(|d| parse_init_balances(&d))
             .transpose()?;
 
+        let init_pos = init_positions
+            .map(|d| parse_init_balances(&d))
+            .transpose()?;
+
         let mp: Box<dyn zk_backtest_rs::match_policy::MatchPolicy> = match match_policy {
             "fcfs" => Box::new(FirstComeFirstServedMatchPolicy),
             _ => Box::new(ImmediateMatchPolicy),
@@ -92,6 +98,7 @@ impl RustBacktester {
             account_ids,
             refdata: ref_vec,
             init_balances: init_bals,
+            init_positions: init_pos,
             match_policy: mp,
             init_data_fetcher: None,
             progress_callback: None,

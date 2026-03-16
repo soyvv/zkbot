@@ -31,7 +31,7 @@ use tracing::{debug, error, warn};
 use zk_infra_rs::nats::subject;
 use zk_proto_rs::zk::{
     exch_gw::v1::{BalanceUpdate, OrderReport},
-    oms::v1::{BalanceUpdateEvent, OrderUpdateEvent},
+    oms::v1::{BalanceUpdateEvent, OrderUpdateEvent, PositionUpdateEvent},
 };
 
 use crate::oms_actor::OmsCommand;
@@ -67,6 +67,12 @@ impl NatsPublisher {
     /// Publish `BalanceUpdateEvent` to the OMS balance topic.
     pub async fn publish_balance_update(&self, event: &BalanceUpdateEvent) {
         let subj = subject::oms_balance_update(&self.oms_id);
+        self.publish_proto(subj, event).await;
+    }
+
+    /// Publish `PositionUpdateEvent` to the OMS position topic.
+    pub async fn publish_position_update(&self, event: &PositionUpdateEvent) {
+        let subj = subject::oms_position_update(&self.oms_id);
         self.publish_proto(subj, event).await;
     }
 }

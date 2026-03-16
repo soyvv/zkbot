@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use zk_infra_rs::redis::key;
-use zk_oms_rs::models::{OmsOrder, OmsPosition};
+use zk_oms_rs::models::{ExchBalanceSnapshot, OmsManagedPosition, OmsOrder};
+use zk_proto_rs::zk::oms::v1::Balance;
 
 /// Thin wrapper around a multiplexed Redis connection.
 pub struct RedisWriter {
@@ -75,10 +76,10 @@ impl RedisWriter {
         &mut self,
         account_id: i64,
         asset: &str,
-        pos: &OmsPosition,
+        snap: &ExchBalanceSnapshot,
     ) -> Result<(), RedisWriterError> {
         let k       = key::balance(&self.oms_id, account_id, asset);
-        let payload = serde_json::to_vec(&PersistedPosition::from(pos))
+        let payload = serde_json::to_vec(&PersistedBalance::from(snap))
             .map_err(RedisWriterError::Serialize)?;
         self.conn
             .set_ex::<_, _, ()>(k, payload, 86_400u64)
@@ -87,16 +88,16 @@ impl RedisWriter {
         Ok(())
     }
 
-    /// Persist a position snapshot.
+    /// Persist a managed position snapshot.
     pub async fn write_position(
         &mut self,
         account_id: i64,
         instrument: &str,
         side: &str,
-        pos: &OmsPosition,
+        pos: &OmsManagedPosition,
     ) -> Result<(), RedisWriterError> {
         let k       = key::position(&self.oms_id, account_id, instrument, side);
-        let payload = serde_json::to_vec(&PersistedPosition::from(pos))
+        let payload = serde_json::to_vec(&PersistedManagedPosition::from(pos))
             .map_err(RedisWriterError::Serialize)?;
         self.conn
             .set_ex::<_, _, ()>(k, payload, 86_400u64)
@@ -159,6 +160,63 @@ impl RedisWriter {
             }
         }
         Ok(orders)
+    }
+
+    /// Load all persisted balance snapshots from Redis for this OMS instance.
+    pub async fn load_balances(&mut self) -> Result<Vec<ExchBalanceSnapshot>, RedisWriterError> {
+        let pattern = format!("oms:{}:balance:*", self.oms_id);
+        let keys = self.scan_keys(&pattern).await?;
+        let mut result = Vec::new();
+        for k in keys {
+            let payload: Option<Vec<u8>> = self.conn.get(&k).await.map_err(RedisWriterError::Redis)?;
+            if let Some(bytes) = payload {
+                match serde_json::from_slice::<PersistedBalance>(&bytes) {
+                    Ok(pb) => result.push(pb.into_exch_balance_snapshot()),
+                    Err(e) => warn!(key = k, error = %e, "failed to deserialise persisted balance"),
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Load all persisted position snapshots from Redis for this OMS instance.
+    pub async fn load_positions(&mut self) -> Result<Vec<OmsManagedPosition>, RedisWriterError> {
+        let pattern = format!("oms:{}:position:*", self.oms_id);
+        let keys = self.scan_keys(&pattern).await?;
+        let mut result = Vec::new();
+        for k in keys {
+            let payload: Option<Vec<u8>> = self.conn.get(&k).await.map_err(RedisWriterError::Redis)?;
+            if let Some(bytes) = payload {
+                match serde_json::from_slice::<PersistedManagedPosition>(&bytes) {
+                    Ok(pp) => result.push(pp.into_oms_managed_position()),
+                    Err(e) => warn!(key = k, error = %e, "failed to deserialise persisted position"),
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// SCAN helper — returns all keys matching `pattern`.
+    async fn scan_keys(&mut self, pattern: &str) -> Result<Vec<String>, RedisWriterError> {
+        let mut cursor = 0u64;
+        let mut keys = Vec::new();
+        loop {
+            let (next_cursor, batch): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(pattern)
+                .arg("COUNT")
+                .arg(100u64)
+                .query_async(&mut self.conn)
+                .await
+                .map_err(RedisWriterError::Redis)?;
+            keys.extend(batch);
+            cursor = next_cursor;
+            if cursor == 0 {
+                break;
+            }
+        }
+        Ok(keys)
     }
 }
 
@@ -261,30 +319,88 @@ impl PersistedOrder {
     }
 }
 
-/// Serialised form of `OmsPosition` stored in Redis.
+/// Serialised form of `OmsManagedPosition` stored in Redis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersistedPosition {
+pub struct PersistedManagedPosition {
+    pub account_id:       i64,
+    pub instrument_code:  String,
+    pub symbol_exch:      Option<String>,
+    pub instrument_type:  i32,
+    pub is_short:         bool,
+    pub total_qty:        f64,
+    pub frozen_qty:       f64,
+    pub avail_qty:        f64,
+}
+
+impl PersistedManagedPosition {
+    pub fn into_oms_managed_position(self) -> OmsManagedPosition {
+        let mut pos = OmsManagedPosition::new(
+            self.account_id,
+            self.instrument_code,
+            self.instrument_type,
+            self.is_short,
+        );
+        pos.symbol_exch = self.symbol_exch;
+        pos.qty_total = self.total_qty;
+        pos.qty_frozen = self.frozen_qty;
+        pos.qty_available = self.avail_qty;
+        pos
+    }
+}
+
+impl From<&OmsManagedPosition> for PersistedManagedPosition {
+    fn from(p: &OmsManagedPosition) -> Self {
+        Self {
+            account_id:      p.account_id,
+            instrument_code: p.instrument_code.clone(),
+            symbol_exch:     p.symbol_exch.clone(),
+            instrument_type: p.instrument_type,
+            is_short:        p.is_short,
+            total_qty:       p.qty_total,
+            frozen_qty:      p.qty_frozen,
+            avail_qty:       p.qty_available,
+        }
+    }
+}
+
+/// Serialised form of `ExchBalanceSnapshot` stored in Redis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedBalance {
     pub account_id:    i64,
-    pub symbol:        String,
-    pub symbol_exch:   Option<String>,
-    pub is_short:      bool,
+    pub asset:         String,
     pub total_qty:     f64,
     pub frozen_qty:    f64,
     pub avail_qty:     f64,
-    pub is_from_exch:  bool,
 }
 
-impl From<&OmsPosition> for PersistedPosition {
-    fn from(p: &OmsPosition) -> Self {
+impl PersistedBalance {
+    pub fn into_exch_balance_snapshot(self) -> ExchBalanceSnapshot {
+        ExchBalanceSnapshot {
+            account_id: self.account_id,
+            asset: self.asset.clone(),
+            symbol_exch: None,
+            balance_state: Balance {
+                account_id: self.account_id,
+                asset: self.asset,
+                total_qty: self.total_qty,
+                avail_qty: self.avail_qty,
+                frozen_qty: self.frozen_qty,
+                ..Default::default()
+            },
+            exch_data_raw: String::new(),
+            sync_ts: 0,
+        }
+    }
+}
+
+impl From<&ExchBalanceSnapshot> for PersistedBalance {
+    fn from(b: &ExchBalanceSnapshot) -> Self {
         Self {
-            account_id:   p.account_id,
-            symbol:       p.symbol.clone(),
-            symbol_exch:  p.symbol_exch.clone(),
-            is_short:     p.is_short,
-            total_qty:    p.position_state.total_qty,
-            frozen_qty:   p.position_state.frozen_qty,
-            avail_qty:    p.position_state.avail_qty,
-            is_from_exch: p.position_state.is_from_exch,
+            account_id: b.account_id,
+            asset:      b.asset.clone(),
+            total_qty:  b.balance_state.total_qty,
+            frozen_qty: b.balance_state.frozen_qty,
+            avail_qty:  b.balance_state.avail_qty,
         }
     }
 }

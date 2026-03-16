@@ -1,0 +1,8 @@
+[package]
+name = "zk-sim-core"
+version = "0.1.0"
+edition = "2021"
+description = "Shared simulation core: match policies, simulator engine, and order models for zkbot"
+
+[dependencies]
+zk-proto-rs = { path = "../zk-proto-rs" }

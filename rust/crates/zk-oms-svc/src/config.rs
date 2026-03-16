@@ -85,6 +85,10 @@ pub struct OmsSvcConfig {
     #[serde(default = "default_resync_interval_secs")]
     pub balance_resync_interval_secs: u64,
 
+    /// Position recheck interval in seconds (default 30).
+    #[serde(default = "default_position_recheck_interval_secs")]
+    pub position_recheck_interval_secs: u64,
+
     /// Cleanup interval in seconds (default 600).
     #[serde(default = "default_cleanup_interval_secs")]
     pub cleanup_interval_secs: u64,
@@ -111,6 +115,7 @@ fn default_cmd_channel_buf()     -> usize  { 4_096 }
 fn default_kv_heartbeat_secs()   -> u64    { 10 }
 fn default_gw_kv_prefix()        -> String { "svc.gw".into() }
 fn default_resync_interval_secs() -> u64   { 60 }
+fn default_position_recheck_interval_secs() -> u64 { 30 }
 fn default_cleanup_interval_secs() -> u64  { 600 }
 fn default_metrics_interval_secs() -> u64  { 10 }
 fn default_metrics_max_pending()   -> usize { 5_000 }

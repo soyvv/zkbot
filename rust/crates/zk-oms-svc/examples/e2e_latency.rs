@@ -5,7 +5,7 @@
 //!
 //! - **Flow 1: Place → Booked** — gRPC PlaceOrder + wait for Booked NATS event
 //! - **Flow 2: Place → Booked → Cancel → Cancelled** — cancel flow latency
-//! - **Flow 3: Place → Booked → Filled** — mock-gw auto-fill latency
+//! - **Flow 3: Place → Booked → ForceMatch → Filled** — admin-triggered fill latency
 //!
 //! Each flow is run `E2E_ITERATIONS` times (default 100).
 //! Results: min / p50 / p95 / p99 / max per flow, plus throughput.
@@ -22,8 +22,8 @@
 //! | `t1` | OMS handler | `system_time_ns()` at OMS gRPC handler entry (single PlaceOrder only) |
 //! | `t3` | OMS actor   | `system_time_ns()` immediately **before** `gw_pool.send_order()` |
 //! | `t3r`| OMS actor   | `system_time_ns()` immediately **after** `send_order()` returns (gRPC ACK) |
-//! | `t4` | mock-gw     | `system_time_ns()` at entry of `GatewayService::place_order` handler |
-//! | `t5` | mock-gw     | `OrderReport.update_timestamp × 1_000_000` — GW clock when BOOKED NATS msg is published |
+//! | `t4` | gw-sim     | `system_time_ns()` at entry of `GatewayService::place_order` handler |
+//! | `t5` | gw-sim     | `OrderReport.update_timestamp × 1_000_000` — GW clock when BOOKED NATS msg is published |
 //! | `t6` | OMS actor   | `system_time_ns()` at entry of `GatewayOrderReport` command processing |
 //! | `t7` | OMS actor   | `OrderUpdateEvent.timestamp × 1_000_000` — OMS clock when update event is published |
 //! | `t8` | bench       | `system_time_ns()` immediately after receiving `OrderUpdateEvent` from NATS |
@@ -44,7 +44,7 @@
 //!
 //! # Prerequisites
 //! ```bash
-//! make dev-up       # start NATS, Postgres, Redis, mock-gw
+//! make dev-up       # start NATS, Postgres, Redis, gw-sim
 //! make oms-run      # start OMS service in another terminal
 //! ```
 //!
@@ -81,6 +81,8 @@ use zk_proto_rs::zk::{
 };
 
 use zk_oms_svc::proto::oms_svc::oms_service_client::OmsServiceClient;
+use zk_oms_svc::proto::gw_svc::gateway_simulator_admin_service_client::GatewaySimulatorAdminServiceClient;
+use zk_proto_rs::zk::gateway::v1::{ForceMatchRequest, FillMode};
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +92,10 @@ fn oms_addr() -> String {
 
 fn nats_url() -> String {
     std::env::var("E2E_NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into())
+}
+
+fn gw_admin_addr() -> String {
+    std::env::var("E2E_GW_ADMIN_ADDR").unwrap_or_else(|_| "http://localhost:51052".into())
 }
 
 fn iterations() -> usize {
@@ -109,7 +115,7 @@ fn metrics_wait_secs() -> u64 {
 
 const OMS_ID:     &str = "oms_dev_1";
 const ACCOUNT_ID: i64  = 9001;
-const INSTRUMENT: &str = "BTCUSDT_MOCK";
+const INSTRUMENT: &str = "BTCUSDT_SIM";
 
 // ── Order ID counter ──────────────────────────────────────────────────────────
 
@@ -368,9 +374,13 @@ async fn flow_place_cancel(
     Ok((cancel_us, ts, order_created_ns))
 }
 
-/// Flow 3: Place → Booked → wait for Filled (mock-gw auto-fills).
+/// Flow 3: Place → Booked → ForceMatch → Filled.
+///
+/// With `fcfs` match policy the sim won't auto-fill on placement, so we
+/// trigger a fill deterministically via the admin `ForceMatch` RPC.
 async fn flow_place_filled(
     client: &mut OmsServiceClient<Channel>,
+    admin:  &mut GatewaySimulatorAdminServiceClient<Channel>,
     nats:   &async_nats::Client,
 ) -> Result<(f64, EventTimestamps, i64), String> {
     let order_id = next_id();
@@ -381,6 +391,17 @@ async fn flow_place_filled(
 
     let t0 = Instant::now();
     client.place_order(req).await.map_err(|e| e.to_string())?;
+
+    // Wait for Booked first so the order is live in the sim.
+    wait_for_status(&mut sub, order_id, OrderStatus::Booked).await?;
+
+    // Trigger fill via admin ForceMatch.
+    admin.force_match(tonic::Request::new(ForceMatchRequest {
+        order_id,
+        fill_mode: FillMode::Full as i32,
+        publish_balance_update: true,
+        ..Default::default()
+    })).await.map_err(|e| format!("ForceMatch failed: {e}"))?;
 
     let ts = wait_for_status(&mut sub, order_id, OrderStatus::Filled).await?;
     let elapsed_us = t0.elapsed().as_secs_f64() * 1_000_000.0;
@@ -450,6 +471,7 @@ async fn main() {
 
     println!("=== OMS E2E Latency Benchmark ===");
     println!("OMS:        {}", oms_addr());
+    println!("GW Admin:   {}", gw_admin_addr());
     println!("NATS:       {}", nats_url());
     println!("Iterations: {n}");
     println!("Instrument: {INSTRUMENT} @ account {ACCOUNT_ID}");
@@ -462,6 +484,14 @@ async fn main() {
         .await
         .expect("failed to connect to OMS gRPC — is `make oms-run` running?");
     let mut client = OmsServiceClient::new(channel);
+
+    // Connect to GW admin gRPC (for ForceMatch in Flow 3).
+    let admin_channel = tonic::transport::Channel::from_shared(gw_admin_addr())
+        .expect("invalid GW admin address")
+        .connect()
+        .await
+        .expect("failed to connect to GW admin gRPC — is gw-sim running on :51052?");
+    let mut admin_client = GatewaySimulatorAdminServiceClient::new(admin_channel);
 
     // Connect to NATS.
     let nats = async_nats::connect(&nats_url())
@@ -518,15 +548,14 @@ async fn main() {
     if f2_errors > 0 { println!("  ERRORS: {f2_errors}/{n}"); }
     println!();
 
-    // ── Flow 3: Place → Booked → Filled ──────────────────────────────────────
-    println!("--- Flow 3: Place → Booked → Filled (mock-gw auto-fill) ---");
+    // ── Flow 3: Place → Booked → ForceMatch → Filled ──────────────────────────
+    println!("--- Flow 3: Place → Booked → ForceMatch → Filled ---");
     let mut f3_samples = Vec::with_capacity(n);
     let f3_start = Instant::now();
     let mut f3_errors = 0usize;
-    // Use fewer iterations for Flow 3 — fill delay adds up.
     let n3 = n.min(50);
     for i in 0..n3 {
-        match flow_place_filled(&mut client, &nats).await {
+        match flow_place_filled(&mut client, &mut admin_client, &nats).await {
             Ok((us, ts, order_created_ns)) => {
                 f3_samples.push(us);
                 bench_samples.record(&ts, order_created_ns);

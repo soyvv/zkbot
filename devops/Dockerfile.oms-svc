@@ -23,9 +23,14 @@ COPY rust/crates/zk-backtest-rs/Cargo.toml     ./rust/crates/zk-backtest-rs/
 COPY rust/crates/zk-strategy-sdk-rs/Cargo.toml ./rust/crates/zk-strategy-sdk-rs/
 COPY rust/crates/zk-infra-rs/Cargo.toml        ./rust/crates/zk-infra-rs/
 COPY rust/crates/zk-pyo3-rs/Cargo.toml         ./rust/crates/zk-pyo3-rs/
+COPY rust/crates/zk-sim-core/Cargo.toml         ./rust/crates/zk-sim-core/
 COPY rust/crates/zk-mock-gw/Cargo.toml         ./rust/crates/zk-mock-gw/
+COPY rust/crates/zk-mock-gw/build.rs           ./rust/crates/zk-mock-gw/
 COPY rust/crates/zk-oms-svc/Cargo.toml         ./rust/crates/zk-oms-svc/
 COPY rust/crates/zk-oms-svc/build.rs           ./rust/crates/zk-oms-svc/
+COPY rust/crates/zk-gw-svc/Cargo.toml          ./rust/crates/zk-gw-svc/
+COPY rust/crates/zk-gw-svc/build.rs            ./rust/crates/zk-gw-svc/
+COPY rust/crates/zk-trading-sdk-rs/Cargo.toml  ./rust/crates/zk-trading-sdk-rs/
 
 # Stub out every crate's lib/main so cargo can resolve the dep graph.
 RUN for dir in \
@@ -34,15 +39,22 @@ RUN for dir in \
       rust/crates/zk-oms-rs \
       rust/crates/zk-engine-rs \
       rust/crates/zk-backtest-rs \
+      rust/crates/zk-sim-core \
       rust/crates/zk-strategy-sdk-rs \
       rust/crates/zk-infra-rs \
       rust/crates/zk-pyo3-rs \
-      rust/crates/zk-mock-gw; do \
+      rust/crates/zk-trading-sdk-rs; do \
         mkdir -p $dir/src && echo "" > $dir/src/lib.rs; \
     done && \
+    mkdir -p rust/crates/zk-mock-gw/src && \
+    echo "" > rust/crates/zk-mock-gw/src/lib.rs && \
+    echo "fn main() {}" > rust/crates/zk-mock-gw/src/main.rs && \
     mkdir -p rust/crates/zk-oms-svc/src && \
     echo "" > rust/crates/zk-oms-svc/src/lib.rs && \
-    echo "fn main() {}" > rust/crates/zk-oms-svc/src/main.rs
+    echo "fn main() {}" > rust/crates/zk-oms-svc/src/main.rs && \
+    mkdir -p rust/crates/zk-gw-svc/src && \
+    echo "" > rust/crates/zk-gw-svc/src/lib.rs && \
+    echo "fn main() {}" > rust/crates/zk-gw-svc/src/main.rs
 
 # Copy protos (needed by zk-proto-rs build.rs and zk-oms-svc build.rs).
 COPY protos/ ./protos/

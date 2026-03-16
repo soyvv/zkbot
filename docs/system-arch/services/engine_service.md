@@ -89,6 +89,15 @@ Refdata guidance:
 
 - the engine should not maintain a second canonical refdata cache beside `RefdataSdk`
 - symbol resolution and market-session lookup should go through `TradingClient.refdata()`
+- in the current design, strategy-facing refdata in `StrategyContext` can be treated as effectively
+  static for the life of the strategy run
+- this is acceptable for now because refdata changes are expected to be low-frequency control-plane
+  events rather than hot-path market events
+- future design should add a strategy callback such as
+  `on_refdata_change(old_refdata, new_refdata, meta)` so strategies can react explicitly before the
+  exposed strategy-side cache/view is updated
+- once that hook exists, the engine/runtime should update the strategy-visible refdata cache only
+  after the callback boundary, preserving deterministic strategy behavior around refdata transitions
 
 The engine supports two supervision modes:
 

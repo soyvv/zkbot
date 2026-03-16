@@ -1,0 +1,305 @@
+syntax = "proto3";
+package zk.gateway.v1;
+
+import "zk/rtmd/v1/rtmd.proto";
+
+// GatewaySimulatorAdminService — test-harness controls for the simulator venue adapter.
+// This service is NOT part of the production GatewayService contract.
+service GatewaySimulatorAdminService {
+  // Phase 1: minimal operator surface
+  rpc ForceMatch(ForceMatchRequest) returns (ForceMatchResponse);
+  rpc InjectError(InjectErrorRequest) returns (InjectErrorResponse);
+  rpc ListInjectedErrors(ListInjectedErrorsRequest) returns (ListInjectedErrorsResponse);
+  rpc ClearInjectedError(ClearInjectedErrorRequest) returns (ClearInjectedErrorResponse);
+
+  // Phase 2: reset and diagnostics
+  rpc ResetSimulator(ResetSimulatorRequest) returns (ResetSimulatorResponse);
+  rpc SetAccountState(SetAccountStateRequest) returns (SetAccountStateResponse);
+  rpc SubmitSyntheticTick(SubmitSyntheticTickRequest) returns (SubmitSyntheticTickResponse);
+  rpc ListOpenOrders(ListOpenOrdersRequest) returns (ListOpenOrdersResponse);
+  rpc PauseMatching(PauseMatchingRequest) returns (MatchingStateResponse);
+  rpc ResumeMatching(ResumeMatchingRequest) returns (MatchingStateResponse);
+  rpc SetMatchPolicy(SetMatchPolicyRequest) returns (SetMatchPolicyResponse);
+  rpc AdvanceTime(AdvanceTimeRequest) returns (AdvanceTimeResponse);
+  rpc GetSimulatorState(GetSimulatorStateRequest) returns (GetSimulatorStateResponse);
+}
+
+// ─── ForceMatch ─────────────────────────────────────────────────────────────
+
+enum FillMode {
+  FILL_MODE_UNSPECIFIED = 0;
+  FILL_MODE_FULL = 1;
+  FILL_MODE_PARTIAL = 2;
+}
+
+message ForceMatchRequest {
+  int64 order_id = 1;
+  FillMode fill_mode = 2;
+  double fill_qty = 3;       // required for PARTIAL
+  double fill_price = 4;     // optional; defaults to order price
+  bool publish_balance_update = 5;   // default true
+  bool publish_position_update = 6;  // default true
+  string reason = 7;
+}
+
+message ForceMatchResponse {
+  bool accepted = 1;
+  int64 matched_order_id = 2;
+  int32 generated_trade_count = 3;
+  double remaining_open_qty = 4;
+  string message = 5;
+}
+
+// ─── InjectError ────────────────────────────────────────────────────────────
+
+enum ErrorScope {
+  ERROR_SCOPE_UNSPECIFIED = 0;
+  ERROR_SCOPE_PLACE_ORDER = 1;
+  ERROR_SCOPE_CANCEL_ORDER = 2;
+  ERROR_SCOPE_QUERY_ACCOUNT_BALANCE = 3;
+  ERROR_SCOPE_QUERY_ORDER_DETAIL = 4;
+}
+
+enum ErrorEffectType {
+  ERROR_EFFECT_UNSPECIFIED = 0;
+  ERROR_EFFECT_RPC_ERROR = 1;
+  ERROR_EFFECT_REJECT_ORDER = 2;
+  ERROR_EFFECT_DELAY_RESPONSE = 3;
+  ERROR_EFFECT_DROP_REPORT = 4;
+  ERROR_EFFECT_DUPLICATE_REPORT = 5;
+  ERROR_EFFECT_DISCONNECT = 6;
+}
+
+enum TriggerPolicy {
+  TRIGGER_POLICY_UNSPECIFIED = 0;
+  TRIGGER_POLICY_ONCE = 1;
+  TRIGGER_POLICY_TIMES = 2;
+  TRIGGER_POLICY_UNTIL_CLEARED = 3;
+}
+
+message ErrorMatchCriteria {
+  int64 account_id = 1;
+  int32 side = 2;              // BuySellType value
+  string instrument = 3;
+  int64 order_id = 4;
+  int64 client_order_id = 5;
+  string exch_account_id = 6;
+}
+
+message InjectErrorRequest {
+  string error_id = 1;           // optional; generated if empty
+  ErrorScope scope = 2;
+  ErrorMatchCriteria match_criteria = 3;
+  ErrorEffectType effect = 4;
+  // effect parameters
+  int32 grpc_status_code = 5;
+  string error_message = 6;
+  int64 delay_ms = 7;
+  int32 duplicate_count = 8;
+  // trigger
+  TriggerPolicy trigger_policy = 9;
+  int32 trigger_times = 10;       // for TRIGGER_POLICY_TIMES
+  int32 priority = 11;
+  bool enabled = 12;
+}
+
+message InjectErrorResponse {
+  string error_id = 1;
+  bool accepted = 2;
+  string message = 3;
+}
+
+// ─── ListInjectedErrors / ClearInjectedError ────────────────────────────────
+
+message ListInjectedErrorsRequest {}
+
+message InjectedErrorInfo {
+  string error_id = 1;
+  ErrorScope scope = 2;
+  ErrorMatchCriteria match_criteria = 3;
+  ErrorEffectType effect = 4;
+  TriggerPolicy trigger_policy = 5;
+  int32 remaining_triggers = 6;
+  int32 priority = 7;
+  bool enabled = 8;
+  int64 created_at = 9;
+  int64 last_fired_at = 10;
+}
+
+message ListInjectedErrorsResponse {
+  repeated InjectedErrorInfo errors = 1;
+}
+
+message ClearInjectedErrorRequest {
+  string error_id = 1;          // empty = clear all
+}
+
+message ClearInjectedErrorResponse {
+  bool accepted = 1;
+  int32 cleared_count = 2;
+  string message = 3;
+}
+
+// ─── ResetSimulator ─────────────────────────────────────────────────────────
+
+message ResetSimulatorRequest {
+  string reason = 1;
+}
+
+message ResetSimulatorResponse {
+  bool accepted = 1;
+  int32 cleared_orders = 2;
+  int32 cleared_error_rules = 3;
+  string message = 4;
+}
+
+// ─── SetAccountState ────────────────────────────────────────────────────────
+
+enum MutationMode {
+  MUTATION_MODE_UNSPECIFIED = 0;
+  MUTATION_MODE_UPSERT = 1;
+  MUTATION_MODE_REMOVE = 2;
+}
+
+message BalanceMutation {
+  string asset = 1;
+  double total_qty = 2;
+  double avail_qty = 3;
+  double frozen_qty = 4;
+  MutationMode mode = 5;
+}
+
+message PositionMutation {
+  string instrument_code = 1;
+  int32 long_short_type = 2;    // LongShortType value
+  double total_qty = 3;
+  double avail_qty = 4;
+  double frozen_qty = 5;
+  MutationMode mode = 6;
+}
+
+message SetAccountStateRequest {
+  int64 account_id = 1;
+  repeated BalanceMutation balance_mutations = 2;
+  repeated PositionMutation position_mutations = 3;
+  bool clear_existing_balances = 4;
+  bool clear_existing_positions = 5;
+  bool publish_updates = 6;      // default true
+  string reason = 7;
+}
+
+message SetAccountStateResponse {
+  bool accepted = 1;
+  int32 applied_balance_count = 2;
+  int32 applied_position_count = 3;
+  string message = 4;
+}
+
+// ─── SubmitSyntheticTick ────────────────────────────────────────────────────
+
+message SubmitSyntheticTickRequest {
+  zk.rtmd.v1.TickData tick = 1;
+  string source_tag = 2;
+  string reason = 3;
+}
+
+message SubmitSyntheticTickResponse {
+  bool accepted = 1;
+  int32 affected_order_count = 2;
+  int32 generated_report_count = 3;
+  string message = 4;
+}
+
+// ─── ListOpenOrders ─────────────────────────────────────────────────────────
+
+message ListOpenOrdersRequest {}
+
+message SimOpenOrder {
+  int64 order_id = 1;
+  string exch_order_ref = 2;
+  int64 account_id = 3;
+  string instrument = 4;
+  int32 side = 5;
+  double remaining_qty = 6;
+  double filled_qty = 7;
+  double limit_price = 8;
+  int64 created_ts = 9;
+  int64 updated_ts = 10;
+}
+
+message ListOpenOrdersResponse {
+  repeated SimOpenOrder orders = 1;
+}
+
+// ─── PauseMatching / ResumeMatching ─────────────────────────────────────────
+
+message PauseMatchingRequest {
+  string reason = 1;
+}
+
+message ResumeMatchingRequest {
+  string reason = 1;
+}
+
+message MatchingStateResponse {
+  bool matching_paused = 1;
+  string message = 2;
+}
+
+// ─── SetMatchPolicy ─────────────────────────────────────────────────────────
+
+message SetMatchPolicyRequest {
+  string policy_name = 1;       // "immediate" or "fcfs"
+  string policy_config = 2;     // optional JSON config
+  string reason = 3;
+}
+
+message SetMatchPolicyResponse {
+  string previous_policy = 1;
+  string current_policy = 2;
+  bool accepted = 3;
+  string message = 4;
+}
+
+// ─── AdvanceTime ────────────────────────────────────────────────────────────
+
+message AdvanceTimeRequest {
+  int64 advance_ms = 1;
+  string reason = 2;
+}
+
+message AdvanceTimeResponse {
+  bool accepted = 1;
+  int64 acknowledged_delta_ms = 2;
+  string message = 3;
+}
+
+// ─── GetSimulatorState ──────────────────────────────────────────────────────
+
+message GetSimulatorStateRequest {}
+
+message SimBalanceEntry {
+  string asset = 1;
+  double total_qty = 2;
+  double avail_qty = 3;
+  double frozen_qty = 4;
+}
+
+message SimPositionEntry {
+  string instrument_code = 1;
+  int32 long_short_type = 2;
+  double total_qty = 3;
+  double avail_qty = 4;
+  double frozen_qty = 5;
+}
+
+message GetSimulatorStateResponse {
+  repeated SimOpenOrder open_orders = 1;
+  repeated SimBalanceEntry balances = 2;
+  repeated SimPositionEntry positions = 3;
+  repeated InjectedErrorInfo active_error_rules = 4;
+  string current_match_policy = 5;
+  bool matching_paused = 6;
+  int64 last_tick_ts = 7;
+  int64 last_event_ts = 8;
+}

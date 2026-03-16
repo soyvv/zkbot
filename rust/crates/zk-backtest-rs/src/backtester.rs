@@ -25,8 +25,11 @@ pub type InitDataFetcher =
 pub struct BacktestConfig {
     pub account_ids: Vec<i64>,
     pub refdata: Vec<InstrumentRefData>,
-    /// Initial holdings: account_id → symbol → quantity.
+    /// Initial asset balances: account_id → asset → quantity.
     pub init_balances: Option<HashMap<i64, HashMap<String, f64>>>,
+    /// Initial instrument positions: account_id → instrument_code → quantity.
+    /// Negative values represent short positions.
+    pub init_positions: Option<HashMap<i64, HashMap<String, f64>>>,
     pub match_policy: Box<dyn MatchPolicy>,
     /// Optional init-data provider called once after `on_create` and before `on_init`.
     /// Mirrors Python `BacktestConfig.init_data_fetcher`.
@@ -121,6 +124,7 @@ impl Backtester {
             config.account_ids,
             config.match_policy,
             config.init_balances.as_ref(),
+            config.init_positions.as_ref(),
         );
         Self {
             runner,

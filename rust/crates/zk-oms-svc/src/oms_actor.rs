@@ -103,6 +103,8 @@ pub enum OmsCommand {
     RecheckOrder(OrderRecheckRequest),
     /// Retry check for a pending cancel.
     RecheckCancel(CancelRecheckRequest),
+    /// Periodic position recheck tick.
+    PositionRecheck,
 }
 
 // ── Writer loop ──────────────────────────────────────────────────────────────
@@ -245,7 +247,7 @@ async fn process_command(
         OmsCommand::ReloadConfig { new_config, reply } => {
             core.reload_config(new_config);
             // Publish refreshed snapshot (config changes can affect risk limits).
-            publish_snapshot(core, writer, replica, false);
+            publish_snapshot(core, writer, replica, false, false);
             let resp = ok_response("Config reloaded");
             let _ = reply.send(resp);
             return; // ReloadConfig is handled inline; no process_message call needed.
@@ -256,6 +258,8 @@ async fn process_command(
             (OmsMessage::RecheckOrder(r), None),
         OmsCommand::RecheckCancel(r) =>
             (OmsMessage::RecheckCancel(r), None),
+        OmsCommand::PositionRecheck =>
+            (OmsMessage::PositionRecheck, None),
     };
 
     // ── Drive OmsCore ────────────────────────────────────────────────────────
@@ -263,6 +267,7 @@ async fn process_command(
 
     // ── Dispatch actions ─────────────────────────────────────────────────────
     let mut balances_dirty = false;
+    let mut positions_dirty = false;
     let mut success = true;
     let mut err_msg = String::new();
 
@@ -285,6 +290,10 @@ async fn process_command(
             OmsAction::PublishBalanceUpdate(event) => {
                 balances_dirty = true;
                 nats.publish_balance_update(&event).await;
+            }
+            OmsAction::PublishPositionUpdate(event) => {
+                positions_dirty = true;
+                nats.publish_position_update(&event).await;
             }
             OmsAction::SendOrderToGw { gw_key, request, order_id, order_created_at } => {
                 let t3 = system_time_ns(); // hot path: one syscall before send
@@ -311,11 +320,21 @@ async fn process_command(
                     warn!(gw_key, error = %e, "BatchCancelOrders to gateway failed");
                 }
             }
+            OmsAction::PersistBalance { account_id, ref asset, ref snapshot } => {
+                if let Err(e) = redis.write_balance(account_id, asset, snapshot).await {
+                    warn!(account_id, asset, error = %e, "Redis write_balance failed");
+                }
+            }
+            OmsAction::PersistPosition { account_id, ref instrument_code, ref side, ref position } => {
+                if let Err(e) = redis.write_position(account_id, instrument_code, side, position).await {
+                    warn!(account_id, instrument_code, error = %e, "Redis write_position failed");
+                }
+            }
         }
     }
 
     // ── Publish updated snapshot (O(1) for im fields) ────────────────────────
-    publish_snapshot(core, writer, replica, balances_dirty);
+    publish_snapshot(core, writer, replica, balances_dirty, positions_dirty);
 
     // ── Reply to caller ──────────────────────────────────────────────────────
     if let Some(tx) = reply {
@@ -333,21 +352,28 @@ async fn process_command(
 // ── Snapshot helper ──────────────────────────────────────────────────────────
 
 fn publish_snapshot(
-    core:          &OmsCore,
-    writer:        &mut OmsSnapshotWriter,
-    replica:       &ReadReplica,
-    balances_dirty: bool,
+    core:             &OmsCore,
+    writer:           &mut OmsSnapshotWriter,
+    replica:          &ReadReplica,
+    balances_dirty:   bool,
+    positions_dirty:  bool,
 ) {
-    let (bal, exch_bal) = if balances_dirty {
+    let (managed_pos, exch_pos) = if positions_dirty {
         (
-            core.balance_mgr.snapshot_balances(),
-            core.balance_mgr.snapshot_exch_balances(),
+            core.position_mgr.snapshot_managed(),
+            core.position_mgr.snapshot_exch(),
         )
     } else {
         let prev = replica.load();
-        (prev.balances.clone(), prev.exch_balances.clone())
+        (prev.managed_positions.clone(), prev.exch_positions.clone())
     };
-    let snap = writer.publish(bal, exch_bal, gen_timestamp_ms());
+    let exch_bal = if balances_dirty {
+        core.balance_mgr.snapshot_exch_balances()
+    } else {
+        let prev = replica.load();
+        prev.exch_balances.clone()
+    };
+    let snap = writer.publish(managed_pos, exch_pos, exch_bal, gen_timestamp_ms());
     replica.store(Arc::new(snap));
 }
 

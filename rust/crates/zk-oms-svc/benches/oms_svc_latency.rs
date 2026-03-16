@@ -135,7 +135,7 @@ async fn bench_writer_loop(
             cmd = rx.recv() => {
                 let Some(cmd) = cmd else { break };
                 let (msg, reply_opt) = match cmd {
-                    OmsCommand::PlaceOrder  { req, reply } =>
+                    OmsCommand::PlaceOrder  { req, reply, .. } =>
                         (OmsMessage::PlaceOrder(req),  Some(reply)),
                     OmsCommand::CancelOrder { req, reply } =>
                         (OmsMessage::CancelOrder(req), Some(reply)),
@@ -146,24 +146,29 @@ async fn bench_writer_loop(
 
                 let actions = core.process_message(msg);
                 let mut balances_dirty = false;
+                let mut positions_dirty = false;
                 for a in &actions {
                     match a {
                         OmsAction::PersistOrder { order, set_closed, .. } =>
                             writer.apply_persist_order(order, *set_closed),
                         OmsAction::PublishBalanceUpdate(_) => balances_dirty = true,
+                        OmsAction::PublishPositionUpdate(_) => positions_dirty = true,
                         _ => {}
                     }
                 }
-                let snap = if balances_dirty {
-                    writer.publish(
-                        core.balance_mgr.snapshot_balances(),
-                        core.balance_mgr.snapshot_exch_balances(),
-                        gen_timestamp_ms(),
-                    )
+                let (managed_pos, exch_pos) = if positions_dirty {
+                    (core.position_mgr.snapshot_managed(), core.position_mgr.snapshot_exch())
                 } else {
                     let prev = replica.load();
-                    writer.publish(prev.balances.clone(), prev.exch_balances.clone(), gen_timestamp_ms())
+                    (prev.managed_positions.clone(), prev.exch_positions.clone())
                 };
+                let exch_bal = if balances_dirty {
+                    core.balance_mgr.snapshot_exch_balances()
+                } else {
+                    let prev = replica.load();
+                    prev.exch_balances.clone()
+                };
+                let snap = writer.publish(managed_pos, exch_pos, exch_bal, gen_timestamp_ms());
                 replica.store(Arc::new(snap));
 
                 if let Some(tx) = reply_opt {
@@ -208,6 +213,7 @@ fn bench_place_order(c: &mut Criterion) {
                 let id = next_id();
                 let resp = send(&cmd_tx, |reply| OmsCommand::PlaceOrder {
                     req: make_order_req(id),
+                    oms_received_ns: 0,
                     reply,
                 })
                 .await;
@@ -261,6 +267,7 @@ fn bench_place_then_cancel(c: &mut Criterion) {
                 // Place
                 let _ = send(&cmd_tx, |reply| OmsCommand::PlaceOrder {
                     req: make_order_req(id),
+                    oms_received_ns: 0,
                     reply,
                 })
                 .await;

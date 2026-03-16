@@ -33,7 +33,7 @@ use tonic::{Request, Response, Status};
 use zk_proto_rs::zk::{
     common::v1::{DummyRequest, ServiceHealthResponse},
     oms::v1::{
-        AlgoOrderRequest, Balance, BatchCancelOrdersRequest,
+        AlgoOrderRequest, BatchCancelOrdersRequest,
         BatchPlaceOrdersRequest, CancelAlgoOrderRequest, DontPanicRequest,
         OmsResponse, OmsErrorType, OrderDetailResponse, PanicRequest, PlaceOrderRequest,
         CancelOrderRequest, PositionResponse, QueryBalancesRequest, QueryBalancesResponse,
@@ -191,19 +191,9 @@ impl OmsService for OmsGrpcHandler {
         let ts   = gen_timestamp_ms();
 
         let balances: Vec<_> = snap
-            .balances
+            .exch_balances
             .get(&req.account_id)
-            .map(|acct| acct.values().map(|p| Balance {
-                account_id: req.account_id,
-                asset: p.position_state.instrument_code.clone(),
-                total_qty: p.position_state.total_qty,
-                frozen_qty: p.position_state.frozen_qty,
-                avail_qty: p.position_state.avail_qty,
-                sync_timestamp: p.position_state.sync_timestamp,
-                update_timestamp: p.position_state.update_timestamp,
-                is_from_exch: p.position_state.is_from_exch,
-                exch_data_raw: p.position_state.exch_data_raw.clone(),
-            }).collect())
+            .map(|acct| acct.values().map(|b| b.balance_state.clone()).collect())
             .unwrap_or_default();
 
         Ok(Response::new(QueryBalancesResponse {
@@ -215,12 +205,22 @@ impl OmsService for OmsGrpcHandler {
 
     async fn query_position(
         &self,
-        _request: Request<QueryPositionRequest>,
+        request: Request<QueryPositionRequest>,
     ) -> Result<Response<PositionResponse>, Status> {
-        Err(Status::unimplemented(
-            "OMS position query not implemented after balance/position split; \
-             use QueryBalances for asset inventory",
-        ))
+        let req  = request.into_inner();
+        let snap = self.replica.load();
+        let positions = if req.query_gw {
+            snap.exch_positions
+                .get(&req.account_id)
+                .map(|acct| acct.values().map(|p| p.position_state.clone()).collect())
+                .unwrap_or_default()
+        } else {
+            snap.managed_positions
+                .get(&req.account_id)
+                .map(|acct| acct.values().map(|p| p.to_proto()).collect())
+                .unwrap_or_default()
+        };
+        Ok(Response::new(PositionResponse { positions }))
     }
 
     async fn query_open_orders(

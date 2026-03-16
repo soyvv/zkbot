@@ -198,7 +198,25 @@ impl GatewayService for ZkGatewayHandler {
         &self,
         _request: Request<QueryAccountRequest>,
     ) -> Result<Response<AccountResponse>, Status> {
-        Ok(Response::new(AccountResponse { ..Default::default() }))
+        use zk_proto_rs::zk::exch_gw::v1::{BalanceUpdate, PositionReport};
+        use zk_proto_rs::zk::common::v1::InstrumentType;
+        let s = self.state.lock().await;
+        let entries: Vec<PositionReport> = s.balances.iter().map(|(symbol, &qty)| {
+            PositionReport {
+                instrument_code: symbol.clone(),
+                instrument_type: InstrumentType::InstTypeSpot as i32,
+                qty,
+                avail_qty: qty,
+                account_id: s.account_id,
+                ..Default::default()
+            }
+        }).collect();
+        Ok(Response::new(AccountResponse {
+            exch_account_code: s.account_id.to_string(),
+            balance_update: Some(BalanceUpdate { balances: entries }),
+            timestamp: system_time_ns() / 1_000_000,
+            ..Default::default()
+        }))
     }
 
     async fn query_position(

@@ -15,6 +15,8 @@ Crate dependency graph, responsibilities, and new components needed.
 | `zk-pyo3-rs` | exists | cdylib + rlib — PyO3 bindings for Python |
 | `zk-infra-rs` | exists (partial) | library — NATS/Redis adapters, dataset readers |
 | `zk-trading-sdk-rs` | **planned** | library — client SDK replacing TQClient + ODS |
+| `zk-mm-core-rs` | **planned** | library — pure MM/hedging logic, pricers, vol, reconciliation |
+| `zk-mm-strategy-rs` | **planned** | library — Rust-native MM/hedging strategy implementations |
 | `zk-oms-svc` | **implemented** (production-ready) | binary — OMS gRPC service host (3-layer mode) |
 | `zk-mock-gw` | **implemented** | binary — mock gateway for dev/testing |
 | `zk-engine-svc` | **planned** | binary — Strategy Engine gRPC service host (3-layer mode) |
@@ -41,6 +43,8 @@ zk-pyo3-rs ← zk-backtest-rs + zk-strategy-sdk-rs + zk-proto-rs + pyo3
 zk-oms-svc ← zk-oms-rs + zk-infra-rs + zk-proto-rs + tonic + async-nats + redis + sqlx  [IMPLEMENTED]
 zk-mock-gw ← zk-proto-rs + tonic + async-nats  [IMPLEMENTED]
 zk-trading-sdk-rs ← zk-proto-rs + zk-infra-rs + tonic + async-nats  [PLANNED]
+zk-mm-core-rs ← zk-domain-rs + serde  [PLANNED]
+zk-mm-strategy-rs ← zk-mm-core-rs + zk-strategy-sdk-rs + zk-backtest-rs(test-only)  [PLANNED]
 zk-engine-svc ← zk-engine-rs + zk-strategy-sdk-rs + zk-trading-sdk-rs + tonic  [PLANNED]
 ```
 
@@ -74,8 +78,19 @@ Known stubs:
 ### `zk-strategy-sdk-rs`
 - `StrategyBase` trait: required callbacks (`on_tick`, `on_order_update`, `on_balance_update`, timer callbacks)
 - `StrategyContext` — injected dependencies for strategies (order submission, query, subscription)
+  plus strategy-facing refdata lookup/cache view
 - chrono + cron scheduler support for timer-driven strategies
 - No infra dependencies
+
+Current refdata note:
+
+- the strategy-facing refdata cache/view in `StrategyContext` may remain static for the duration of
+  a run in the near-term design
+- this should later evolve to an explicit callback contract such as
+  `on_refdata_change(old_refdata, new_refdata, meta)` so the runtime can deliver canonical refdata
+  changes deterministically before swapping the visible cached entry
+- the callback should be event-driven from refdata invalidation/reload, not from ad hoc polling in
+  strategy code
 
 ### `zk-engine-rs`
 - Live event loop: event coalescing, batching, priority routing
@@ -124,6 +139,33 @@ Modules:
 - `id_gen` — Snowflake order-ID generator
 - `model` — SDK domain types
 - `config` — env-var config loader
+
+### `zk-mm-core-rs` (new)
+
+See [MM Strategy Rust Migration Plan](/Users/zzk/workspace/zklab/zkbot/docs/hft-algos/market-making/rust_migration_plan.md).
+
+Modules:
+
+- `config` — typed pricer/vol/hedge config variants
+- `model` — pure market/quote/inventory structs
+- `pricer` — pricer trait and implementations
+- `vol` — volatility/sigma estimators
+- `quote_reconciler` — target-vs-live quote diffing and action planning
+- `hedge_policy` — hedge sizing and trigger rules
+- `risk` — inventory and capacity checks
+
+### `zk-mm-strategy-rs` (new)
+
+See [MM Strategy Rust Migration Plan](/Users/zzk/workspace/zklab/zkbot/docs/hft-algos/market-making/rust_migration_plan.md).
+
+Modules:
+
+- `config` — strategy-facing config schema
+- `mm_strategy` — market maker `Strategy` implementation
+- `hedge_strategy` — hedger `Strategy` implementation
+- `factory` — typed builders from config
+- `init` — warmup/init-data loading helpers
+- `metrics` — strategy diagnostics
 
 ## 4. Service Binary Design
 

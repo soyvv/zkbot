@@ -16,9 +16,9 @@ use zk_backtest_rs::{
     event_queue::BtEventKind,
     match_policy::ImmediateMatchPolicy,
 };
-use zk_proto_rs::{
-    common::{InstrumentRefData, InstrumentType},
-    rtmd::Kline,
+use zk_proto_rs::zk::{
+    common::v1::{InstrumentRefData, InstrumentType},
+    rtmd::v1::Kline,
 };
 use zk_strategy_sdk_rs::strategy::Strategy;
 
@@ -94,6 +94,7 @@ fn make_backtester() -> Backtester {
         init_balances: Some(
             [(ACCOUNT_ID, [("USD".to_string(), 1500.0)].into())].into(),
         ),
+        init_positions: None,
         match_policy: Box::new(ImmediateMatchPolicy),
         init_data_fetcher: None,
         progress_callback: None,

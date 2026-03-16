@@ -3,7 +3,7 @@ use zk_proto_rs::{
         common::v1::InstrumentRefData,
         exch_gw::v1::{BalanceUpdate, OrderReport},
         gateway::v1::{CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest, BatchSendOrdersRequest as ExchBatchSendOrdersRequest, BatchCancelOrdersRequest as ExchBatchCancelOrdersRequest},
-        oms::v1::{BalanceUpdateEvent, ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest, OrderUpdateEvent, PositionUpdateEvent, Position, Trade},
+        oms::v1::{Balance, BalanceUpdateEvent, ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest, OrderUpdateEvent, Position, PositionUpdateEvent, Trade},
     },
     ods::{GwConfigEntry, OmsRouteEntry},
 };
@@ -51,53 +51,127 @@ impl OmsOrder {
     }
 }
 
-/// Internal position / balance record.
-/// Mirrors Python `OMSPosition`.
+// ---------------------------------------------------------------------------
+// Domain types — Position / Balance / Reservation separation
+// ---------------------------------------------------------------------------
+
+/// OMS-owned executable position state for an instrument.
+/// Position qty is owned by the OMS and reconciled against exchange.
 #[derive(Debug, Clone)]
-pub struct OmsPosition {
+pub struct OmsManagedPosition {
     pub account_id: i64,
-    pub symbol: String,
-    /// Exchange-side symbol name (for matching inbound balance updates).
+    pub instrument_code: String,
     pub symbol_exch: Option<String>,
+    pub instrument_type: i32,
     pub is_short: bool,
-    /// Proto snapshot — used for publishing.
-    pub position_state: Position,
+    pub qty_total: f64,
+    pub qty_frozen: f64,
+    pub qty_available: f64,
+    pub last_local_update_ts: i64,
+    pub last_exch_sync_ts: i64,
+    // Reconcile tracking
+    pub reconcile_status: ReconcileStatus,
+    pub last_exch_qty: f64,
+    pub first_diverged_ts: i64,
+    pub divergence_count: u32,
 }
 
-impl OmsPosition {
-    pub fn new(account_id: i64, symbol: impl Into<String>, instrument_type: i32, is_short: bool, is_from_exch: bool) -> Self {
-        use zk_proto_rs::zk::common::v1::LongShortType;
-        let symbol = symbol.into();
-        let mut pos_state = Position::default();
-        pos_state.account_id = account_id;
-        pos_state.instrument_code = symbol.clone();
-        pos_state.instrument_type = instrument_type;
-        pos_state.long_short_type = if is_short {
-            LongShortType::LsShort as i32
-        } else {
-            LongShortType::LsLong as i32
-        };
-        pos_state.avail_qty = 0.0;
-        pos_state.frozen_qty = 0.0;
-        pos_state.total_qty = 0.0;
-        pos_state.is_from_exch = is_from_exch;
-
+impl OmsManagedPosition {
+    pub fn new(
+        account_id: i64,
+        instrument_code: impl Into<String>,
+        instrument_type: i32,
+        is_short: bool,
+    ) -> Self {
         Self {
             account_id,
-            symbol,
+            instrument_code: instrument_code.into(),
             symbol_exch: None,
+            instrument_type,
             is_short,
-            position_state: pos_state,
+            qty_total: 0.0,
+            qty_frozen: 0.0,
+            qty_available: 0.0,
+            last_local_update_ts: 0,
+            last_exch_sync_ts: 0,
+            reconcile_status: ReconcileStatus::Unknown,
+            last_exch_qty: 0.0,
+            first_diverged_ts: 0,
+            divergence_count: 0,
+        }
+    }
+
+    /// Build a proto `Position` from managed state.
+    pub fn to_proto(&self) -> Position {
+        use zk_proto_rs::zk::common::v1::LongShortType;
+        Position {
+            account_id: self.account_id,
+            instrument_code: self.instrument_code.clone(),
+            instrument_type: self.instrument_type,
+            long_short_type: if self.is_short {
+                LongShortType::LsShort as i32
+            } else {
+                LongShortType::LsLong as i32
+            },
+            total_qty: self.qty_total,
+            frozen_qty: self.qty_frozen,
+            avail_qty: self.qty_available,
+            update_timestamp: self.last_local_update_ts,
+            sync_timestamp: self.last_exch_sync_ts,
+            ..Default::default()
         }
     }
 }
 
-/// Balance change request applied atomically by BalanceManager.
-/// Mirrors Python `PositionChange`.
+/// Exchange-reported position snapshot (read-only cache).
 #[derive(Debug, Clone)]
-pub struct PositionChange {
+pub struct ExchPositionSnapshot {
+    pub account_id: i64,
+    pub instrument_code: String,
+    pub symbol_exch: Option<String>,
+    pub position_state: Position,
+    pub exch_data_raw: String,
+    pub sync_ts: i64,
+}
+
+/// Exchange-reported balance snapshot (exchange-owned, canonical).
+#[derive(Debug, Clone)]
+pub struct ExchBalanceSnapshot {
+    pub account_id: i64,
+    pub asset: String,
+    pub symbol_exch: Option<String>,
+    pub balance_state: Balance,
+    pub exch_data_raw: String,
+    pub sync_ts: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReconcileStatus {
+    #[default]
+    Unknown,
+    InSync,
+    DivergedTransient,
+    DivergedPersistent,
+    ExchangeOnly,
+    OmsOnly,
+}
+
+/// Per-order hold against cash or inventory.
+#[derive(Debug, Clone)]
+pub struct Reservation {
+    pub order_id: i64,
     pub account_id: i64,
     pub symbol: String,
+    pub reserved_qty: f64,
+    /// false = cash reservation (buy), true = inventory reservation (sell).
+    pub is_position: bool,
+}
+
+/// Position quantity delta applied by PositionManager.
+#[derive(Debug, Clone)]
+pub struct PositionDelta {
+    pub account_id: i64,
+    pub instrument_code: String,
     pub is_short: bool,
     pub avail_change: f64,
     pub frozen_change: f64,
@@ -140,6 +214,9 @@ pub enum OmsMessage {
     /// Periodic cleanup tick; `ts_ms` is the current wall-clock time in milliseconds.
     Cleanup { ts_ms: i64 },
     ReloadConfig,
+    /// Periodic position recheck — triggers reconciliation of managed positions
+    /// against exchange-reported state.
+    PositionRecheck,
 }
 
 // ---------------------------------------------------------------------------
@@ -174,13 +251,28 @@ pub enum OmsAction {
     },
     /// Publish an order state update (to NATS etc.).
     PublishOrderUpdate(Box<OrderUpdateEvent>),
-    /// Publish a balance / position update.
+    /// Publish a balance update (exchange-owned asset inventory).
     PublishBalanceUpdate(Box<BalanceUpdateEvent>),
+    /// Publish a position update (OMS-managed instrument exposure).
+    PublishPositionUpdate(Box<PositionUpdateEvent>),
     /// Persist order state (to Redis etc.).
     PersistOrder {
         order: Box<OmsOrder>,
         set_expire: bool,
         set_closed: bool,
+    },
+    /// Persist balance snapshot (to Redis etc.).
+    PersistBalance {
+        account_id: i64,
+        asset: String,
+        snapshot: ExchBalanceSnapshot,
+    },
+    /// Persist position snapshot (to Redis etc.).
+    PersistPosition {
+        account_id: i64,
+        instrument_code: String,
+        side: String,
+        position: OmsManagedPosition,
     },
 }
 

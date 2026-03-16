@@ -72,20 +72,25 @@ services:
       timeout: 3s
       retries: 5
 
-  mock-gw:
+  gw-sim:
     build:
       context: ..
-      dockerfile: devops/Dockerfile.mock-gw
-    image: zk-mock-gw:dev
+      dockerfile: devops/Dockerfile.gw-sim
+    image: zk-gw-sim:dev
     ports:
       - "51051:51051"
+      - "51052:51052"
     environment:
       ZK_NATS_URL: "nats://nats:4222"
-      ZK_GW_ID: "gw_mock_1"
+      ZK_GW_ID: "gw_sim_1"
+      ZK_VENUE: "simulator"
       ZK_ACCOUNT_ID: "9001"
-      ZK_FILL_DELAY_MS: "100"
+      ZK_MATCH_POLICY: "fcfs"
       ZK_MOCK_BALANCES: "BTC:10,USDT:100000,ETH:50"
-      RUST_LOG: "zk_mock_gw=info,warn"
+      ZK_GRPC_PORT: "51051"
+      ZK_ADMIN_GRPC_PORT: "51052"
+      ZK_ENABLE_ADMIN_CONTROLS: "true"
+      RUST_LOG: "zk_gw_svc=info,warn"
     depends_on:
       nats:
         condition: service_healthy
@@ -134,7 +139,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      mock-gw:
+      gw-sim:
         condition: service_started
 
   refdata-svc:

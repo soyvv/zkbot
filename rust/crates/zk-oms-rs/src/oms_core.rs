@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use zk_proto_rs::zk::{
     common::v1::{BuySellType, Rejection, RejectionReason, RejectionSource},
     exch_gw::v1::OrderReport,
@@ -15,11 +15,13 @@ use crate::{
     balance_mgr::BalanceManager,
     config::ConfdataManager,
     models::{
-        CancelRecheckRequest, OmsAction, OmsMessage, OmsOrder, OmsPosition, OrderContext,
-        OrderRecheckRequest, PositionChange,
+        CancelRecheckRequest, ExchBalanceSnapshot, OmsAction, OmsMessage, OmsManagedPosition,
+        OmsOrder, OrderContext, OrderRecheckRequest, PositionDelta,
     },
     order_mgr::OrderManager,
-    utils::gen_timestamp_ms,
+    position_mgr::PositionManager,
+    reservation_mgr::ReservationManager,
+    utils::{gen_timestamp_ms, SPOT_INSTRUMENT_TYPE},
 };
 
 /// The core OMS state machine.
@@ -32,7 +34,9 @@ use crate::{
 pub struct OmsCore {
     config: ConfdataManager,
     pub order_mgr: OrderManager,
+    pub position_mgr: PositionManager,
     pub balance_mgr: BalanceManager,
+    pub reservation_mgr: ReservationManager,
     use_time_emulation: bool,
     risk_check_enabled: bool,
     handle_external_orders: bool,
@@ -57,15 +61,21 @@ impl OmsCore {
             use_time_emulation,
             max_cached_orders,
         );
-        let balance_mgr = BalanceManager::new(
+        let position_mgr = PositionManager::new(
             config.refdata_by_account_id.clone(),
+            &config.account_routes.values().cloned().collect::<Vec<_>>(),
+        );
+        let balance_mgr = BalanceManager::new(
             &config.account_routes.values().cloned().collect::<Vec<_>>(),
             &config.gw_configs.values().cloned().collect::<Vec<_>>(),
         );
+        let reservation_mgr = ReservationManager::new();
         Self {
             config,
             order_mgr,
+            position_mgr,
             balance_mgr,
+            reservation_mgr,
             use_time_emulation,
             risk_check_enabled,
             handle_external_orders,
@@ -80,17 +90,6 @@ impl OmsCore {
     // Read replica (live trading only — compiled when feature = "replica")
     // ------------------------------------------------------------------
 
-    /// Build the initial read-replica snapshot from current `OmsCore` state and
-    /// return an `OmsSnapshotWriter` primed with that state for subsequent
-    /// incremental updates.
-    ///
-    /// Called **once** after warm-start / gateway reconciliation. The returned
-    /// `OmsSnapshotWriter` is then owned by the writer task; subsequent mutations
-    /// drive it via `apply_persist_order` / `apply_panic` etc., and each
-    /// `writer.publish()` produces a new snapshot at O(1) cost.
-    ///
-    /// The initial build is O(n log n) for the order map — acceptable as a
-    /// one-time startup cost.
     #[cfg(feature = "replica")]
     pub fn take_snapshot(
         &self,
@@ -99,19 +98,18 @@ impl OmsCore {
 
         let mut writer = OmsSnapshotWriter::new();
 
-        // Populate from current OrderManager state.
         for (id, order) in &self.order_mgr.order_dict {
             let set_closed = !self.order_mgr.open_order_ids.contains(id);
             writer.apply_persist_order(order, set_closed);
         }
 
-        // Populate panic state.
         for &account_id in &self.panic_accounts {
             writer.apply_panic(account_id);
         }
 
         let snapshot = writer.publish(
-            self.balance_mgr.snapshot_balances(),
+            self.position_mgr.snapshot_managed(),
+            self.position_mgr.snapshot_exch(),
             self.balance_mgr.snapshot_exch_balances(),
             crate::utils::gen_timestamp_ms(),
         );
@@ -123,8 +121,14 @@ impl OmsCore {
     // Initialisation
     // ------------------------------------------------------------------
 
-    pub fn init_state(&mut self, orders: Vec<OmsOrder>, balances: Vec<OmsPosition>) {
+    pub fn init_state(
+        &mut self,
+        orders: Vec<OmsOrder>,
+        positions: Vec<OmsManagedPosition>,
+        balances: Vec<ExchBalanceSnapshot>,
+    ) {
         self.order_mgr.init_with_orders(orders);
+        self.position_mgr.init_positions(positions);
         self.balance_mgr.init_balances(balances);
     }
 
@@ -134,8 +138,13 @@ impl OmsCore {
 
     pub fn reload_config(&mut self, new_config: ConfdataManager) {
         self.config = new_config;
-        self.order_mgr.reload_refdata_lookup(self.config.refdata_by_gw_key.clone());
-        self.balance_mgr.reload_symbol_map(self.config.refdata_by_account_id.clone());
+        self.order_mgr
+            .reload_refdata_lookup(self.config.refdata_by_gw_key.clone());
+        self.position_mgr
+            .reload_symbol_map(self.config.refdata_by_account_id.clone());
+        self.position_mgr.reload_account_config(
+            &self.config.account_routes.values().cloned().collect::<Vec<_>>(),
+        );
         self.balance_mgr.reload_account_config(
             &self.config.account_routes.values().cloned().collect::<Vec<_>>(),
             &self.config.gw_configs.values().cloned().collect::<Vec<_>>(),
@@ -168,10 +177,9 @@ impl OmsCore {
             }
             OmsMessage::Cleanup { ts_ms } => self.process_cleanup(ts_ms),
             OmsMessage::ReloadConfig => {
-                // Caller is responsible for providing the new config to reload_config().
-                // This variant just signals a reload was requested.
                 vec![]
             }
+            OmsMessage::PositionRecheck => self.process_position_recheck(),
         }
     }
 
@@ -191,19 +199,28 @@ impl OmsCore {
                     error_message: e.to_string(),
                     ..Default::default()
                 };
-                let update_event = self.order_mgr.update_with_oms_error(None, &req, &e, rejection);
+                let update_event =
+                    self.order_mgr
+                        .update_with_oms_error(None, &req, &e, rejection);
                 vec![OmsAction::PublishOrderUpdate(Box::new(update_event))]
             }
         }
     }
 
     fn process_order_inner(&mut self, req: OrderRequest) -> Result<Vec<OmsAction>, String> {
-        let ts = if self.use_time_emulation { req.timestamp } else { gen_timestamp_ms() };
+        let _ts = if self.use_time_emulation {
+            req.timestamp
+        } else {
+            gen_timestamp_ms()
+        };
         info!(order_id = req.order_id, "processing order request");
 
         // Panic check
         if self.panic_accounts.contains(&req.account_id) {
-            info!(account_id = req.account_id, "order rejected: account in panic");
+            info!(
+                account_id = req.account_id,
+                "order rejected: account in panic"
+            );
             return Ok(vec![]);
         }
 
@@ -220,63 +237,98 @@ impl OmsCore {
             let tc = ctx.trading_config.as_ref();
             if let Some(max_size) = tc.and_then(|t| t.max_order_size) {
                 if req.qty > max_size {
-                    ctx.errors.push(format!("order qty {} exceeds max {}", req.qty, max_size));
+                    ctx.errors
+                        .push(format!("order qty {} exceeds max {}", req.qty, max_size));
                 }
             }
         }
 
-        // Balance bookkeeping (pre-trade)
-        let mut fund_change: Option<PositionChange> = None;
-        let mut pos_change: Option<PositionChange> = None;
-
-        let bookkeeping = ctx.trading_config.as_ref().map(|t| t.bookkeeping_balance).unwrap_or(false);
+        // Pre-trade checks using PositionManager + ReservationManager
+        let bookkeeping = ctx
+            .trading_config
+            .as_ref()
+            .map(|t| t.bookkeeping_balance)
+            .unwrap_or(false);
         if !ctx.has_error() && bookkeeping {
             let tc = ctx.trading_config.as_ref().unwrap();
             let fund_sym = ctx.fund_symbol.clone().unwrap_or_default();
             let pos_sym = ctx.pos_symbol.clone().unwrap_or_default();
 
-            let mut fc = self.balance_mgr.create_balance_change(req.account_id, &fund_sym, false);
-            let mut pc = self.balance_mgr.create_balance_change(req.account_id, &pos_sym, false);
-
             if !tc.use_margin {
                 match BuySellType::try_from(req.buy_sell_type) {
                     Ok(BuySellType::BsBuy) => {
-                        fc.avail_change = -(req.qty * req.price);
-                        fc.frozen_change = -fc.avail_change;
+                        let order_value = req.qty * req.price;
+                        if tc.balance_check {
+                            let exch_avail = self
+                                .balance_mgr
+                                .get_balance(req.account_id, &fund_sym)
+                                .map(|b| b.balance_state.avail_qty)
+                                .unwrap_or(0.0);
+                            self.reservation_mgr
+                                .check_available(
+                                    req.account_id,
+                                    &fund_sym,
+                                    order_value,
+                                    exch_avail,
+                                )
+                                .map_err(|e| {
+                                    ctx.errors.push(e.clone());
+                                    e
+                                })
+                                .ok();
+                        }
+                        if !ctx.has_error() {
+                            self.reservation_mgr
+                                .reserve(
+                                    req.order_id,
+                                    req.account_id,
+                                    fund_sym,
+                                    order_value,
+                                    false,
+                                )
+                                .ok();
+                        }
                     }
                     Ok(BuySellType::BsSell) => {
-                        pc.avail_change = -req.qty;
-                        pc.frozen_change = -pc.avail_change;
+                        if tc.balance_check {
+                            self.position_mgr
+                                .check_and_freeze(req.account_id, &pos_sym, req.qty, false)
+                                .map_err(|e| {
+                                    ctx.errors.push(e.clone());
+                                    e
+                                })
+                                .ok();
+                        }
+                        if !ctx.has_error() {
+                            self.reservation_mgr
+                                .reserve(
+                                    req.order_id,
+                                    req.account_id,
+                                    pos_sym,
+                                    req.qty,
+                                    true, // inventory reservation
+                                )
+                                .ok();
+                        }
                     }
                     _ => return Err("unsupported buy_sell_type".into()),
                 }
             }
-
-            let balance_check = tc.balance_check;
-            if balance_check {
-                self.balance_mgr
-                    .check_changes(&[fc.clone(), pc.clone()])
-                    .map_err(|e| e.to_string())
-                    .map_err(|e| {
-                        ctx.errors.push(e.clone());
-                        e
-                    })
-                    .ok();
-            }
-
-            fund_change = Some(fc);
-            pos_change = Some(pc);
         }
 
-        // Create internal order record — skip building gw_req when context has errors
-        // (build_gw_order_req requires symbol_ref which may be None on error paths)
+        // Create internal order record
         let order_ctx = if ctx.has_error() { None } else { Some(&ctx) };
         let oms_order = self.order_mgr.create_order(&req, order_ctx);
-        self.order_mgr.context_cache.insert(req.order_id, ctx.clone());
+        self.order_mgr
+            .context_cache
+            .insert(req.order_id, ctx.clone());
 
         let mut actions = Vec::new();
 
         if ctx.has_error() {
+            // Release any reservation we may have created
+            self.reservation_mgr.release(req.order_id);
+
             let rejection = Rejection {
                 reason: RejectionReason::RejReasonOmsInvalidState as i32,
                 recoverable: false,
@@ -292,30 +344,27 @@ impl OmsCore {
             actions.push(OmsAction::PublishOrderUpdate(Box::new(update_event)));
         } else {
             // Send to gateway
-            let gw_req = oms_order.gw_req.clone().expect("gw_req always set on non-error order");
-            let gw_key = ctx.gw_config.as_ref().map(|g| g.gw_key.clone()).unwrap_or_default();
+            let gw_req = oms_order
+                .gw_req
+                .clone()
+                .expect("gw_req always set on non-error order");
+            let gw_key = ctx
+                .gw_config
+                .as_ref()
+                .map(|g| g.gw_key.clone())
+                .unwrap_or_default();
             actions.push(OmsAction::SendOrderToGw {
                 gw_key,
                 request: gw_req,
                 order_id: oms_order.order_id,
                 order_created_at: oms_order.order_state.created_at,
             });
-
-            // Apply balance changes if bookkeeping is on
-            if let (Some(fc), Some(pc)) = (fund_change, pos_change) {
-                let updated_symbols = self.balance_mgr.apply_changes(&[fc, pc], ts);
-                let tc = ctx.trading_config.as_ref().unwrap();
-                if tc.publish_balance_on_book {
-                    let bue = self.balance_mgr.build_balance_snapshot(
-                        req.account_id, false, ts,
-                    );
-                    actions.push(OmsAction::PublishBalanceUpdate(Box::new(bue)));
-                }
-            }
         }
 
         // Persist order
-        let terminal = self.order_mgr.get_order_by_id(req.order_id)
+        let terminal = self
+            .order_mgr
+            .get_order_by_id(req.order_id)
             .map(|o| o.is_in_terminal_state())
             .unwrap_or(false);
         actions.push(OmsAction::PersistOrder {
@@ -330,7 +379,6 @@ impl OmsCore {
     fn batch_process_orders(&mut self, reqs: Vec<OrderRequest>) -> Vec<OmsAction> {
         info!(n = reqs.len(), "batch processing orders");
         let mut gw_orders: HashMap<String, Vec<OmsAction>> = HashMap::new();
-        let mut balance_actions: Vec<OmsAction> = Vec::new();
         let mut other_actions: Vec<OmsAction> = Vec::new();
 
         for req in reqs {
@@ -339,7 +387,6 @@ impl OmsCore {
                     OmsAction::SendOrderToGw { gw_key, .. } => {
                         gw_orders.entry(gw_key.clone()).or_default().push(action);
                     }
-                    OmsAction::PublishBalanceUpdate(_) => balance_actions.push(action),
                     _ => other_actions.push(action),
                 }
             }
@@ -347,7 +394,10 @@ impl OmsCore {
 
         // Batch per exchange if supported
         for (gw_key, oa_list) in gw_orders {
-            let supports_batch = self.config.gw_configs.get(&gw_key)
+            let supports_batch = self
+                .config
+                .gw_configs
+                .get(&gw_key)
                 .map(|g| g.support_batch_order)
                 .unwrap_or(false);
             if oa_list.len() > 1 && supports_batch {
@@ -360,23 +410,13 @@ impl OmsCore {
                     .collect();
                 other_actions.push(OmsAction::BatchSendOrdersToGw {
                     gw_key,
-                    request: ExchBatchSendOrdersRequest { order_requests: requests },
+                    request: ExchBatchSendOrdersRequest {
+                        order_requests: requests,
+                    },
                 });
             } else {
                 other_actions.extend(oa_list);
             }
-        }
-
-        // Deduplicate balance updates (keep last per account)
-        let mut last_by_account: HashMap<i64, zk_proto_rs::zk::oms::v1::BalanceUpdateEvent> = HashMap::new();
-        for action in balance_actions {
-            if let OmsAction::PublishBalanceUpdate(bue) = action {
-                let account_id = bue.account_id;
-                last_by_account.insert(account_id, *bue);
-            }
-        }
-        for bue in last_by_account.into_values() {
-            other_actions.push(OmsAction::PublishBalanceUpdate(Box::new(bue)));
         }
 
         other_actions
@@ -386,7 +426,10 @@ impl OmsCore {
     // Cancel
     // ------------------------------------------------------------------
 
-    fn process_cancel(&mut self, req: zk_proto_rs::zk::oms::v1::OrderCancelRequest) -> Vec<OmsAction> {
+    fn process_cancel(
+        &mut self,
+        req: zk_proto_rs::zk::oms::v1::OrderCancelRequest,
+    ) -> Vec<OmsAction> {
         let order_id = req.order_id;
         info!(order_id, "processing cancel request");
 
@@ -448,7 +491,11 @@ impl OmsCore {
         if let Some(rej) = rejection {
             let msg = rej.error_message.clone();
             if let Some(oue) = self.order_mgr.update_with_gw_error(
-                order_id, req.timestamp, &msg, ExecType::Cancel as i32, rej,
+                order_id,
+                req.timestamp,
+                &msg,
+                ExecType::Cancel as i32,
+                rej,
             ) {
                 return vec![OmsAction::PublishOrderUpdate(Box::new(oue))];
             }
@@ -481,11 +528,21 @@ impl OmsCore {
             ..Default::default()
         };
 
+        // Do NOT release reservation or unfreeze position here — the cancel is not
+        // yet confirmed by the exchange. Protection is released when the order reaches
+        // terminal state (Cancelled/Filled) in process_order_report's terminal handler.
+
         let gw_key = ctx.route.map(|r| r.gw_key).unwrap_or_default();
-        vec![OmsAction::SendCancelToGw { gw_key, request: gw_cancel }]
+        vec![OmsAction::SendCancelToGw {
+            gw_key,
+            request: gw_cancel,
+        }]
     }
 
-    fn batch_process_cancels(&mut self, reqs: Vec<zk_proto_rs::zk::oms::v1::OrderCancelRequest>) -> Vec<OmsAction> {
+    fn batch_process_cancels(
+        &mut self,
+        reqs: Vec<zk_proto_rs::zk::oms::v1::OrderCancelRequest>,
+    ) -> Vec<OmsAction> {
         info!(n = reqs.len(), "batch processing cancels");
         let mut cancel_by_gw: HashMap<String, Vec<OmsAction>> = HashMap::new();
         let mut other_actions: Vec<OmsAction> = Vec::new();
@@ -502,7 +559,10 @@ impl OmsCore {
         }
 
         for (gw_key, ca_list) in cancel_by_gw {
-            let supports_batch = self.config.gw_configs.get(&gw_key)
+            let supports_batch = self
+                .config
+                .gw_configs
+                .get(&gw_key)
                 .map(|g| g.support_batch_cancel)
                 .unwrap_or(false);
             if ca_list.len() > 1 && supports_batch {
@@ -515,7 +575,9 @@ impl OmsCore {
                     .collect();
                 other_actions.push(OmsAction::BatchCancelToGw {
                     gw_key,
-                    request: ExchBatchCancelOrdersRequest { cancel_requests: requests },
+                    request: ExchBatchCancelOrdersRequest {
+                        cancel_requests: requests,
+                    },
                 });
             } else {
                 other_actions.extend(ca_list);
@@ -541,13 +603,15 @@ impl OmsCore {
             let account_id = if report.account_id != 0 {
                 report.account_id
             } else {
-                // Guess account_id if there's only one account on this gw
                 let ids = self.config.gw_key_to_account_ids.get(&gw_key);
                 if let Some(set) = ids {
                     if set.len() == 1 {
                         *set.iter().next().unwrap()
                     } else {
-                        error!(gw_key, "cannot determine account_id for non-TQ report; discarding");
+                        error!(
+                            gw_key,
+                            "cannot determine account_id for non-TQ report; discarding"
+                        );
                         return vec![];
                     }
                 } else {
@@ -561,13 +625,16 @@ impl OmsCore {
                 .unwrap_or(OrderSourceType::OrderSourceUnspecified);
             let is_external = src_type == OrderSourceType::OrderSourceNonTq;
             let is_known_external = src_type == OrderSourceType::OrderSourceUnknown
-                && self.order_mgr.is_marked_as_external(&gw_key, &exch_order_ref);
+                && self
+                    .order_mgr
+                    .is_marked_as_external(&gw_key, &exch_order_ref);
 
             if is_external || is_known_external {
                 let mut actions = Vec::new();
-                let oue = self.order_mgr.handle_external_order_report(&mut report);
+                let oue = self
+                    .order_mgr
+                    .handle_external_order_report(&mut report);
 
-                // Replay any pending reports that were buffered for this exch_order_ref
                 let pending = self.pop_pending_reports(&gw_key, &exch_order_ref);
 
                 let mut events = Vec::new();
@@ -575,14 +642,19 @@ impl OmsCore {
                     events.push(e);
                 }
                 for mut pending_report in pending {
-                    if let Some(e) = self.order_mgr.handle_external_order_report(&mut pending_report) {
+                    if let Some(e) = self
+                        .order_mgr
+                        .handle_external_order_report(&mut pending_report)
+                    {
                         events.push(e);
                     }
                 }
 
                 for event in events {
                     let order_id = event.order_id;
-                    let terminal = self.order_mgr.get_order_by_id(order_id)
+                    let terminal = self
+                        .order_mgr
+                        .get_order_by_id(order_id)
                         .map(|o| o.is_in_terminal_state())
                         .unwrap_or(false);
                     if let Some(order) = self.order_mgr.get_order_by_id(order_id).cloned() {
@@ -601,10 +673,15 @@ impl OmsCore {
         // Normal (TQ-originated) order report
         let order_id = report.order_id;
         let ctx = if order_id != 0 {
-            self.order_mgr.context_cache.get(&order_id).cloned()
+            self.order_mgr
+                .context_cache
+                .get(&order_id)
+                .cloned()
                 .or_else(|| self.resolve_context_for_order(order_id))
         } else {
-            let order = self.order_mgr.get_order_by_exch_ref(&gw_key, &exch_order_ref);
+            let order = self
+                .order_mgr
+                .get_order_by_exch_ref(&gw_key, &exch_order_ref);
             match order {
                 Some(o) => self.resolve_context_for_order(o.order_id),
                 None => {
@@ -617,28 +694,62 @@ impl OmsCore {
 
         let mut actions = Vec::new();
 
-        // Balance update on trade (for bookkeeping instruments)
+        // Process fill: update positions + release reservations.
+        // Runs before update_with_report intentionally — uses trade.filled_qty from
+        // the report directly, not the order's cumulative filled_qty.
         if let Some(ctx) = &ctx {
-            let bookkeeping = ctx.trading_config.as_ref().map(|t| t.bookkeeping_balance).unwrap_or(false);
+            let bookkeeping = ctx
+                .trading_config
+                .as_ref()
+                .map(|t| t.bookkeeping_balance)
+                .unwrap_or(false);
             if bookkeeping {
-                if let Some(balance_changes) = self.calc_balance_changes_for_report(ctx, &report) {
-                    let updated = self.balance_mgr.apply_changes(&balance_changes, ts);
-                    let account_id = ctx.account_id;
-                    if !updated.is_empty() {
-                        let bue = self.balance_mgr.build_balance_snapshot(
-                            account_id, false, ts,
-                        );
-                        actions.push(OmsAction::PublishBalanceUpdate(Box::new(bue)));
-                    }
-                }
+                self.process_fill_for_report(ctx, &report, ts, &mut actions);
             }
         }
 
         // Update order state
         let update_events = self.order_mgr.update_with_report(&report);
 
+        // Release reservation + unfreeze position on terminal state.
+        // This is the single cleanup point — cancel requests do NOT release early.
+        for event in &update_events {
+            let oid = event.order_id;
+            if let Some(order) = self.order_mgr.get_order_by_id(oid) {
+                if order.is_in_terminal_state() {
+                    self.reservation_mgr.release(oid);
+                    // Unfreeze remaining sell-side position qty
+                    if let Some(ctx) = &ctx {
+                        let bookkeeping = ctx
+                            .trading_config
+                            .as_ref()
+                            .map(|t| t.bookkeeping_balance && t.balance_check)
+                            .unwrap_or(false);
+                        if bookkeeping {
+                            let is_sell = order.order_state.buy_sell_type
+                                == BuySellType::BsSell as i32;
+                            if is_sell {
+                                if let Some(pos_sym) = &ctx.pos_symbol {
+                                    let unfilled = order.order_state.qty
+                                        - order.order_state.filled_qty;
+                                    if unfilled > 0.0 {
+                                        self.position_mgr.unfreeze(
+                                            ctx.account_id,
+                                            pos_sym,
+                                            unfilled,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Replay any buffered reports
-        let ctx_order_exch_ref = ctx.as_ref()
+        let ctx_order_exch_ref = ctx
+            .as_ref()
             .and_then(|c| c.order.as_ref())
             .map(|o| o.order_state.exch_order_ref.clone());
         if let Some(exch_ref) = ctx_order_exch_ref {
@@ -647,7 +758,9 @@ impl OmsCore {
                 let more = self.order_mgr.update_with_report(&pending_report);
                 for event in more {
                     let oid = event.order_id;
-                    let terminal = self.order_mgr.get_order_by_id(oid)
+                    let terminal = self
+                        .order_mgr
+                        .get_order_by_id(oid)
                         .map(|o| o.is_in_terminal_state())
                         .unwrap_or(false);
                     if let Some(order) = self.order_mgr.get_order_by_id(oid).cloned() {
@@ -664,7 +777,9 @@ impl OmsCore {
 
         for event in update_events {
             let oid = event.order_id;
-            let terminal = self.order_mgr.get_order_by_id(oid)
+            let terminal = self
+                .order_mgr
+                .get_order_by_id(oid)
                 .map(|o| o.is_in_terminal_state())
                 .unwrap_or(false);
             if let Some(order) = self.order_mgr.get_order_by_id(oid).cloned() {
@@ -681,17 +796,184 @@ impl OmsCore {
     }
 
     // ------------------------------------------------------------------
-    // Balance update from gateway
+    // Gateway balance/position update — classification adapter
     // ------------------------------------------------------------------
 
-    fn process_balance_update(&mut self, update: zk_proto_rs::zk::exch_gw::v1::BalanceUpdate) -> Vec<OmsAction> {
-        let ts = gen_timestamp_ms();
-        if let Some(account_id) = self.balance_mgr.merge_gw_balance_update(&update, ts) {
-            let exch_ts = update.balances.first().map(|b| b.update_timestamp).unwrap_or(ts);
-            let bue = self.balance_mgr.build_balance_snapshot(account_id, true, exch_ts);
-            return vec![OmsAction::PublishBalanceUpdate(Box::new(bue))];
+    fn process_balance_update(
+        &mut self,
+        update: zk_proto_rs::zk::exch_gw::v1::BalanceUpdate,
+    ) -> Vec<OmsAction> {
+        if update.balances.is_empty() {
+            return vec![];
         }
-        vec![]
+        let ts = gen_timestamp_ms();
+
+        // Resolve account_id from the first entry's exch_account_code
+        let exch_account_code = &update.balances[0].exch_account_code;
+        let account_id = match self.balance_mgr.resolve_account_id(exch_account_code) {
+            Some(id) => id,
+            None => {
+                error!(exch_account_code, "unknown account code in balance update");
+                return vec![];
+            }
+        };
+
+        // Classify entries: spot-like → BalanceManager, others → PositionManager
+        let mut balance_entries = Vec::new();
+        let mut position_entries = Vec::new();
+        for entry in &update.balances {
+            if entry.instrument_type == SPOT_INSTRUMENT_TYPE {
+                balance_entries.push(entry.clone());
+            } else {
+                position_entries.push(entry.clone());
+            }
+        }
+
+        let exch_ts = update
+            .balances
+            .first()
+            .map(|b| b.update_timestamp)
+            .unwrap_or(ts);
+
+        let mut actions = Vec::new();
+
+        if !balance_entries.is_empty() {
+            self.balance_mgr
+                .merge_gw_balance_entries(&balance_entries, account_id, ts);
+            let bue = self.balance_mgr.build_balance_snapshot(account_id, exch_ts);
+            actions.push(OmsAction::PublishBalanceUpdate(Box::new(bue)));
+
+            // Persist each updated balance entry to Redis.
+            for entry in &balance_entries {
+                let asset = &entry.instrument_code;
+                if let Some(snap) = self.balance_mgr.get_balance(account_id, asset) {
+                    actions.push(OmsAction::PersistBalance {
+                        account_id,
+                        asset: asset.clone(),
+                        snapshot: snap.clone(),
+                    });
+                }
+            }
+        }
+
+        if !position_entries.is_empty() {
+            self.position_mgr
+                .merge_gw_position_entries(&position_entries, account_id, ts);
+            let pue = self
+                .position_mgr
+                .build_position_snapshot(account_id, exch_ts);
+            actions.push(OmsAction::PublishPositionUpdate(Box::new(pue)));
+
+            // Persist each updated position entry to Redis.
+            for entry in &position_entries {
+                let instrument_code = &entry.instrument_code;
+                if let Some(pos) = self.position_mgr.get_position(account_id, instrument_code) {
+                    let side = if pos.is_short { "short" } else { "long" };
+                    actions.push(OmsAction::PersistPosition {
+                        account_id,
+                        instrument_code: instrument_code.clone(),
+                        side: side.to_string(),
+                        position: pos.clone(),
+                    });
+                }
+            }
+        }
+
+        actions
+    }
+
+    // ------------------------------------------------------------------
+    // Fill processing — replaces the old stubbed calc_balance_changes_for_report
+    // ------------------------------------------------------------------
+
+    fn process_fill_for_report(
+        &mut self,
+        ctx: &OrderContext,
+        report: &OrderReport,
+        ts: i64,
+        actions: &mut Vec<OmsAction>,
+    ) {
+        use zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report;
+
+        let order_id = report.order_id;
+        let pos_sym = ctx.pos_symbol.as_deref().unwrap_or_default();
+        let is_buy = ctx
+            .order
+            .as_ref()
+            .map(|o| o.order_state.buy_sell_type == BuySellType::BsBuy as i32)
+            .unwrap_or(false);
+        // Only apply frozen_change for sells when balance_check was true
+        // (meaning check_and_freeze actually froze qty up front).
+        let sell_was_frozen = !is_buy
+            && ctx
+                .trading_config
+                .as_ref()
+                .map(|t| t.balance_check)
+                .unwrap_or(false);
+        let mut position_changed = false;
+
+        for entry in &report.order_report_entries {
+            if let Some(Report::TradeReport(trade)) = &entry.report {
+                let delta = PositionDelta {
+                    account_id: ctx.account_id,
+                    instrument_code: pos_sym.to_string(),
+                    is_short: false,
+                    avail_change: if is_buy {
+                        trade.filled_qty
+                    } else if sell_was_frozen {
+                        0.0 // qty moves from frozen→gone, avail unchanged
+                    } else {
+                        0.0 // nothing was frozen, avail untouched
+                    },
+                    frozen_change: if sell_was_frozen {
+                        -trade.filled_qty
+                    } else {
+                        0.0
+                    },
+                    total_change: if is_buy {
+                        trade.filled_qty
+                    } else {
+                        -trade.filled_qty
+                    },
+                };
+                self.position_mgr.apply_delta(&delta, ts);
+                // Release reservation proportional to fill.
+                // Buy: release cash reservation using order price (not fill price)
+                //       to avoid stranded amounts when fill price != order price.
+                // Sell: release inventory reservation by filled qty.
+                let order_price = ctx
+                    .order
+                    .as_ref()
+                    .map(|o| o.order_state.price)
+                    .unwrap_or(trade.filled_price);
+                let release_amount = if is_buy {
+                    trade.filled_qty * order_price
+                } else {
+                    trade.filled_qty
+                };
+                self.reservation_mgr
+                    .release_partial(order_id, release_amount);
+                position_changed = true;
+            }
+        }
+
+        if position_changed {
+            let pue = self
+                .position_mgr
+                .build_position_snapshot(ctx.account_id, ts);
+            actions.push(OmsAction::PublishPositionUpdate(Box::new(pue)));
+
+            // Persist the changed position to Redis.
+            if let Some(pos) = self.position_mgr.get_position(ctx.account_id, pos_sym) {
+                let side = if pos.is_short { "short" } else { "long" };
+                actions.push(OmsAction::PersistPosition {
+                    account_id: ctx.account_id,
+                    instrument_code: pos_sym.to_string(),
+                    side: side.to_string(),
+                    position: pos.clone(),
+                });
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -701,8 +983,12 @@ impl OmsCore {
     fn process_recheck_order(&mut self, req: OrderRecheckRequest) -> Vec<OmsAction> {
         self.total_retries_orders += 1;
         let ts = req.timestamp + req.check_delay_secs * 1000;
-        let is_pending = self.order_mgr.get_order_by_id(req.order_id)
-            .map(|o| OrderStatus::try_from(o.order_state.order_status) == Ok(OrderStatus::Pending))
+        let is_pending = self
+            .order_mgr
+            .get_order_by_id(req.order_id)
+            .map(|o| {
+                OrderStatus::try_from(o.order_state.order_status) == Ok(OrderStatus::Pending)
+            })
             .unwrap_or(false);
 
         if is_pending {
@@ -714,16 +1000,28 @@ impl OmsCore {
                 ..Default::default()
             };
             if let Some(oue) = self.order_mgr.update_with_gw_error(
-                req.order_id, ts, "Order still pending after recheck",
-                ExecType::PlacingOrder as i32, rejection,
+                req.order_id,
+                ts,
+                "Order still pending after recheck",
+                ExecType::PlacingOrder as i32,
+                rejection,
             ) {
-                let terminal = self.order_mgr.get_order_by_id(req.order_id)
+                let terminal = self
+                    .order_mgr
+                    .get_order_by_id(req.order_id)
                     .map(|o| o.is_in_terminal_state())
                     .unwrap_or(false);
+                if terminal {
+                    self.reservation_mgr.release(req.order_id);
+                }
                 if let Some(order) = self.order_mgr.get_order_by_id(req.order_id).cloned() {
                     return vec![
                         OmsAction::PublishOrderUpdate(Box::new(oue)),
-                        OmsAction::PersistOrder { order: Box::new(order), set_expire: terminal, set_closed: terminal },
+                        OmsAction::PersistOrder {
+                            order: Box::new(order),
+                            set_expire: terminal,
+                            set_closed: terminal,
+                        },
                     ];
                 }
             }
@@ -736,7 +1034,9 @@ impl OmsCore {
         let order_id = req.orig_cancel_request.order_id;
         let ts = req.timestamp + req.check_delay_secs * 1000;
 
-        let not_terminal = self.order_mgr.get_order_by_id(order_id)
+        let not_terminal = self
+            .order_mgr
+            .get_order_by_id(order_id)
             .map(|o| !o.is_in_terminal_state())
             .unwrap_or(false);
 
@@ -749,8 +1049,11 @@ impl OmsCore {
                 ..Default::default()
             };
             if let Some(oue) = self.order_mgr.update_with_gw_error(
-                order_id, ts, "cancel did not go through after recheck",
-                ExecType::Cancel as i32, rejection,
+                order_id,
+                ts,
+                "cancel did not go through after recheck",
+                ExecType::Cancel as i32,
+                rejection,
             ) {
                 return vec![OmsAction::PublishOrderUpdate(Box::new(oue))];
             }
@@ -779,7 +1082,8 @@ impl OmsCore {
                         for r in reports {
                             let mut r = r.clone();
                             r.order_source_type =
-                                zk_proto_rs::zk::exch_gw::v1::OrderSourceType::OrderSourceNonTq as i32;
+                                zk_proto_rs::zk::exch_gw::v1::OrderSourceType::OrderSourceNonTq
+                                    as i32;
                             to_replay.push((gw_key.clone(), r));
                         }
                     }
@@ -801,6 +1105,18 @@ impl OmsCore {
     }
 
     // ------------------------------------------------------------------
+    // Position recheck
+    // ------------------------------------------------------------------
+
+    /// Periodic position recheck. Currently a noop — will be wired to
+    /// compare managed positions against exchange-reported state and emit
+    /// reconciliation actions when divergence is detected.
+    fn process_position_recheck(&mut self) -> Vec<OmsAction> {
+        debug!("position recheck tick (noop)");
+        vec![]
+    }
+
+    // ------------------------------------------------------------------
     // Context resolution
     // ------------------------------------------------------------------
 
@@ -813,11 +1129,8 @@ impl OmsCore {
             .cloned();
         let trading_config = self.config.trading_configs.get(instrument_code).cloned();
 
-        // Spot: fund = quote asset, position = base asset
-        // Non-spot: fund = settlement/quote, position = instrument_id
-        const SPOT_LIKE: &[i32] = &[1, 6, 7]; // SPOT, ETF, STOCK
         let (fund_symbol, pos_symbol) = if let Some(ref rd) = symbol_ref {
-            let is_spot_like = SPOT_LIKE.contains(&(rd.instrument_type));
+            let is_spot_like = rd.instrument_type == SPOT_INSTRUMENT_TYPE;
             if is_spot_like {
                 (Some(rd.quote_asset.clone()), Some(rd.base_asset.clone()))
             } else {
@@ -832,7 +1145,6 @@ impl OmsCore {
             (None, None)
         };
 
-        // Ensure balance entries exist
         OrderContext {
             account_id,
             fund_symbol,
@@ -857,22 +1169,6 @@ impl OmsCore {
         let mut ctx = self.resolve_context(&instrument, account_id);
         ctx.order = Some(order.clone());
         Some(ctx)
-    }
-
-    // ------------------------------------------------------------------
-    // Balance change calculation for reports
-    // ------------------------------------------------------------------
-
-    fn calc_balance_changes_for_report(
-        &self,
-        _ctx: &OrderContext,
-        _report: &OrderReport,
-    ) -> Option<Vec<PositionChange>> {
-        // Full spot/margin balance bookkeeping from trade and state reports.
-        // The Python implementation is elaborate and asset-class specific.
-        // For Phase 2 we return None (no bookkeeping from reports) and implement
-        // the full logic incrementally in Phase 2b after parity tests are in place.
-        None
     }
 
     // ------------------------------------------------------------------
@@ -911,10 +1207,11 @@ impl OmsCore {
         self.order_mgr.get_open_orders_for_account(account_id)
     }
 
-    pub fn get_account_balance(&self, account_id: i64) -> Vec<&OmsPosition> {
-        let use_exch = self.config.account_id_to_gw_config.get(&account_id)
-            .map(|g| !g.calc_balance_needed)
-            .unwrap_or(true);
-        self.balance_mgr.get_balances_for_account(account_id, use_exch)
+    pub fn get_account_balance(&self, account_id: i64) -> Vec<&ExchBalanceSnapshot> {
+        self.balance_mgr.get_balances_for_account(account_id)
+    }
+
+    pub fn get_account_positions(&self, account_id: i64) -> Vec<&OmsManagedPosition> {
+        self.position_mgr.get_positions_for_account(account_id)
     }
 }

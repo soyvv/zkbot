@@ -1,4 +1,4 @@
-/// Compile OMS service stubs (server) and Gateway service stubs (client).
+/// Compile OMS service stubs (server) and Gateway + Admin service stubs (client).
 ///
 /// Message types are NOT regenerated here — they are already compiled by
 /// `zk-proto-rs/build.rs` (via prost-build) and referenced via `extern_path`.
@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[
                 &format!("{proto_dir_str}/zk/oms/v1/oms_service.proto"),
                 &format!("{proto_dir_str}/zk/gateway/v1/gateway_service.proto"),
+                &format!("{proto_dir_str}/zk/gateway/v1/gateway_simulator_admin.proto"),
             ],
             &[proto_dir_str],
         )?;

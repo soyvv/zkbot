@@ -17,8 +17,8 @@ use tracing::{info, warn};
 
 use crate::proto::gw_svc::gateway_service_client::GatewayServiceClient;
 use zk_proto_rs::zk::gateway::v1::{
-    BatchCancelOrdersRequest, BatchSendOrdersRequest, CancelOrderRequest, GatewayResponse,
-    SendOrderRequest,
+    AccountResponse, BatchCancelOrdersRequest, BatchSendOrdersRequest, CancelOrderRequest,
+    GatewayResponse, QueryAccountRequest, SendOrderRequest,
 };
 
 pub type GatewayClient = GatewayServiceClient<Channel>;
@@ -116,6 +116,21 @@ impl GwClientPool {
         let client = self.clients.get_mut(gw_key).ok_or_else(|| GwError::NotFound(gw_key.into()))?;
         let resp = client
             .batch_cancel_orders(tonic::Request::new(req))
+            .await
+            .map_err(GwError::Rpc)?;
+        Ok(resp.into_inner())
+    }
+
+    // ── Query ─────────────────────────────────────────────────────────────────
+
+    pub async fn query_account_balance(
+        &mut self,
+        gw_key: &str,
+        req: QueryAccountRequest,
+    ) -> Result<AccountResponse, GwError> {
+        let client = self.clients.get_mut(gw_key).ok_or_else(|| GwError::NotFound(gw_key.into()))?;
+        let resp = client
+            .query_account_balance(tonic::Request::new(req))
             .await
             .map_err(GwError::Rpc)?;
         Ok(resp.into_inner())

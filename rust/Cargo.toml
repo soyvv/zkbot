@@ -5,12 +5,15 @@ members = [
     "crates/zk-oms-rs",
     "crates/zk-engine-rs",
     "crates/zk-backtest-rs",
+    "crates/zk-sim-core",
     "crates/zk-strategy-sdk-rs",
     "crates/zk-infra-rs",
     "crates/zk-pyo3-rs",
     "crates/zk-mock-gw",
     "crates/zk-oms-svc",
+    "crates/zk-gw-svc",
     "crates/zk-trading-sdk-rs",
+    "crates/zk-trade-tools",
 ]
 resolver = "2"
 

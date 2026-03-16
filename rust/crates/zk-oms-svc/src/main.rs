@@ -95,6 +95,18 @@ async fn main() -> anyhow::Result<()> {
         .map(|p| p.into_oms_order())
         .collect();
 
+    let persisted_balances = redis_writer.load_balances().await.unwrap_or_else(|e| {
+        warn!(error = %e, "failed to load balances from Redis, starting cold");
+        vec![]
+    });
+    info!(loaded_balances = persisted_balances.len(), "warm-start balances loaded from Redis");
+
+    let persisted_positions = redis_writer.load_positions().await.unwrap_or_else(|e| {
+        warn!(error = %e, "failed to load positions from Redis, starting cold");
+        vec![]
+    });
+    info!(loaded_positions = persisted_positions.len(), "warm-start positions loaded from Redis");
+
     // ── 6. Build OmsCore ──────────────────────────────────────────────────────
     let mut core = OmsCore::new(
         confdata.clone(),
@@ -103,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
         cfg.handle_external_orders,
         cfg.max_cached_orders,
     );
-    core.init_state(warm_orders, vec![]); // balances reconciled from gw below
+    core.init_state(warm_orders, persisted_positions, persisted_balances);
     info!("OmsCore initialised");
 
     // ── 7. Connect to gateways via NATS KV ───────────────────────────────────
@@ -167,9 +179,40 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── 8. Balance reconciliation ─────────────────────────────────────────────
-    // TODO: call QueryAccountBalance on each gateway for bound accounts;
-    //       inject BalanceUpdate via OmsCore::process_message.
-    //       Deferred until gateway proto QueryAccountBalance integration tested.
+    {
+        use zk_proto_rs::zk::gateway::v1::QueryAccountRequest;
+        use zk_oms_rs::models::OmsAction;
+
+        // Query each connected gateway once for account balances.
+        let gw_keys: Vec<String> = gw_pool.gw_keys().map(String::from).collect();
+        for gw_key in &gw_keys {
+            let req = QueryAccountRequest::default();
+            match gw_pool.query_account_balance(gw_key, req).await {
+                Ok(resp) => {
+                    if let Some(balance_update) = resp.balance_update {
+                        let actions = core.process_message(
+                            zk_oms_rs::models::OmsMessage::BalanceUpdate(balance_update),
+                        );
+                        for action in actions {
+                            if let OmsAction::PersistBalance {
+                                account_id,
+                                ref asset,
+                                ref snapshot,
+                            } = action
+                            {
+                                let _ = redis_writer
+                                    .write_balance(account_id, asset, snapshot)
+                                    .await;
+                            }
+                        }
+                    }
+                    info!(gw_key, "startup balance reconcile succeeded");
+                }
+                Err(e) => warn!(gw_key, error = %e, "startup balance reconcile failed"),
+            }
+        }
+        info!("startup balance reconciliation complete");
+    }
 
     // ── 9. Start OMS writer task ──────────────────────────────────────────────
     let (cmd_tx, cmd_rx) = mpsc::channel::<OmsCommand>(cfg.cmd_channel_buf);
@@ -266,6 +309,17 @@ async fn main() -> anyhow::Result<()> {
             interval.tick().await;
             let ts_ms = zk_oms_rs::utils::gen_timestamp_ms();
             let _ = cleanup_tx.send(OmsCommand::Cleanup { ts_ms }).await;
+        }
+    });
+
+    let recheck_tx   = cmd_tx.clone();
+    let recheck_secs = cfg.position_recheck_interval_secs;
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(recheck_secs));
+        interval.tick().await; // skip immediate first tick
+        loop {
+            interval.tick().await;
+            let _ = recheck_tx.send(OmsCommand::PositionRecheck).await;
         }
     });
 

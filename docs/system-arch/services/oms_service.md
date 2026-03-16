@@ -49,6 +49,22 @@ gRPC mutations / GW reports
 
 This keeps mutation order deterministic while making read APIs cheap.
 
+## Performance Design Best Practices
+
+OMS should explicitly follow the system performance rules for latency-sensitive services:
+
+- respect the disruptor-style single-writer design: one writer task/thread owns `OmsCore` and is
+  the only place where mutable order/risk state changes
+- avoid unnecessary copying/cloning on the hot path: command handlers should pass owned work into
+  the writer, and snapshots should be rebuilt once per committed mutation, not once per reader
+- avoid locks around `OmsCore` and query reads: queries should read immutable snapshots instead of
+  contending on mutexes/RwLocks with the writer
+- keep mutation sequencing deterministic so gateway actions, event publication, Redis sync, and
+  snapshot publication all reflect the same ordered state transition stream
+
+The practical rule is: single writer for mutation, lock-free readers for queries, and no per-read
+cloning of the full OMS state.
+
 ## Startup Model
 
 OMS startup should:

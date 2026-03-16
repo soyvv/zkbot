@@ -96,10 +96,12 @@ the stack. Key decisions:
 - **Strategy trait**: `on_balance_update` and `on_position_update` are separate callbacks.
 - **Trading SDK**: `subscribe_balance_updates()` wired to decode `BalanceUpdateEvent` from OMS
   NATS topic (no longer a stub).
-- **`QueryPosition` gRPC**: Returns `Status::Unimplemented` after the split. The OMS has no
-  distinct position data source — `build_position_snapshot()` was removed (dead code that read
-  from balance storage). Position queries will be reintroduced once OMS has a real gateway-backed
-  source or a separate internal position read model.
+- **`QueryBalances` gRPC**: Canonical query for asset inventory. Returns `Balance` messages
+  converted from internal `OmsPosition` at the boundary.
+- **`QueryPosition` gRPC**: Compatibility pass-through. Returns the internal OMS `Position`
+  snapshots from `snap.balances` (default) or `snap.exch_balances` (`query_gw=true`). This is
+  not a distinct position data source — it reads from the same balance ledger. New callers
+  should prefer `QueryBalances`.
 - **`ZkBalance` (PyO3)**: No `long_short_type` field. Existing Python strategies that read
   `balance.long_short_type` will break — fix is in PR 5 (Python migration).
 

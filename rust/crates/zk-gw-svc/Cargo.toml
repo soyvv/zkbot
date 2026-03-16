@@ -1,0 +1,53 @@
+[package]
+name = "zk-gw-svc"
+version = "0.1.0"
+edition = "2021"
+description = "Production trading gateway service with pluggable venue adapters"
+
+[lib]
+name = "zk_gw_svc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zk-gw-svc"
+path = "src/main.rs"
+
+[dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+
+# NATS
+async-nats = "0.37"
+
+# byte buffers
+bytes = "1"
+
+# tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# errors
+thiserror = "2"
+anyhow = "1"
+
+# async trait
+async-trait = "0.1"
+
+# uuid for error_id generation
+uuid = { version = "1", features = ["v4"] }
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# infra + domain + simulation
+zk-proto-rs = { path = "../zk-proto-rs" }
+zk-infra-rs = { path = "../zk-infra-rs" }
+zk-sim-core = { path = "../zk-sim-core" }
+
+[build-dependencies]
+tonic-build = "0.12"

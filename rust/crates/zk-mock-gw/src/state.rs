@@ -49,6 +49,47 @@ impl MockGwState {
         }
     }
 
+    /// Apply balance changes from a fill.
+    /// For a BUY of "BASE-QUOTE" at price P, qty Q: BASE += Q, QUOTE -= P*Q.
+    /// For a SELL: inverse.
+    pub fn apply_fill_to_balances(&mut self, instrument: &str, side: i32, qty: f64, price: f64) {
+        let (base, quote) = instrument
+            .split_once('-')
+            .map(|(b, q)| (b.to_string(), Some(q.to_string())))
+            .unwrap_or((instrument.to_string(), None));
+
+        let is_buy = side == 1; // BuySellType::BsBuy
+        let value = price * qty;
+
+        if is_buy {
+            *self.balances.entry(base).or_insert(0.0) += qty;
+            if let Some(q) = quote {
+                *self.balances.entry(q).or_insert(0.0) -= value;
+            }
+        } else {
+            *self.balances.entry(base).or_insert(0.0) -= qty;
+            if let Some(q) = quote {
+                *self.balances.entry(q).or_insert(0.0) += value;
+            }
+        }
+    }
+
+    /// Build a snapshot of current balances as `PositionReport` entries (all spot-type).
+    pub fn balance_snapshot(&self) -> Vec<crate::proto::exch_gw::PositionReport> {
+        use crate::proto::common::InstrumentType;
+        self.balances
+            .iter()
+            .map(|(symbol, &qty)| crate::proto::exch_gw::PositionReport {
+                instrument_code: symbol.clone(),
+                instrument_type: InstrumentType::InstTypeSpot as i32,
+                qty,
+                avail_qty: qty,
+                account_id: self.account_id,
+                ..Default::default()
+            })
+            .collect()
+    }
+
     /// Parse "BTC:10.5,USDT:100000" into a balance map.
     pub fn parse_balances(s: &str) -> HashMap<String, f64> {
         let mut map = HashMap::new();

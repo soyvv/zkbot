@@ -38,6 +38,26 @@ Topic-specific design notes live alongside it:
 - APIs are contract-first (protobuf), language-agnostic, and versioned.
 - Runtime modes differ by composition, not by business semantics.
 
+### 2.1 Performance Design Best Practices
+
+- Respect single-writer ownership on the hot path. Mutable runtime state should have one writer
+  task/thread per shard or service instance, with work sequenced through message passing instead of
+  shared mutation.
+- Follow a disruptor-style mental model for latency-sensitive flows: preserve ordered mutation,
+  avoid cross-thread write contention, and keep cache locality high by letting one writer advance
+  state deterministically.
+- Avoid unnecessary copying/cloning. Prefer passing ownership once into the writer, borrowing or
+  slicing existing buffers where safe, and cloning once per committed state change rather than once
+  per reader/request.
+- Avoid locks on the hot path. Do not put mutex/RwLock contention in front of order processing,
+  query serving, or event fanout when a single-writer plus immutable read-replica design can solve
+  the same problem.
+- Prefer immutable snapshots or read replicas for queries. Readers should observe a stable
+  point-in-time view without blocking the writer.
+- Reserve locks for cold-path concerns such as bootstrap, low-rate admin flows, or coarse resource
+  lifecycle management. If a lock appears on a latency-sensitive path, it should be treated as a
+  design smell and justified explicitly.
+
 ## 3. Runtime Stack
 
 - Hot path services: Rust.
