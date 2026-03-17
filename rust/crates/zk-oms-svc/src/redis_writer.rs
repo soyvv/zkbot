@@ -35,6 +35,17 @@ impl RedisWriter {
         Self { conn, oms_id: oms_id.into() }
     }
 
+    /// Clone the writer.
+    ///
+    /// `MultiplexedConnection` is internally Arc'd — clones share the same
+    /// underlying connection and are safe for concurrent use.
+    pub fn clone_writer(&self) -> Self {
+        Self {
+            conn: self.conn.clone(),
+            oms_id: self.oms_id.clone(),
+        }
+    }
+
     // ── Order persistence ────────────────────────────────────────────────────
 
     /// Persist full order state to Redis.

@@ -67,6 +67,14 @@ impl GwClientPool {
         self.clients.keys().map(String::as_str)
     }
 
+    /// Clone the client for `gw_key`.
+    ///
+    /// Tonic `GatewayServiceClient<Channel>` is cheaply cloneable —
+    /// clones share the underlying HTTP/2 connection.
+    pub fn get_client(&self, gw_key: &str) -> Option<GatewayClient> {
+        self.clients.get(gw_key).cloned()
+    }
+
     // ── Order dispatch ───────────────────────────────────────────────────────
 
     pub async fn send_order(

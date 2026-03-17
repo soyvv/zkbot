@@ -15,7 +15,13 @@
 //! 12. Start periodic tasks (cleanup, resync timers).
 //! 13. Await shutdown signal (SIGTERM / SIGINT).
 
-use zk_oms_svc::{config, db, gw_client, grpc_handler, nats_handler, oms_actor, proto, redis_writer};
+use zk_oms_svc::{
+    config, db, gw_client, grpc_handler, nats_handler, oms_actor, proto, redis_writer,
+    gw_executor::GwExecutorPool,
+    persist_executor::PersistExecutorPool,
+    publish_executor::PublishExecutorPool,
+    latency::LatencyEvent,
+};
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -32,7 +38,7 @@ use zk_infra_rs::{
     service_registry::ServiceRegistration,
     tracing as zk_tracing,
 };
-use zk_oms_rs::{config::ConfdataManager, oms_core::OmsCore};
+use zk_oms_rs::{config::ConfdataManager, oms_core_v2::OmsCoreV2};
 use crate::{
     gw_client::GwClientPool,
     grpc_handler::OmsGrpcHandler,
@@ -107,16 +113,16 @@ async fn main() -> anyhow::Result<()> {
     });
     info!(loaded_positions = persisted_positions.len(), "warm-start positions loaded from Redis");
 
-    // ── 6. Build OmsCore ──────────────────────────────────────────────────────
-    let mut core = OmsCore::new(
-        confdata.clone(),
+    // ── 6. Build OmsCoreV2 ────────────────────────────────────────────────────
+    let mut core = OmsCoreV2::new(
+        &confdata,
         false,                       // use_time_emulation: false for live trading
         cfg.risk_check_enabled,
         cfg.handle_external_orders,
         cfg.max_cached_orders,
     );
     core.init_state(warm_orders, persisted_positions, persisted_balances);
-    info!("OmsCore initialised");
+    info!("OmsCoreV2 initialised");
 
     // ── 7. Connect to gateways via NATS KV ───────────────────────────────────
     let js = async_nats::jetstream::new(nats_client.clone());
@@ -178,12 +184,12 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // ── 8. Balance reconciliation ─────────────────────────────────────────────
+    // ── 8. Balance/position reconciliation ─────────────────────────────────────
     {
         use zk_proto_rs::zk::gateway::v1::QueryAccountRequest;
-        use zk_oms_rs::models::OmsAction;
+        use zk_oms_rs::models_v2::OmsActionV2;
 
-        // Query each connected gateway once for account balances.
+        // Query each connected gateway once for account balances/positions.
         let gw_keys: Vec<String> = gw_pool.gw_keys().map(String::from).collect();
         for gw_key in &gw_keys {
             let req = QueryAccountRequest::default();
@@ -193,47 +199,110 @@ async fn main() -> anyhow::Result<()> {
                         let actions = core.process_message(
                             zk_oms_rs::models::OmsMessage::BalanceUpdate(balance_update),
                         );
-                        for action in actions {
-                            if let OmsAction::PersistBalance {
-                                account_id,
-                                ref asset,
-                                ref snapshot,
-                            } = action
-                            {
-                                let _ = redis_writer
-                                    .write_balance(account_id, asset, snapshot)
-                                    .await;
+                        for action in &actions {
+                            match action {
+                                OmsActionV2::PersistBalance { account_id, asset_id } => {
+                                    oms_actor::persist_balance_to_redis(
+                                        &core, &mut redis_writer, *account_id, *asset_id,
+                                    ).await;
+                                }
+                                OmsActionV2::PersistPosition { account_id, instrument_id } => {
+                                    oms_actor::persist_position_to_redis(
+                                        &core, &mut redis_writer, *account_id, *instrument_id,
+                                    ).await;
+                                }
+                                _ => {}
                             }
                         }
                     }
-                    info!(gw_key, "startup balance reconcile succeeded");
+                    info!(gw_key, "startup reconcile succeeded");
                 }
-                Err(e) => warn!(gw_key, error = %e, "startup balance reconcile failed"),
+                Err(e) => warn!(gw_key, error = %e, "startup reconcile failed"),
             }
         }
-        info!("startup balance reconciliation complete");
+        info!("startup reconciliation complete");
     }
 
     // ── 9. Start OMS writer task ──────────────────────────────────────────────
     let (cmd_tx, cmd_rx) = mpsc::channel::<OmsCommand>(cfg.cmd_channel_buf);
-    let replica: ReadReplica = Arc::new(ArcSwap::new(Arc::new(
-        // Placeholder — writer task publishes the real initial snapshot immediately.
-        {
-            let (snap, _writer) = core.take_snapshot();
-            snap
-        },
-    )));
+
+    // Build initial snapshot from warm-started state.
+    use zk_oms_rs::snapshot_v2::OmsSnapshotWriterV2;
+    use crate::oms_actor::{
+        build_managed_positions, build_exch_positions, build_exch_balances,
+        build_snapshot_order_from_live, build_snapshot_detail_from_core,
+    };
+
+    let snap_meta = Arc::new(core.build_snapshot_metadata());
+    let mut snap_writer = OmsSnapshotWriterV2::new(snap_meta);
+
+    // Walk all live orders + details to hydrate the snapshot writer.
+    let order_ids: Vec<i64> = core.orders.live.keys().copied().collect();
+    for oid in &order_ids {
+        if let Some(live) = core.orders.live.get(oid) {
+            let snap_order = build_snapshot_order_from_live(live, &core.orders.dyn_strings);
+            let is_terminal = live.is_in_terminal_state();
+            snap_writer.apply_order_update(snap_order, is_terminal);
+
+            if let Some(detail_log) = core.orders.get_detail(*oid) {
+                let snap_detail = build_snapshot_detail_from_core(
+                    *oid, live, detail_log, &core.metadata, &core.orders.dyn_strings,
+                );
+                snap_writer.apply_order_detail(snap_detail);
+            }
+        }
+    }
+
+    let (exch_pos, unknown_pos) = build_exch_positions(&core);
+    let (exch_bal, unknown_bal) = build_exch_balances(&core);
+    let initial_snap = snap_writer.publish(
+        build_managed_positions(&core),
+        exch_pos,
+        exch_bal,
+        unknown_pos,
+        unknown_bal,
+        zk_oms_rs::utils::gen_timestamp_ms(),
+    );
+    info!(seq = initial_snap.seq, orders = initial_snap.orders.len(), "initial snapshot built");
+
+    let replica: ReadReplica = Arc::new(ArcSwap::new(Arc::new(initial_snap)));
 
     let shutdown = CancellationToken::new();
     let shutdown_clone = shutdown.clone();
 
+    // ── Executor pools + latency feedback channel ───────────────────────────
+    let (latency_tx, latency_rx) = mpsc::channel::<LatencyEvent>(2048);
+
+    // Build gw_id (u32) → gw_key (String) mapping from core metadata.
+    let gw_id_to_key: Vec<(u32, String)> = core
+        .metadata
+        .gws
+        .iter()
+        .map(|gw| {
+            let key = core.metadata.strings.resolve(gw.gw_key_sym).to_string();
+            (gw.gw_id, key)
+        })
+        .collect();
+
+    let gw_executor = GwExecutorPool::new(256, &gw_id_to_key, &gw_pool, latency_tx.clone(), cmd_tx.clone());
+
+    let persist_executor = PersistExecutorPool::new(1024, redis_writer.clone_writer());
+
+    let nats_publisher = NatsPublisher::new(nats_client.clone(), cfg.oms_id.clone());
+    let publish_executor = PublishExecutorPool::new(256, nats_publisher.clone(), latency_tx);
+
     let writer_handle = oms_actor::spawn_writer(
         core,
+        snap_writer,
         cmd_rx,
         replica.clone(),
-        NatsPublisher::new(nats_client.clone(), cfg.oms_id.clone()),
+        nats_publisher,
         redis_writer,
         gw_pool,
+        gw_executor,
+        persist_executor,
+        publish_executor,
+        latency_rx,
         shutdown_clone,
         Duration::from_secs(cfg.metrics_interval_secs),
         cfg.metrics_max_pending,

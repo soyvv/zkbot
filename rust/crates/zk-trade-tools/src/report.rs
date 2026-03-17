@@ -91,6 +91,10 @@ pub(crate) struct OmsBenchRun {
     pub(crate) degradation_reasons: Vec<String>,
     pub(crate) ack_latency_ms: PercentileSummary,
     pub(crate) oms_through_latency_ms: Option<PercentileSummary>,
+    pub(crate) writer_queue_latency_ms: Option<PercentileSummary>,
+    pub(crate) writer_core_latency_ms: Option<PercentileSummary>,
+    pub(crate) writer_post_core_latency_ms: Option<PercentileSummary>,
+    pub(crate) gw_exec_queue_latency_ms: Option<PercentileSummary>,
     pub(crate) order_update_latency_ms: Option<PercentileSummary>,
     pub(crate) metric_latency_ms: Option<PercentileSummary>,
 }
@@ -389,6 +393,61 @@ fn print_oms_benchmark_report(report: &OmsBenchmarkReport) {
                     latency.p90_ms,
                     latency.p99_ms,
                     latency.p99_9_ms,
+                    latency.max_ms,
+                    latency.avg_ms
+                );
+            }
+        }
+    }
+
+    if report.track_metric_latency {
+        println!();
+        println!("Through-OMS breakdown from metric tags:");
+        for run in &report.runs {
+            let queue = run.writer_queue_latency_ms.as_ref();
+            let core = run.writer_core_latency_ms.as_ref();
+            let post_core = run.writer_post_core_latency_ms.as_ref();
+            let gw_queue = run.gw_exec_queue_latency_ms.as_ref();
+            if queue.is_none() && core.is_none() && post_core.is_none() && gw_queue.is_none() {
+                continue;
+            }
+            println!("  {:>8.0}/s", run.target_qps);
+            if let Some(latency) = queue {
+                println!(
+                    "           writer queue   p50={:.3} p90={:.3} p99={:.3} max={:.3} avg={:.3}",
+                    latency.p50_ms,
+                    latency.p90_ms,
+                    latency.p99_ms,
+                    latency.max_ms,
+                    latency.avg_ms
+                );
+            }
+            if let Some(latency) = core {
+                println!(
+                    "           writer core    p50={:.3} p90={:.3} p99={:.3} max={:.3} avg={:.3}",
+                    latency.p50_ms,
+                    latency.p90_ms,
+                    latency.p99_ms,
+                    latency.max_ms,
+                    latency.avg_ms
+                );
+            }
+            if let Some(latency) = post_core {
+                println!(
+                    "           post-core prep p50={:.3} p90={:.3} p99={:.3} max={:.3} avg={:.3}",
+                    latency.p50_ms,
+                    latency.p90_ms,
+                    latency.p99_ms,
+                    latency.max_ms,
+                    latency.avg_ms
+                );
+            }
+            if let Some(latency) = gw_queue {
+                println!(
+                    "           gw-exec queue  p50={:.3} p90={:.3} p99={:.3} max={:.3} avg={:.3}",
+                    latency.p50_ms,
+                    latency.p90_ms,
+                    latency.p99_ms,
                     latency.max_ms,
                     latency.avg_ms
                 );

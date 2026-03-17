@@ -217,6 +217,20 @@ pub enum OmsMessage {
     /// Periodic position recheck — triggers reconciliation of managed positions
     /// against exchange-reported state.
     PositionRecheck,
+    /// Gateway worker failed to send order to exchange (gRPC error).
+    /// Writer handles this as a synthetic rejection.
+    GatewaySendFailed {
+        order_id: i64,
+        gw_id: u32,
+        error_msg: String,
+    },
+    /// Gateway worker failed to send cancel to exchange (gRPC error).
+    /// Writer handles this as a synthetic cancel-reject.
+    GatewayCancelSendFailed {
+        order_id: i64,
+        gw_id: u32,
+        error_msg: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

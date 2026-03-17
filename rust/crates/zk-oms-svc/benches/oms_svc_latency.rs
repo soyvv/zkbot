@@ -168,7 +168,7 @@ async fn bench_writer_loop(
                     let prev = replica.load();
                     prev.exch_balances.clone()
                 };
-                let snap = writer.publish(managed_pos, exch_pos, exch_bal, gen_timestamp_ms());
+                let snap = writer.publish(managed_pos, exch_pos, exch_bal, vec![], vec![], gen_timestamp_ms());
                 replica.store(Arc::new(snap));
 
                 if let Some(tx) = reply_opt {

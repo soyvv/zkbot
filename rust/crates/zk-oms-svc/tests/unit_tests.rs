@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 use zk_oms_rs::{
     config::ConfdataManager,
     models::OmsOrder,
-    oms_core::OmsCore,
+    oms_core_v2::OmsCoreV2,
 };
 use zk_proto_rs::{
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
@@ -90,52 +90,47 @@ async fn spawn_test_actor(
     confdata: ConfdataManager,
     shutdown: CancellationToken,
 ) -> (mpsc::Sender<OmsCommand>, ReadReplica) {
-    let core = OmsCore::new(confdata, false, true, false, 10_000);
+    let core = OmsCoreV2::new(&confdata, false, true, false, 10_000);
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<OmsCommand>(256);
 
-    // Build a fake replica
-    let (initial_snap, _) = core.take_snapshot();
+    // Build initial snapshot from empty core.
+    use zk_oms_rs::snapshot_v2::OmsSnapshotWriterV2;
+    use zk_oms_svc::oms_actor::{build_managed_positions, build_exch_positions, build_exch_balances};
+
+    let snap_meta = Arc::new(core.build_snapshot_metadata());
+    let mut snap_writer = OmsSnapshotWriterV2::new(snap_meta);
+    let (exch_pos, unknown_pos) = build_exch_positions(&core);
+    let (exch_bal, unknown_bal) = build_exch_balances(&core);
+    let initial_snap = snap_writer.publish(
+        build_managed_positions(&core),
+        exch_pos,
+        exch_bal,
+        unknown_pos,
+        unknown_bal,
+        zk_oms_rs::utils::gen_timestamp_ms(),
+    );
     let replica: ReadReplica = Arc::new(ArcSwap::new(Arc::new(initial_snap)));
 
-    // We can't easily construct a NatsPublisher without a real NATS connection,
-    // so we use a dummy by constructing with an async-nats test client.
-    // For simplicity, spawn but immediately provide a mock-friendly version.
-    //
-    // NOTE: The writer task panics if any NATS publish is called (no real client).
-    // These tests avoid triggering NATS publishes by using the snapshot read path only.
-    //
-    // TODO: introduce a NatsPublisher trait for better testability (Phase 3.5).
-    //
-    // For the actor tests that need GW dispatch, a mock GwClientPool should be used.
-    // For now, we only test the command flow / snapshot correctness.
-
-    // The simplest approach: use a dummy no-publish publisher.
-    // We construct a real NATS client only for integration tests.
-    // Unit tests: verify only snapshot state, not NATS output.
-
     let replica2 = replica.clone();
-
-    // Spawn a simplified writer that only manipulates the snapshot,
-    // skipping real NATS/Redis/GW calls.
-    let cmd_tx2 = cmd_tx.clone();
-    let _ = cmd_tx2; // suppress warning — writer below uses cmd_rx directly.
-
-    tokio::spawn(simple_test_writer_loop(core, cmd_rx, replica2, shutdown));
+    tokio::spawn(simple_test_writer_loop(core, snap_writer, cmd_rx, replica2, shutdown));
 
     (cmd_tx, replica)
 }
 
 /// Simplified writer loop for unit tests — no NATS/Redis/GW.
 async fn simple_test_writer_loop(
-    mut core:    OmsCore,
+    mut core:    OmsCoreV2,
+    mut writer:  zk_oms_rs::snapshot_v2::OmsSnapshotWriterV2,
     mut rx:      mpsc::Receiver<OmsCommand>,
     replica:     ReadReplica,
     shutdown:    CancellationToken,
 ) {
-    use zk_oms_rs::{models::OmsAction, utils::gen_timestamp_ms};
-    let (initial_snap, mut writer) = core.take_snapshot();
-    replica.store(Arc::new(initial_snap));
+    use zk_oms_rs::{models_v2::OmsActionV2, utils::gen_timestamp_ms};
+    use zk_oms_svc::oms_actor::{
+        build_managed_positions, build_exch_positions, build_exch_balances,
+        build_snapshot_order_from_live, build_snapshot_detail_from_core,
+    };
 
     loop {
         tokio::select! {
@@ -165,12 +160,16 @@ async fn simple_test_writer_loop(
                         (zk_oms_rs::models::OmsMessage::Cleanup { ts_ms }, None),
                     OmsCommand::ReloadConfig { new_config, reply } => {
                         core.reload_config(new_config);
+                        let new_meta = Arc::new(core.build_snapshot_metadata());
+                        writer.update_metadata(new_meta);
                         let snap = {
                             let prev = replica.load();
                             writer.publish(
                                 prev.managed_positions.clone(),
                                 prev.exch_positions.clone(),
                                 prev.exch_balances.clone(),
+                                prev.unknown_exch_positions.clone(),
+                                prev.unknown_exch_balances.clone(),
                                 gen_timestamp_ms(),
                             )
                         };
@@ -186,35 +185,45 @@ async fn simple_test_writer_loop(
                 let mut positions_dirty = false;
                 for action in &actions {
                     match action {
-                        OmsAction::PersistOrder { order, set_closed, .. } =>
-                            writer.apply_persist_order(order, *set_closed),
-                        OmsAction::PublishBalanceUpdate(_) => balances_dirty = true,
-                        OmsAction::PublishPositionUpdate(_) => positions_dirty = true,
+                        OmsActionV2::PersistOrder { order_id, set_closed, .. } => {
+                            if let Some(live) = core.orders.live.get(order_id) {
+                                let snap_order = build_snapshot_order_from_live(live, &core.orders.dyn_strings);
+                                writer.apply_order_update(snap_order, *set_closed);
+                                if let Some(detail_log) = core.orders.get_detail(*order_id) {
+                                    let snap_detail = build_snapshot_detail_from_core(
+                                        *order_id, live, detail_log, &core.metadata, &core.orders.dyn_strings,
+                                    );
+                                    writer.apply_order_detail(snap_detail);
+                                }
+                            }
+                        }
+                        OmsActionV2::PublishBalanceUpdate { .. } => balances_dirty = true,
+                        OmsActionV2::PublishPositionUpdate { .. } => positions_dirty = true,
                         _ => {}
                     }
                 }
 
-                let (managed_pos, exch_pos) = if positions_dirty {
-                    (
-                        core.position_mgr.snapshot_managed(),
-                        core.position_mgr.snapshot_exch(),
-                    )
+                let (managed_pos, exch_pos, unknown_pos) = if positions_dirty {
+                    let (ep, up) = build_exch_positions(&core);
+                    (build_managed_positions(&core), ep, up)
                 } else {
                     let prev = replica.load();
-                    (prev.managed_positions.clone(), prev.exch_positions.clone())
+                    (prev.managed_positions.clone(), prev.exch_positions.clone(), prev.unknown_exch_positions.clone())
                 };
-                let exch_bal = if balances_dirty {
-                    core.balance_mgr.snapshot_exch_balances()
+                let (exch_bal, unknown_bal) = if balances_dirty {
+                    build_exch_balances(&core)
                 } else {
                     let prev = replica.load();
-                    prev.exch_balances.clone()
+                    (prev.exch_balances.clone(), prev.unknown_exch_balances.clone())
                 };
-                let snap = writer.publish(managed_pos, exch_pos, exch_bal, gen_timestamp_ms());
+                let snap = writer.publish(managed_pos, exch_pos, exch_bal, unknown_pos, unknown_bal, gen_timestamp_ms());
                 replica.store(Arc::new(snap));
 
                 if let Some(tx) = reply {
-                    // Determine success: if any PublishOrderUpdate was emitted → success.
-                    let ok = actions.iter().any(|a| matches!(a, OmsAction::PublishOrderUpdate(_) | OmsAction::SendOrderToGw { .. }));
+                    let ok = actions.iter().any(|a| matches!(
+                        a,
+                        OmsActionV2::PublishOrderUpdate { .. } | OmsActionV2::SendOrderToGw { .. }
+                    ));
                     let resp = if ok {
                         oms_actor::ok_response("")
                     } else {
@@ -479,26 +488,41 @@ fn test_config_defaults() {
 
 // ── QueryPosition compatibility tests ────────────────────────────────────────
 
-/// Helper: build a snapshot with positions and balances populated.
-fn snapshot_with_positions() -> zk_oms_rs::snapshot::OmsSnapshot {
+/// Helper: build a V2 snapshot with positions and balances populated.
+fn snapshot_with_positions() -> zk_oms_rs::snapshot_v2::OmsSnapshotV2 {
     use std::collections::HashMap;
-    use zk_oms_rs::models::{ExchBalanceSnapshot, ExchPositionSnapshot, OmsManagedPosition};
+    use zk_oms_rs::models::{ExchBalanceSnapshot, ExchPositionSnapshot, ReconcileStatus};
+    use zk_oms_rs::snapshot_v2::{OmsSnapshotV2, OmsSnapshotWriterV2, SnapshotMetadata, SnapshotManagedPosition};
     use zk_proto_rs::zk::oms::v1::{Balance, Position};
 
-    // Managed positions
-    let mut managed_positions: HashMap<i64, HashMap<String, OmsManagedPosition>> = HashMap::new();
-    let mut acct_pos = HashMap::new();
-    let mut btc_pos = OmsManagedPosition::new(9001, "BTC-PERP", 2, false);
-    btc_pos.qty_total = 1.5;
-    btc_pos.qty_available = 1.5;
-    acct_pos.insert("BTC-PERP".to_string(), btc_pos);
-    managed_positions.insert(9001, acct_pos);
+    let meta = Arc::new(SnapshotMetadata {
+        instrument_names: vec!["".into(), "BTC-PERP".into()],
+        instrument_exch_names: vec!["".into(), "BTC-PERP".into()],
+        asset_names: vec!["USDT".into()],
+        gw_names: vec!["gw_mock_1".into()],
+        source_names: vec!["".into()],
+    });
 
-    // Exchange positions
-    let mut exch_positions: HashMap<i64, HashMap<String, ExchPositionSnapshot>> = HashMap::new();
-    let mut acct_exch_pos = HashMap::new();
-    acct_exch_pos.insert(
-        "BTC-PERP".to_string(),
+    let mut managed_positions: HashMap<(i64, u32), SnapshotManagedPosition> = HashMap::new();
+    managed_positions.insert(
+        (9001, 1),
+        SnapshotManagedPosition {
+            account_id: 9001,
+            instrument_id: 1,
+            instrument_type: 2, // PERP
+            is_short: false,
+            qty_total: 1.5,
+            qty_frozen: 0.0,
+            qty_available: 1.5,
+            last_local_update_ts: 0,
+            last_exch_sync_ts: 0,
+            reconcile_status: ReconcileStatus::Unknown,
+        },
+    );
+
+    let mut exch_positions: HashMap<(i64, u32), ExchPositionSnapshot> = HashMap::new();
+    exch_positions.insert(
+        (9001, 1),
         ExchPositionSnapshot {
             account_id: 9001,
             instrument_code: "BTC-PERP".to_string(),
@@ -513,13 +537,10 @@ fn snapshot_with_positions() -> zk_oms_rs::snapshot::OmsSnapshot {
             sync_ts: 0,
         },
     );
-    exch_positions.insert(9001, acct_exch_pos);
 
-    // Exchange balances
-    let mut exch_balances: HashMap<i64, HashMap<String, ExchBalanceSnapshot>> = HashMap::new();
-    let mut acct_bal = HashMap::new();
-    acct_bal.insert(
-        "USDT".to_string(),
+    let mut exch_balances: HashMap<(i64, u32), ExchBalanceSnapshot> = HashMap::new();
+    exch_balances.insert(
+        (9001, 0), // asset_id 0 = USDT
         ExchBalanceSnapshot {
             account_id: 9001,
             asset: "USDT".to_string(),
@@ -536,28 +557,25 @@ fn snapshot_with_positions() -> zk_oms_rs::snapshot::OmsSnapshot {
             sync_ts: 0,
         },
     );
-    exch_balances.insert(9001, acct_bal);
 
-    zk_oms_rs::snapshot::OmsSnapshot {
-        orders: Default::default(),
-        open_order_ids_by_account: Default::default(),
-        panic_accounts: Default::default(),
-        managed_positions,
-        exch_positions,
-        exch_balances,
-        seq: 1,
-        snapshot_ts_ms: 0,
-    }
+    let mut writer = OmsSnapshotWriterV2::new(meta);
+    writer.publish(managed_positions, exch_positions, exch_balances, vec![], vec![], 0)
 }
 
-/// query_position(query_gw=false) returns OMS-managed positions.
+/// query_position(query_gw=false) returns OMS-managed positions via metadata.
 #[test]
 fn test_query_position_managed() {
     let snap = snapshot_with_positions();
     let positions: Vec<_> = snap
-        .managed_positions
+        .managed_position_ids_by_account
         .get(&9001)
-        .map(|acct| acct.values().map(|p| p.to_proto()).collect())
+        .map(|inst_ids| {
+            inst_ids
+                .iter()
+                .filter_map(|iid| snap.managed_positions.get(&(9001, *iid)))
+                .map(|p| p.to_proto(&snap.metadata))
+                .collect()
+        })
         .unwrap_or_default();
 
     assert_eq!(positions.len(), 1);
@@ -570,9 +588,15 @@ fn test_query_position_managed() {
 fn test_query_position_from_exch() {
     let snap = snapshot_with_positions();
     let positions: Vec<_> = snap
-        .exch_positions
+        .exch_position_ids_by_account
         .get(&9001)
-        .map(|acct| acct.values().map(|p| p.position_state.clone()).collect())
+        .map(|inst_ids| {
+            inst_ids
+                .iter()
+                .filter_map(|iid| snap.exch_positions.get(&(9001, *iid)))
+                .map(|p| p.position_state.clone())
+                .collect()
+        })
         .unwrap_or_default();
 
     assert_eq!(positions.len(), 1);
@@ -585,12 +609,233 @@ fn test_query_position_from_exch() {
 fn test_query_position_unknown_account() {
     let snap = snapshot_with_positions();
     let positions: Vec<zk_proto_rs::zk::oms::v1::Position> = snap
-        .managed_positions
+        .managed_position_ids_by_account
         .get(&9999)
-        .map(|acct| acct.values().map(|p| p.to_proto()).collect())
+        .map(|inst_ids| {
+            inst_ids
+                .iter()
+                .filter_map(|iid| snap.managed_positions.get(&(9999, *iid)))
+                .map(|p| p.to_proto(&snap.metadata))
+                .collect()
+        })
         .unwrap_or_default();
 
     assert!(positions.is_empty());
+}
+
+/// Unknown exchange positions/balances are preserved in overflow buckets,
+/// not collapsed to ID 0.
+#[test]
+fn test_unknown_exch_overflow_buckets() {
+    use std::collections::HashMap;
+    use zk_oms_rs::models::{ExchBalanceSnapshot, ExchPositionSnapshot};
+    use zk_oms_rs::snapshot_v2::{OmsSnapshotWriterV2, SnapshotMetadata};
+    use zk_proto_rs::zk::oms::v1::{Balance, Position};
+
+    let meta = Arc::new(SnapshotMetadata {
+        instrument_names: vec!["".into(), "BTC-PERP".into()],
+        instrument_exch_names: vec!["".into(), "BTC-PERP".into()],
+        asset_names: vec!["USDT".into()],
+        gw_names: vec!["gw1".into()],
+        source_names: vec!["".into()],
+    });
+
+    // One resolved + two unknown positions for the same account.
+    let mut exch_positions = HashMap::new();
+    exch_positions.insert(
+        (100_i64, 1_u32),
+        ExchPositionSnapshot {
+            account_id: 100,
+            instrument_code: "BTC-PERP".to_string(),
+            symbol_exch: None,
+            position_state: Position {
+                account_id: 100,
+                instrument_code: "BTC-PERP".to_string(),
+                total_qty: 1.0,
+                ..Default::default()
+            },
+            exch_data_raw: String::new(),
+            sync_ts: 0,
+        },
+    );
+
+    let unknown_pos = vec![
+        ExchPositionSnapshot {
+            account_id: 100,
+            instrument_code: "UNKNOWN-A".to_string(),
+            symbol_exch: None,
+            position_state: Position {
+                account_id: 100,
+                instrument_code: "UNKNOWN-A".to_string(),
+                total_qty: 2.0,
+                ..Default::default()
+            },
+            exch_data_raw: String::new(),
+            sync_ts: 0,
+        },
+        ExchPositionSnapshot {
+            account_id: 100,
+            instrument_code: "UNKNOWN-B".to_string(),
+            symbol_exch: None,
+            position_state: Position {
+                account_id: 100,
+                instrument_code: "UNKNOWN-B".to_string(),
+                total_qty: 3.0,
+                ..Default::default()
+            },
+            exch_data_raw: String::new(),
+            sync_ts: 0,
+        },
+    ];
+
+    let unknown_bal = vec![
+        ExchBalanceSnapshot {
+            account_id: 100,
+            asset: "MYSTERY_COIN".to_string(),
+            symbol_exch: None,
+            balance_state: Balance {
+                account_id: 100,
+                asset: "MYSTERY_COIN".to_string(),
+                total_qty: 999.0,
+                ..Default::default()
+            },
+            exch_data_raw: String::new(),
+            sync_ts: 0,
+        },
+    ];
+
+    let mut writer = OmsSnapshotWriterV2::new(meta);
+    let snap = writer.publish(
+        HashMap::new(), exch_positions, HashMap::new(),
+        unknown_pos, unknown_bal, 0,
+    );
+
+    // Resolved position accessible via index.
+    assert_eq!(snap.exch_position_ids_by_account[&100], vec![1]);
+
+    // Unknown positions preserved in overflow.
+    assert_eq!(snap.unknown_exch_positions.len(), 2);
+    let codes: Vec<&str> = snap.unknown_exch_positions.iter()
+        .map(|p| p.instrument_code.as_str())
+        .collect();
+    assert!(codes.contains(&"UNKNOWN-A"));
+    assert!(codes.contains(&"UNKNOWN-B"));
+
+    // Unknown balance preserved.
+    assert_eq!(snap.unknown_exch_balances.len(), 1);
+    assert_eq!(snap.unknown_exch_balances[0].asset, "MYSTERY_COIN");
+
+    // Simulate query_position (query_gw=true): resolved + unknown.
+    let mut positions: Vec<Position> = snap.exch_position_ids_by_account
+        .get(&100)
+        .map(|ids| ids.iter()
+            .filter_map(|iid| snap.exch_positions.get(&(100, *iid)))
+            .map(|p| p.position_state.clone())
+            .collect())
+        .unwrap_or_default();
+    positions.extend(
+        snap.unknown_exch_positions.iter()
+            .filter(|p| p.account_id == 100)
+            .map(|p| p.position_state.clone()),
+    );
+    assert_eq!(positions.len(), 3); // 1 resolved + 2 unknown
+}
+
+/// Duplicate order_refs in query_order_details produce no duplicate output rows.
+#[test]
+fn test_query_order_details_dedup() {
+    use std::collections::HashSet;
+    use zk_oms_rs::snapshot_v2::{
+        OmsSnapshotWriterV2, SnapshotMetadata, SnapshotOrder, SnapshotOrderDetail,
+    };
+
+    let meta = Arc::new(SnapshotMetadata {
+        instrument_names: vec!["".into(), "BTC-PERP".into()],
+        instrument_exch_names: vec!["".into(), "BTCPERP".into()],
+        asset_names: vec![],
+        gw_names: vec!["gw1".into()],
+        source_names: vec!["".into(), "strat1".into()],
+    });
+
+    let mut writer = OmsSnapshotWriterV2::new(meta);
+
+    let order = SnapshotOrder {
+        order_id: 1001,
+        account_id: 42,
+        instrument_id: 1,
+        gw_id: 0,
+        source_sym: 1,
+        order_status: 1,
+        buy_sell_type: 1,
+        open_close_type: 0,
+        order_type: 1,
+        tif_type: 0,
+        price: 100.0,
+        qty: 10.0,
+        filled_qty: 5.0,
+        filled_avg_price: 99.5,
+        exch_order_ref: Some("EX1".into()),
+        created_at: 1000,
+        updated_at: 2000,
+        snapshot_version: 1,
+        is_external: false,
+    };
+    writer.apply_order_update(order, false);
+
+    let detail = SnapshotOrderDetail {
+        order_id: 1001,
+        source_sym: 1,
+        instrument_exch_sym: 1,
+        exch_order_ref: Some("EX1".into()),
+        error_msg: "".into(),
+        trades: vec![zk_proto_rs::zk::oms::v1::Trade {
+            order_id: 1001,
+            ext_trade_id: "T1".into(),
+            ..Default::default()
+        }],
+        inferred_trades: vec![],
+        exec_msgs: vec![],
+        fees: vec![],
+    };
+    writer.apply_order_detail(detail);
+
+    let snap = writer.publish(
+        std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
+        vec![], vec![], 0,
+    );
+
+    // Simulate query_order_details with duplicate refs ["EX1", "EX1"].
+    let order_refs = vec!["EX1".to_string(), "EX1".to_string()];
+    let unique_refs: HashSet<&str> = order_refs.iter().map(String::as_str).collect();
+    let mut seen_oids = HashSet::new();
+    let orders: Vec<_> = unique_refs
+        .iter()
+        .filter_map(|r| snap.order_ids_by_exch_ref.get(*r))
+        .flatten()
+        .filter(|oid| seen_oids.insert(**oid))
+        .filter_map(|oid| {
+            let o = snap.orders.get(oid)?;
+            Some(o.to_proto_order(&snap.metadata, snap.order_details.get(oid)))
+        })
+        .collect();
+
+    assert_eq!(orders.len(), 1, "duplicate refs must not produce duplicate orders");
+    assert_eq!(orders[0].order_id, 1001);
+
+    // Simulate query_trade_details with duplicate refs.
+    let mut seen_oids2 = HashSet::new();
+    let trades: Vec<_> = unique_refs
+        .iter()
+        .filter_map(|r| snap.order_ids_by_exch_ref.get(*r))
+        .flatten()
+        .filter(|oid| seen_oids2.insert(**oid))
+        .filter_map(|oid| snap.order_details.get(oid))
+        .flat_map(|d| d.trades.clone())
+        .collect();
+
+    assert_eq!(trades.len(), 1, "duplicate refs must not produce duplicate trades");
 }
 
 // ── Integration tests (require dev docker-compose stack) ──────────────────────

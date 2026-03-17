@@ -190,11 +190,24 @@ impl OmsService for OmsGrpcHandler {
         let snap = self.replica.load();
         let ts   = gen_timestamp_ms();
 
-        let balances: Vec<_> = snap
-            .exch_balances
+        let mut balances: Vec<_> = snap
+            .balance_asset_ids_by_account
             .get(&req.account_id)
-            .map(|acct| acct.values().map(|b| b.balance_state.clone()).collect())
+            .map(|asset_ids| {
+                asset_ids
+                    .iter()
+                    .filter_map(|aid| snap.exch_balances.get(&(req.account_id, *aid)))
+                    .map(|b| b.balance_state.clone())
+                    .collect()
+            })
             .unwrap_or_default();
+
+        // Append unknown (unresolved) balances for this account.
+        balances.extend(
+            snap.unknown_exch_balances.iter()
+                .filter(|b| b.account_id == req.account_id)
+                .map(|b| b.balance_state.clone()),
+        );
 
         Ok(Response::new(QueryBalancesResponse {
             account_id: req.account_id,
@@ -210,14 +223,33 @@ impl OmsService for OmsGrpcHandler {
         let req  = request.into_inner();
         let snap = self.replica.load();
         let positions = if req.query_gw {
-            snap.exch_positions
+            let mut pos: Vec<_> = snap.exch_position_ids_by_account
                 .get(&req.account_id)
-                .map(|acct| acct.values().map(|p| p.position_state.clone()).collect())
-                .unwrap_or_default()
+                .map(|inst_ids| {
+                    inst_ids
+                        .iter()
+                        .filter_map(|iid| snap.exch_positions.get(&(req.account_id, *iid)))
+                        .map(|p| p.position_state.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            // Append unknown (unresolved) positions for this account.
+            pos.extend(
+                snap.unknown_exch_positions.iter()
+                    .filter(|p| p.account_id == req.account_id)
+                    .map(|p| p.position_state.clone()),
+            );
+            pos
         } else {
-            snap.managed_positions
+            snap.managed_position_ids_by_account
                 .get(&req.account_id)
-                .map(|acct| acct.values().map(|p| p.to_proto()).collect())
+                .map(|inst_ids| {
+                    inst_ids
+                        .iter()
+                        .filter_map(|iid| snap.managed_positions.get(&(req.account_id, *iid)))
+                        .map(|p| p.to_proto(&snap.metadata))
+                        .collect()
+                })
                 .unwrap_or_default()
         };
         Ok(Response::new(PositionResponse { positions }))
@@ -235,8 +267,10 @@ impl OmsService for OmsGrpcHandler {
             .get(&req.account_id)
             .map(|ids| {
                 ids.iter()
-                    .filter_map(|id| snap.orders.get(id))
-                    .map(|o| o.order_state.clone())
+                    .filter_map(|id| {
+                        let o = snap.orders.get(id)?;
+                        Some(o.to_proto_order(&snap.metadata, snap.order_details.get(id)))
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -254,20 +288,19 @@ impl OmsService for OmsGrpcHandler {
         let req  = request.into_inner();
         let snap = self.replica.load();
 
-        // `order_refs` are exch_order_refs; do a linear scan (typically small batch).
-        let refs: std::collections::HashSet<&str> =
+        let unique_refs: std::collections::HashSet<&str> =
             req.order_refs.iter().map(String::as_str).collect();
+        let mut seen_oids = std::collections::HashSet::new();
 
-        let orders: Vec<_> = snap
-            .orders
-            .values()
-            .filter(|o| {
-                o.exch_order_ref
-                    .as_deref()
-                    .map(|r| refs.contains(r))
-                    .unwrap_or(false)
+        let orders: Vec<_> = unique_refs
+            .iter()
+            .filter_map(|r| snap.order_ids_by_exch_ref.get(*r))
+            .flatten()
+            .filter(|oid| seen_oids.insert(**oid))
+            .filter_map(|oid| {
+                let o = snap.orders.get(oid)?;
+                Some(o.to_proto_order(&snap.metadata, snap.order_details.get(oid)))
             })
-            .map(|o| o.order_state.clone())
             .collect();
 
         Ok(Response::new(OrderDetailResponse { orders, pagination: None }))
@@ -280,19 +313,17 @@ impl OmsService for OmsGrpcHandler {
         let req  = request.into_inner();
         let snap = self.replica.load();
 
-        let refs: std::collections::HashSet<&str> =
+        let unique_refs: std::collections::HashSet<&str> =
             req.order_refs.iter().map(String::as_str).collect();
+        let mut seen_oids = std::collections::HashSet::new();
 
-        let trades: Vec<_> = snap
-            .orders
-            .values()
-            .filter(|o| {
-                o.exch_order_ref
-                    .as_deref()
-                    .map(|r| refs.contains(r))
-                    .unwrap_or(false)
-            })
-            .flat_map(|o| o.trades.clone())
+        let trades: Vec<_> = unique_refs
+            .iter()
+            .filter_map(|r| snap.order_ids_by_exch_ref.get(*r))
+            .flatten()
+            .filter(|oid| seen_oids.insert(**oid))
+            .filter_map(|oid| snap.order_details.get(oid))
+            .flat_map(|d| d.trades.clone())
             .collect();
 
         Ok(Response::new(TradeDetailResponse { trades, pagination: None }))

@@ -93,7 +93,7 @@ pub struct OmsSvcConfig {
     #[serde(default = "default_cleanup_interval_secs")]
     pub cleanup_interval_secs: u64,
 
-    /// How often (seconds) OMS flushes accumulated latency samples to NATS (default 10).
+    /// How often (seconds) OMS flushes accumulated latency samples to NATS (default 2).
     #[serde(default = "default_metrics_interval_secs")]
     pub metrics_interval_secs: u64,
 
@@ -117,7 +117,7 @@ fn default_gw_kv_prefix()        -> String { "svc.gw".into() }
 fn default_resync_interval_secs() -> u64   { 60 }
 fn default_position_recheck_interval_secs() -> u64 { 30 }
 fn default_cleanup_interval_secs() -> u64  { 600 }
-fn default_metrics_interval_secs() -> u64  { 10 }
+fn default_metrics_interval_secs() -> u64  { 2 }
 fn default_metrics_max_pending()   -> usize { 5_000 }
 fn default_metrics_max_complete()  -> usize { 10_000 }
 

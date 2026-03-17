@@ -34,6 +34,10 @@ struct OmsRequestOutcome {
     in_measurement: bool,
     ack_result: AckResult,
     oms_through_latency_ms: Option<f64>,
+    writer_queue_latency_ms: Option<f64>,
+    writer_core_latency_ms: Option<f64>,
+    writer_post_core_latency_ms: Option<f64>,
+    gw_exec_queue_latency_ms: Option<f64>,
     order_update_latency_ms: Option<f64>,
     metric_latency_ms: Option<f64>,
 }
@@ -147,16 +151,52 @@ async fn run_oms_place_request(
         None
     };
 
-    let (metric_latency_ms, oms_through_latency_ms) = if let AckResult::Success(_) = ack {
+    let (
+        metric_latency_ms,
+        oms_through_latency_ms,
+        writer_queue_latency_ms,
+        writer_core_latency_ms,
+        writer_post_core_latency_ms,
+        gw_exec_queue_latency_ms,
+    ) = if let AckResult::Success(_) = ack {
         if let Some(rx) = metric_rx {
             match tokio::time::timeout(timeout, rx).await {
                 Ok(Ok(observation)) => {
+                    let t1 = observation.tagged_timestamps.get("t1").copied();
+                    let t2 = observation.tagged_timestamps.get("t2").copied();
+                    let tw_core = observation.tagged_timestamps.get("tw_core").copied();
+                    let tw_dispatch = observation.tagged_timestamps.get("tw_dispatch").copied();
+                    let t3 = observation.tagged_timestamps.get("t3").copied();
                     let oms_through_latency_ms = match (
-                        observation.tagged_timestamps.get("t1").copied(),
-                        observation.tagged_timestamps.get("t3").copied(),
+                        t1,
+                        t3,
                     ) {
                         (Some(t1), Some(t3)) if t1 > 0 && t3 >= t1 => {
                             Some((t3 - t1) as f64 / 1_000_000.0)
+                        }
+                        _ => None,
+                    };
+                    let writer_queue_latency_ms = match (t1, t2) {
+                        (Some(t1), Some(t2)) if t1 > 0 && t2 >= t1 => {
+                            Some((t2 - t1) as f64 / 1_000_000.0)
+                        }
+                        _ => None,
+                    };
+                    let writer_core_latency_ms = match (t2, tw_core) {
+                        (Some(t2), Some(tw_core)) if t2 > 0 && tw_core >= t2 => {
+                            Some((tw_core - t2) as f64 / 1_000_000.0)
+                        }
+                        _ => None,
+                    };
+                    let writer_post_core_latency_ms = match (tw_core, tw_dispatch) {
+                        (Some(tw_core), Some(tw_dispatch)) if tw_core > 0 && tw_dispatch >= tw_core => {
+                            Some((tw_dispatch - tw_core) as f64 / 1_000_000.0)
+                        }
+                        _ => None,
+                    };
+                    let gw_exec_queue_latency_ms = match (tw_dispatch, t3) {
+                        (Some(tw_dispatch), Some(t3)) if tw_dispatch > 0 && t3 >= tw_dispatch => {
+                            Some((t3 - tw_dispatch) as f64 / 1_000_000.0)
                         }
                         _ => None,
                     };
@@ -169,29 +209,37 @@ async fn run_oms_place_request(
                                 * 1_000.0,
                         ),
                         oms_through_latency_ms,
+                        writer_queue_latency_ms,
+                        writer_core_latency_ms,
+                        writer_post_core_latency_ms,
+                        gw_exec_queue_latency_ms,
                     )
                 }
                 _ => {
                     if let Some(tracker) = metric_tracker {
                         tracker.clear(order_id).await;
                     }
-                    (None, None)
+                    (None, None, None, None, None, None)
                 }
             }
         } else {
-            (None, None)
+            (None, None, None, None, None, None)
         }
     } else {
         if let Some(tracker) = metric_tracker {
             tracker.clear(order_id).await;
         }
-        (None, None)
+        (None, None, None, None, None, None)
     };
 
     OmsRequestOutcome {
         in_measurement,
         ack_result: ack,
         oms_through_latency_ms,
+        writer_queue_latency_ms,
+        writer_core_latency_ms,
+        writer_post_core_latency_ms,
+        gw_exec_queue_latency_ms,
         order_update_latency_ms,
         metric_latency_ms,
     }
@@ -696,6 +744,10 @@ async fn run_oms_latency_point(
     let mut timeout_count = 0_u64;
     let mut ack_latencies = Vec::new();
     let mut oms_through_latencies = Vec::new();
+    let mut writer_queue_latencies = Vec::new();
+    let mut writer_core_latencies = Vec::new();
+    let mut writer_post_core_latencies = Vec::new();
+    let mut gw_exec_queue_latencies = Vec::new();
     let mut order_update_latencies = Vec::new();
     let mut metric_latencies = Vec::new();
     let mut pending: FuturesUnordered<BoxFuture<'static, OmsRequestOutcome>> =
@@ -769,6 +821,18 @@ async fn run_oms_latency_point(
                         }
                         if let Some(latency_ms) = outcome.oms_through_latency_ms {
                             oms_through_latencies.push(latency_ms);
+                        }
+                        if let Some(latency_ms) = outcome.writer_queue_latency_ms {
+                            writer_queue_latencies.push(latency_ms);
+                        }
+                        if let Some(latency_ms) = outcome.writer_core_latency_ms {
+                            writer_core_latencies.push(latency_ms);
+                        }
+                        if let Some(latency_ms) = outcome.writer_post_core_latency_ms {
+                            writer_post_core_latencies.push(latency_ms);
+                        }
+                        if let Some(latency_ms) = outcome.gw_exec_queue_latency_ms {
+                            gw_exec_queue_latencies.push(latency_ms);
                         }
                         if let Some(latency_ms) = outcome.order_update_latency_ms {
                             order_update_latencies.push(latency_ms);
@@ -853,6 +917,26 @@ async fn run_oms_latency_point(
             None
         } else {
             Some(compute_percentiles(oms_through_latencies))
+        },
+        writer_queue_latency_ms: if writer_queue_latencies.is_empty() {
+            None
+        } else {
+            Some(compute_percentiles(writer_queue_latencies))
+        },
+        writer_core_latency_ms: if writer_core_latencies.is_empty() {
+            None
+        } else {
+            Some(compute_percentiles(writer_core_latencies))
+        },
+        writer_post_core_latency_ms: if writer_post_core_latencies.is_empty() {
+            None
+        } else {
+            Some(compute_percentiles(writer_post_core_latencies))
+        },
+        gw_exec_queue_latency_ms: if gw_exec_queue_latencies.is_empty() {
+            None
+        } else {
+            Some(compute_percentiles(gw_exec_queue_latencies))
         },
         order_update_latency_ms: if order_update_latencies.is_empty() {
             None

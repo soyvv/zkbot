@@ -180,6 +180,8 @@ impl OmsCore {
                 vec![]
             }
             OmsMessage::PositionRecheck => self.process_position_recheck(),
+            // V1 OmsCore does not handle gateway failure feedback — V2 only.
+            OmsMessage::GatewaySendFailed { .. } | OmsMessage::GatewayCancelSendFailed { .. } => vec![],
         }
     }
 

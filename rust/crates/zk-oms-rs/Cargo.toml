@@ -22,3 +22,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "oms_latency"
 harness = false
+
+[[bench]]
+name = "oms_v2_latency"
+harness = false
