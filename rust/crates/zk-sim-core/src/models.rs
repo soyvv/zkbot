@@ -1,6 +1,5 @@
 use zk_proto_rs::zk::{
-    exch_gw::v1::OrderReport,
-    gateway::v1::SendOrderRequest as ExchSendOrderRequest,
+    exch_gw::v1::OrderReport, gateway::v1::SendOrderRequest as ExchSendOrderRequest,
 };
 
 /// In-flight order tracked by the simulator.

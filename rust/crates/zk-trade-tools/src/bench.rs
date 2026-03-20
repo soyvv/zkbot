@@ -167,10 +167,7 @@ async fn run_oms_place_request(
                     let tw_core = observation.tagged_timestamps.get("tw_core").copied();
                     let tw_dispatch = observation.tagged_timestamps.get("tw_dispatch").copied();
                     let t3 = observation.tagged_timestamps.get("t3").copied();
-                    let oms_through_latency_ms = match (
-                        t1,
-                        t3,
-                    ) {
+                    let oms_through_latency_ms = match (t1, t3) {
                         (Some(t1), Some(t3)) if t1 > 0 && t3 >= t1 => {
                             Some((t3 - t1) as f64 / 1_000_000.0)
                         }
@@ -189,7 +186,9 @@ async fn run_oms_place_request(
                         _ => None,
                     };
                     let writer_post_core_latency_ms = match (tw_core, tw_dispatch) {
-                        (Some(tw_core), Some(tw_dispatch)) if tw_core > 0 && tw_dispatch >= tw_core => {
+                        (Some(tw_core), Some(tw_dispatch))
+                            if tw_core > 0 && tw_dispatch >= tw_core =>
+                        {
                             Some((tw_dispatch - tw_core) as f64 / 1_000_000.0)
                         }
                         _ => None,

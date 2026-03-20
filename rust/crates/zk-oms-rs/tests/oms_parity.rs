@@ -22,15 +22,13 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use zk_oms_rs::{
     config::{ConfdataManager, InstrumentTradingConfig},
-    models::{
-        OmsAction, OmsManagedPosition, OmsMessage, PositionDelta,
-        ReconcileStatus,
-    },
+    models::{OmsAction, OmsManagedPosition, OmsMessage, PositionDelta, ReconcileStatus},
     oms_core::OmsCore,
     position_mgr::PositionManager,
     reservation_mgr::ReservationManager,
 };
 use zk_proto_rs::{
+    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     zk::{
         common::v1::{
             BasicOrderType, BuySellType, InstrumentRefData, InstrumentType, LongShortType,
@@ -46,7 +44,6 @@ use zk_proto_rs::{
             PositionUpdateEvent,
         },
     },
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
 };
 
 // ---------------------------------------------------------------------------
@@ -940,10 +937,16 @@ fn test_check_available_with_reservations() {
 
     // 10_000 available, 8_000 reserved → 2_000 effective
     let result = mgr.check_available(ACCOUNT_1, "USDC", 3_000.0, 10_000.0);
-    assert!(result.is_err(), "should fail: need 3000, only 2000 effective");
+    assert!(
+        result.is_err(),
+        "should fail: need 3000, only 2000 effective"
+    );
 
     let result = mgr.check_available(ACCOUNT_1, "USDC", 1_500.0, 10_000.0);
-    assert!(result.is_ok(), "should succeed: need 1500, have 2000 effective");
+    assert!(
+        result.is_ok(),
+        "should succeed: need 1500, have 2000 effective"
+    );
 }
 
 // ===========================================================================
@@ -952,10 +955,7 @@ fn test_check_available_with_reservations() {
 
 #[test]
 fn test_balance_mgr_exchange_only() {
-    let mut mgr = zk_oms_rs::balance_mgr::BalanceManager::new(
-        &test_routes(),
-        &test_gw_configs(),
-    );
+    let mut mgr = zk_oms_rs::balance_mgr::BalanceManager::new(&test_routes(), &test_gw_configs());
 
     // Merge a spot balance entry
     let entries = vec![PositionReport {

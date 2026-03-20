@@ -60,6 +60,12 @@ Heartbeat interval: 5s. Lease TTL: 20s. Consumers evict stale entries after TTL.
 All command requests carry `AuditMeta audit_meta` and `string idempotency_key`.
 All command responses use `CommandAck` (see [proto.md](proto.md)).
 
+Command ACK semantics:
+
+- OMS command success means the request was validated and accepted for asynchronous processing by OMS
+- OMS command success does not mean the order was already enqueued, sent to the gateway, or accepted by the venue
+- final execution outcome is asynchronous and arrives through order-update / report paths
+
 Idempotency options:
 - Option A (preferred): OMS deduplicates commands on `(order_id, source_id, idempotency_key)` using in-memory + Redis short-window cache.
 - Option B: OMS deduplicates in-memory only (lower complexity, weaker restart safety).
@@ -109,6 +115,12 @@ Streaming options:
 
 OMS calls gateways directly. `trading_sdk` does not call gateways.
 
+Gateway command ACK semantics:
+
+- gateway command success means the request was validated and accepted for asynchronous processing by the gateway
+- gateway command success does not mean the order was already enqueued, sent to, or accepted by the venue
+- downstream send/reject/fill outcomes are asynchronous
+
 **Order execution:**
 
 | RPC | Request | Response |
@@ -124,6 +136,12 @@ Gateway identity-linkage note:
 - the gateway must emit at least one early acknowledgment or event carrying both `client_order_id`
   and the venue-native order id once both are known
 - OMS uses that linkage to persist the durable correlation
+
+Execution model note:
+
+- validation failure is a synchronous command failure
+- internal dispatch/queue failure or downstream send failure after ACK is asynchronous and should be surfaced by a gateway event,
+  synthetic failure event, or timeout/recheck path
 
 **Queries** (mirrors current Python `GWSender.QueryOrderDetails` / `QueryAccountSummary`):
 

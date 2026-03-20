@@ -23,8 +23,14 @@
 /// ```
 pub mod action_dispatcher;
 pub mod engine_event;
+pub mod latency;
 pub mod live_engine;
+pub mod snapshot;
 
 pub use action_dispatcher::{ActionDispatcher, NoopDispatcher, RecordingDispatcher};
-pub use engine_event::{coalesce_ticks, EngineEvent};
+pub use engine_event::{
+    coalesce_ticks, system_time_ns, ControlCommand, EngineEvent, EventEnvelope, TriggerContext,
+};
+pub use latency::{EngineLatencyTracker, LatencySample};
 pub use live_engine::{run_timer_clock, EngineConfig, LiveEngine};
+pub use snapshot::{new_read_replica, EngineReadReplica, EngineSnapshot, LifecycleState};

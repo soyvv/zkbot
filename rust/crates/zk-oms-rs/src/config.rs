@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use zk_proto_rs::{
-    zk::common::v1::InstrumentRefData,
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
+    zk::common::v1::InstrumentRefData,
 };
 
 /// Per-instrument trading behaviour flags for the OMS.
@@ -79,7 +79,8 @@ impl ConfdataManager {
 
         // gw_key → config
         let gw_key_to_config: HashMap<String, GwConfigEntry> = {
-            let relevant_gw_keys: HashSet<&str> = routes.iter().map(|r| r.gw_key.as_str()).collect();
+            let relevant_gw_keys: HashSet<&str> =
+                routes.iter().map(|r| r.gw_key.as_str()).collect();
             gw_configs
                 .into_iter()
                 .filter(|g| relevant_gw_keys.contains(g.gw_key.as_str()))
@@ -128,18 +129,18 @@ impl ConfdataManager {
                 .unwrap_or_default();
 
             for gw_key in &gw_keys_for_exch {
-                refdata_by_gw_key
-                    .entry(gw_key.clone())
-                    .or_default()
-                    .insert(ref_entry.instrument_id_exchange.clone(), (*ref_entry).clone());
+                refdata_by_gw_key.entry(gw_key.clone()).or_default().insert(
+                    ref_entry.instrument_id_exchange.clone(),
+                    (*ref_entry).clone(),
+                );
 
                 // also build account_id lookup
                 for (acc_id, acc_route) in &route_map {
                     if acc_route.gw_key == *gw_key {
-                        refdata_by_account_id
-                            .entry(*acc_id)
-                            .or_default()
-                            .insert(ref_entry.instrument_id_exchange.clone(), (*ref_entry).clone());
+                        refdata_by_account_id.entry(*acc_id).or_default().insert(
+                            ref_entry.instrument_id_exchange.clone(),
+                            (*ref_entry).clone(),
+                        );
                     }
                 }
             }

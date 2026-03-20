@@ -5,6 +5,7 @@ use tonic::{Request, Response, Status};
 
 use zk_proto_rs::zk::exch_gw::v1::BalanceUpdate;
 
+use crate::gw_executor::{GwExecAction, GwExecPool};
 use crate::proto::zk_gw_v1::gateway_service_server::GatewayService;
 use crate::proto::zk_gw_v1::*;
 use crate::reconnect::GatewayState;
@@ -12,8 +13,14 @@ use crate::venue_adapter::*;
 
 /// GatewayService gRPC handler.
 ///
-/// Delegates all RPCs to the underlying VenueAdapter (simulator or real venue).
+/// Execution commands (place/cancel) are dispatched to the internal execution
+/// pool. gRPC success = validated + accepted for async processing. It does NOT
+/// guarantee enqueue to a worker or venue acceptance. Queue-full drops publish
+/// synthetic rejection reports asynchronously via NATS.
+/// Query RPCs still call the adapter synchronously.
 pub struct GrpcHandler {
+    pub exec_pool: Arc<GwExecPool>,
+    /// Adapter kept for query RPCs (balance, position, orders, trades).
     pub adapter: Arc<dyn VenueAdapter>,
     pub gw_state: Arc<Mutex<GatewayState>>,
     pub account_id: i64,
@@ -31,6 +38,7 @@ impl GatewayService for GrpcHandler {
             .unwrap_or_default()
             .as_millis() as i64;
 
+        let correlation_id = req.correlation_id;
         let venue_req = VenuePlaceOrder {
             correlation_id: req.correlation_id,
             exch_account_id: req.exch_account_id,
@@ -44,34 +52,54 @@ impl GatewayService for GrpcHandler {
             timestamp: req.timestamp,
         };
 
-        match self.adapter.place_order(venue_req).await {
-            Ok(ack) => {
-                let status = if ack.success {
-                    gateway_response::Status::GwRespStatusSuccess as i32
-                } else {
-                    gateway_response::Status::GwRespStatusFail as i32
-                };
-                Ok(Response::new(GatewayResponse {
-                    timestamp: ts,
-                    status,
-                    message: ack.error_message.unwrap_or_default(),
-                    ..Default::default()
-                }))
-            }
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
+        self.exec_pool.dispatch_or_reject(
+            correlation_id,
+            GwExecAction::PlaceOrder {
+                venue_req,
+                correlation_id,
+            },
+        );
+        Ok(Response::new(GatewayResponse {
+            timestamp: ts,
+            status: gateway_response::Status::GwRespStatusSuccess as i32,
+            ..Default::default()
+        }))
     }
 
     async fn batch_place_orders(
         &self,
         request: Request<BatchSendOrdersRequest>,
     ) -> Result<Response<GatewayResponse>, Status> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+
         let batch = request.into_inner();
         for req in batch.order_requests {
-            let wrapped = Request::new(req);
-            self.place_order(wrapped).await?;
+            let correlation_id = req.correlation_id;
+            let venue_req = VenuePlaceOrder {
+                correlation_id: req.correlation_id,
+                exch_account_id: req.exch_account_id,
+                instrument: req.instrument,
+                buysell_type: req.buysell_type,
+                openclose_type: req.openclose_type,
+                order_type: req.order_type,
+                price: req.scaled_price,
+                qty: req.scaled_qty,
+                leverage: req.leverage,
+                timestamp: req.timestamp,
+            };
+            self.exec_pool.dispatch_or_reject(
+                correlation_id,
+                GwExecAction::PlaceOrder {
+                    venue_req,
+                    correlation_id,
+                },
+            );
         }
         Ok(Response::new(GatewayResponse {
+            timestamp: ts,
             status: gateway_response::Status::GwRespStatusSuccess as i32,
             ..Default::default()
         }))
@@ -87,44 +115,60 @@ impl GatewayService for GrpcHandler {
             .unwrap_or_default()
             .as_millis() as i64;
 
+        let order_id = req.order_id;
         let venue_req = VenueCancelOrder {
             exch_order_ref: req.exch_order_ref,
             order_id: req.order_id,
             timestamp: req.timestamp,
         };
 
-        match self.adapter.cancel_order(venue_req).await {
-            Ok(ack) => {
-                let status = if ack.success {
-                    gateway_response::Status::GwRespStatusSuccess as i32
-                } else {
-                    gateway_response::Status::GwRespStatusFail as i32
-                };
-                Ok(Response::new(GatewayResponse {
-                    timestamp: ts,
-                    status,
-                    message: ack.error_message.unwrap_or_default(),
-                    ..Default::default()
-                }))
-            }
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
+        self.exec_pool.dispatch_or_reject(
+            order_id,
+            GwExecAction::CancelOrder {
+                venue_req,
+                order_id,
+            },
+        );
+        Ok(Response::new(GatewayResponse {
+            timestamp: ts,
+            status: gateway_response::Status::GwRespStatusSuccess as i32,
+            ..Default::default()
+        }))
     }
 
     async fn batch_cancel_orders(
         &self,
         request: Request<BatchCancelOrdersRequest>,
     ) -> Result<Response<GatewayResponse>, Status> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+
         let batch = request.into_inner();
         for req in batch.cancel_requests {
-            let wrapped = Request::new(req);
-            self.cancel_order(wrapped).await?;
+            let order_id = req.order_id;
+            let venue_req = VenueCancelOrder {
+                exch_order_ref: req.exch_order_ref,
+                order_id: req.order_id,
+                timestamp: req.timestamp,
+            };
+            self.exec_pool.dispatch_or_reject(
+                order_id,
+                GwExecAction::CancelOrder {
+                    venue_req,
+                    order_id,
+                },
+            );
         }
         Ok(Response::new(GatewayResponse {
+            timestamp: ts,
             status: gateway_response::Status::GwRespStatusSuccess as i32,
             ..Default::default()
         }))
     }
+
+    // ── Query RPCs — still synchronous via adapter ──────────────────────────
 
     async fn query_account_balance(
         &self,

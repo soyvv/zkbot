@@ -19,8 +19,6 @@ pub fn init_tracing(service_name: &str) {
             .with_current_span(false)
             .init();
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .init();
+        tracing_subscriber::fmt().with_env_filter(filter).init();
     }
 }

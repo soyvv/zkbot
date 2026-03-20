@@ -1,6 +1,5 @@
 /// Integration tests — require `make dev-up` (docker-compose stack).
 /// Run with: `cargo test -p zk-infra-rs -- --ignored`
-
 use zk_infra_rs::{nats, pg, redis};
 
 const NATS_URL: &str = "nats://localhost:4222";

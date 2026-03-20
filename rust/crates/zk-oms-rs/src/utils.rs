@@ -170,8 +170,7 @@ mod tests {
 
     #[test]
     fn btc_balance_derives_spot_position() {
-        let bals: HashMap<String, f64> =
-            [("BTC".into(), 1.5), ("USDT".into(), 10_000.0)].into();
+        let bals: HashMap<String, f64> = [("BTC".into(), 1.5), ("USDT".into(), 10_000.0)].into();
         let rd = vec![spot_refdata("BTC-USDT@EX", "BTC", "USDT")];
         let positions = derive_spot_positions_from_balances_with_refdata(1, &bals, &rd);
         assert_eq!(positions.len(), 1);
@@ -186,7 +185,10 @@ mod tests {
         let bals: HashMap<String, f64> = [("USDT".into(), 10_000.0)].into();
         let rd = vec![spot_refdata("BTC-USDT@EX", "BTC", "USDT")];
         let positions = derive_spot_positions_from_balances_with_refdata(1, &bals, &rd);
-        assert!(positions.is_empty(), "USDT is quote, not base — should not derive");
+        assert!(
+            positions.is_empty(),
+            "USDT is quote, not base — should not derive"
+        );
     }
 
     #[test]
@@ -213,7 +215,8 @@ mod tests {
     #[test]
     fn zero_balance_skipped() {
         let bals: HashMap<String, f64> = [("BTC".into(), 0.0)].into();
-        let spot_assets = collect_spot_position_assets(&[spot_refdata("BTC-USDT@EX", "BTC", "USDT")]);
+        let spot_assets =
+            collect_spot_position_assets(&[spot_refdata("BTC-USDT@EX", "BTC", "USDT")]);
         let positions = derive_spot_positions_from_balances(1, &bals, &spot_assets);
         assert!(positions.is_empty());
     }
@@ -221,7 +224,8 @@ mod tests {
     #[test]
     fn negative_balance_skipped() {
         let bals: HashMap<String, f64> = [("BTC".into(), -0.5)].into();
-        let spot_assets = collect_spot_position_assets(&[spot_refdata("BTC-USDT@EX", "BTC", "USDT")]);
+        let spot_assets =
+            collect_spot_position_assets(&[spot_refdata("BTC-USDT@EX", "BTC", "USDT")]);
         let positions = derive_spot_positions_from_balances(1, &bals, &spot_assets);
         assert!(positions.is_empty());
     }
@@ -265,7 +269,8 @@ mod tests {
             p
         }];
         let explicit = vec![{
-            let mut p = OmsManagedPosition::new(1, "ETH-PERP", InstrumentType::InstTypePerp as i32, false);
+            let mut p =
+                OmsManagedPosition::new(1, "ETH-PERP", InstrumentType::InstTypePerp as i32, false);
             p.qty_total = 5.0;
             p
         }];

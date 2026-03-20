@@ -5,9 +5,9 @@
 pub mod config;
 pub mod db;
 pub mod executor;
+pub mod grpc_handler;
 pub mod gw_client;
 pub mod gw_executor;
-pub mod grpc_handler;
 pub mod latency;
 pub mod nats_handler;
 pub mod oms_actor;

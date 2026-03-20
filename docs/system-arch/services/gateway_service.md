@@ -15,6 +15,13 @@ Responsibilities:
 - publish normalized gateway events to NATS
 - register a live endpoint in KV
 
+Gateway command ACK semantics should be queue-based:
+
+- success means the gateway validated the request and accepted it for asynchronous processing
+- success does not mean the request was already enqueued to a worker, sent to the venue, or accepted by the venue
+- internal dispatch drops, queue issues, or venue send failure after ACK must be surfaced asynchronously through gateway events
+  or explicit failure callbacks to OMS
+
 The gateway should follow similar control constraints to the RTMD gateway:
 
 - Pilot/bootstrap is used for startup authorization and topology truth
@@ -147,6 +154,27 @@ Recommended behavior by mode:
 - polling deltas should be converted into `VenueEvent` facts, not published directly
 
 This keeps all venues on one gateway-owned semantic pipeline regardless of how raw venue state is obtained.
+
+## Internal Execution Model
+
+The gateway service should separate ingress ACK from venue I/O completion.
+
+Recommended flow:
+
+1. validate the inbound gRPC request
+2. accept it for asynchronous processing
+3. reply success
+4. let worker tasks perform actual venue dispatch and follow-up queries/events
+
+Recommended properties:
+
+- internal queue is bounded
+- worker concurrency is configurable
+- per-order ordering is preserved by routing place/cancel for the same `order_id` to the same
+  internal shard when the venue semantics allow it
+
+This contract allows OMS to use async-processing ACK semantics end-to-end instead of blocking on
+venue round-trip time.
 
 ### Gateway-Owned Semantic Pipeline
 

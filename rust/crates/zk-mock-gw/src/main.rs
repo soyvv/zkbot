@@ -1,8 +1,8 @@
 mod fill;
-mod zk_gateway;
 mod gateway;
 mod proto;
 mod state;
+mod zk_gateway;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -11,10 +11,10 @@ use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::gateway::MockGatewayHandler;
-use crate::zk_gateway::ZkGatewayHandler;
-use crate::proto::zk_gw_v1::gateway_service_server::GatewayServiceServer;
 use crate::proto::tqrpc_exch_gw::exchange_gateway_service_server::ExchangeGatewayServiceServer;
+use crate::proto::zk_gw_v1::gateway_service_server::GatewayServiceServer;
 use crate::state::MockGwState;
+use crate::zk_gateway::ZkGatewayHandler;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,7 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let balances_str = std::env::var("ZK_MOCK_BALANCES")
         .unwrap_or_else(|_| "BTC:10,USDT:100000,ETH:50".to_string());
 
-    info!(gw_id, account_id, fill_delay_ms, grpc_port, "zk-mock-gw starting");
+    info!(
+        gw_id,
+        account_id, fill_delay_ms, grpc_port, "zk-mock-gw starting"
+    );
 
     // ── NATS connection (optional) ────────────────────────────────────────────
     let nats_client = if let Some(url) = nats_url {
@@ -58,12 +61,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Register under `svc.gw.{gw_id}` so OMS can discover this gateway.
     // OMS watches this prefix and connects via gRPC using the address in PG.
     if let Some(ref nats) = nats_client {
-        let kv_prefix = std::env::var("ZK_GATEWAY_KV_PREFIX")
-            .unwrap_or_else(|_| "svc.gw".to_string());
+        let kv_prefix =
+            std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".to_string());
         let kv_key = format!("{kv_prefix}.{gw_id}");
-        let kv_val_str = format!(
-            r#"{{"service_type":"GW","gw_id":"{gw_id}","grpc_port":{grpc_port}}}"#
-        );
+        let kv_val_str =
+            format!(r#"{{"service_type":"GW","gw_id":"{gw_id}","grpc_port":{grpc_port}}}"#);
         let kv_val = bytes::Bytes::from(kv_val_str.clone());
 
         let js = async_nats::jetstream::new(nats.clone());
@@ -112,9 +114,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
     info!(%addr, "gRPC server listening");
 
-    let zk_handler = ZkGatewayHandler { state: Arc::clone(&state) };
+    let zk_handler = ZkGatewayHandler {
+        state: Arc::clone(&state),
+    };
     tonic::transport::Server::builder()
-        .add_service(ExchangeGatewayServiceServer::new(MockGatewayHandler { state }))
+        .add_service(ExchangeGatewayServiceServer::new(MockGatewayHandler {
+            state,
+        }))
         .add_service(GatewayServiceServer::new(zk_handler))
         .serve(addr)
         .await?;

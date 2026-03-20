@@ -12,13 +12,13 @@ use zk_strategy_sdk_rs::models::TimerEvent;
 /// Type priority is used for tie-breaking when timestamps are equal —
 /// higher priority number = processed first (matches Python `_type_ord`).
 pub enum BtEventKind {
-    Tick(TickData),                        // priority 10
-    Signal(RealtimeSignal),                // priority 9
-    Bar(Kline),                            // priority 8
-    BalanceUpdate(BalanceUpdateEvent),     // priority 7 (asset inventory)
-    PositionUpdate(PositionUpdateEvent),   // priority 7 (derivatives exposure)
-    OrderUpdate(OrderUpdateEvent),         // priority 6
-    Timer(TimerEvent),                     // priority 5
+    Tick(TickData),                      // priority 10
+    Signal(RealtimeSignal),              // priority 9
+    Bar(Kline),                          // priority 8
+    BalanceUpdate(BalanceUpdateEvent),   // priority 7 (asset inventory)
+    PositionUpdate(PositionUpdateEvent), // priority 7 (derivatives exposure)
+    OrderUpdate(OrderUpdateEvent),       // priority 6
+    Timer(TimerEvent),                   // priority 5
 }
 
 impl BtEventKind {
@@ -96,7 +96,9 @@ impl SortedStream {
 
     /// Peek at the current head: returns `(ts_ms, priority)` without consuming.
     fn peek(&self) -> Option<(i64, u8)> {
-        self.events.get(self.idx).map(|(ts, kind)| (*ts, kind.priority()))
+        self.events
+            .get(self.idx)
+            .map(|(ts, kind)| (*ts, kind.priority()))
     }
 
     /// Consume and return the current head.
@@ -173,7 +175,10 @@ impl EventQueue {
     /// the dynamic heap's minimum, then pops the winner.
     pub fn pop(&mut self) -> Option<BtEvent> {
         // Candidate from dynamic heap: (ts_ms, priority)
-        let dyn_peek = self.dynamic.peek().map(|e| (e.0.ts_ms, e.0.kind.priority()));
+        let dyn_peek = self
+            .dynamic
+            .peek()
+            .map(|e| (e.0.ts_ms, e.0.kind.priority()));
 
         // Best candidate across all sorted streams: (stream_idx, ts_ms, priority)
         let stream_best: Option<(usize, i64, u8)> = self

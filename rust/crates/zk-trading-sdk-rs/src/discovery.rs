@@ -44,7 +44,11 @@ impl OmsDiscovery {
         let inner = KvDiscoveryClient::start(js).await?;
         let watch = inner.spawn_watch_loop();
         let cache = Arc::new(RwLock::new(HashMap::new()));
-        let discovery = Self { inner, watch, cache };
+        let discovery = Self {
+            inner,
+            watch,
+            cache,
+        };
 
         let snapshot_ready = discovery.wait_for_initial_snapshot().await?;
         discovery.refresh_account_cache().await?;
@@ -145,9 +149,7 @@ pub fn build_account_map(
 }
 
 /// Resolve the refdata gRPC endpoint from the registry snapshot.
-pub fn resolve_refdata_endpoint(
-    snapshot: &HashMap<String, ServiceRegistration>,
-) -> Option<String> {
+pub fn resolve_refdata_endpoint(snapshot: &HashMap<String, ServiceRegistration>) -> Option<String> {
     let now_ms = now_ms();
 
     for (key, reg) in snapshot {

@@ -16,11 +16,9 @@
 //! 13. Await shutdown signal (SIGTERM / SIGINT).
 
 use zk_oms_svc::{
-    config, db, gw_client, grpc_handler, nats_handler, oms_actor, proto, redis_writer,
-    gw_executor::GwExecutorPool,
-    persist_executor::PersistExecutorPool,
-    publish_executor::PublishExecutorPool,
-    latency::LatencyEvent,
+    config, db, grpc_handler, gw_client, gw_executor::GwExecutorPool, latency::LatencyEvent,
+    nats_handler, oms_actor, persist_executor::PersistExecutorPool, proto,
+    publish_executor::PublishExecutorPool, redis_writer,
 };
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -33,20 +31,18 @@ use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 use tracing::{info, warn};
 
-use zk_infra_rs::{
-    nats_kv::KvRegistryClient,
-    service_registry::ServiceRegistration,
-    tracing as zk_tracing,
-};
-use zk_oms_rs::{config::ConfdataManager, oms_core_v2::OmsCoreV2};
 use crate::{
-    gw_client::GwClientPool,
     grpc_handler::OmsGrpcHandler,
+    gw_client::GwClientPool,
     nats_handler::NatsPublisher,
     oms_actor::{OmsCommand, ReadReplica},
     proto::oms_svc::oms_service_server::OmsServiceServer,
     redis_writer::RedisWriter,
 };
+use zk_infra_rs::{
+    nats_kv::KvRegistryClient, service_registry::ServiceRegistration, tracing as zk_tracing,
+};
+use zk_oms_rs::{config::ConfdataManager, oms_core_v2::OmsCoreV2};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -94,7 +90,10 @@ async fn main() -> anyhow::Result<()> {
         warn!(error = %e, "failed to load orders from Redis, starting cold");
         vec![]
     });
-    info!(loaded_orders = persisted_orders.len(), "warm-start orders loaded from Redis");
+    info!(
+        loaded_orders = persisted_orders.len(),
+        "warm-start orders loaded from Redis"
+    );
 
     let warm_orders: Vec<_> = persisted_orders
         .into_iter()
@@ -105,18 +104,24 @@ async fn main() -> anyhow::Result<()> {
         warn!(error = %e, "failed to load balances from Redis, starting cold");
         vec![]
     });
-    info!(loaded_balances = persisted_balances.len(), "warm-start balances loaded from Redis");
+    info!(
+        loaded_balances = persisted_balances.len(),
+        "warm-start balances loaded from Redis"
+    );
 
     let persisted_positions = redis_writer.load_positions().await.unwrap_or_else(|e| {
         warn!(error = %e, "failed to load positions from Redis, starting cold");
         vec![]
     });
-    info!(loaded_positions = persisted_positions.len(), "warm-start positions loaded from Redis");
+    info!(
+        loaded_positions = persisted_positions.len(),
+        "warm-start positions loaded from Redis"
+    );
 
     // ── 6. Build OmsCoreV2 ────────────────────────────────────────────────────
     let mut core = OmsCoreV2::new(
         &confdata,
-        false,                       // use_time_emulation: false for live trading
+        false, // use_time_emulation: false for live trading
         cfg.risk_check_enabled,
         cfg.handle_external_orders,
         cfg.max_cached_orders,
@@ -136,7 +141,9 @@ async fn main() -> anyhow::Result<()> {
 
     let mut gw_pool = GwClientPool::new();
     let gw_prefix = format!("{}.>", cfg.gateway_kv_prefix);
-    let mut gw_watch = kv_registry.watch(&gw_prefix).await
+    let mut gw_watch = kv_registry
+        .watch(&gw_prefix)
+        .await
         .expect("Failed to watch gateway KV");
 
     // Drain current entries (don't wait for new ones).
@@ -169,7 +176,9 @@ async fn main() -> anyhow::Result<()> {
     // Fallback: directly probe KV for any configured gateways not yet connected.
     // The watch may miss already-registered entries due to JetStream consumer timing.
     for (gw_id, gw_cfg) in &confdata.gw_configs {
-        if gw_pool.contains(gw_id) { continue; }
+        if gw_pool.contains(gw_id) {
+            continue;
+        }
         let kv_key = format!("{}.{}", cfg.gateway_kv_prefix, gw_id);
         match kv_registry.get(&kv_key).await {
             Ok(Some(_)) => {
@@ -179,15 +188,18 @@ async fn main() -> anyhow::Result<()> {
                     Err(e) => warn!(gw_id, error = %e, "gateway gRPC connect failed"),
                 }
             }
-            Ok(None) => warn!(gw_id, kv_key, "gateway not registered in KV — will connect when it registers"),
+            Ok(None) => warn!(
+                gw_id,
+                kv_key, "gateway not registered in KV — will connect when it registers"
+            ),
             Err(e) => warn!(gw_id, error = %e, "KV probe failed"),
         }
     }
 
     // ── 8. Balance/position reconciliation ─────────────────────────────────────
     {
-        use zk_proto_rs::zk::gateway::v1::QueryAccountRequest;
         use zk_oms_rs::models_v2::OmsActionV2;
+        use zk_proto_rs::zk::gateway::v1::QueryAccountRequest;
 
         // Query each connected gateway once for account balances/positions.
         let gw_keys: Vec<String> = gw_pool.gw_keys().map(String::from).collect();
@@ -201,15 +213,29 @@ async fn main() -> anyhow::Result<()> {
                         );
                         for action in &actions {
                             match action {
-                                OmsActionV2::PersistBalance { account_id, asset_id } => {
+                                OmsActionV2::PersistBalance {
+                                    account_id,
+                                    asset_id,
+                                } => {
                                     oms_actor::persist_balance_to_redis(
-                                        &core, &mut redis_writer, *account_id, *asset_id,
-                                    ).await;
+                                        &core,
+                                        &mut redis_writer,
+                                        *account_id,
+                                        *asset_id,
+                                    )
+                                    .await;
                                 }
-                                OmsActionV2::PersistPosition { account_id, instrument_id } => {
+                                OmsActionV2::PersistPosition {
+                                    account_id,
+                                    instrument_id,
+                                } => {
                                     oms_actor::persist_position_to_redis(
-                                        &core, &mut redis_writer, *account_id, *instrument_id,
-                                    ).await;
+                                        &core,
+                                        &mut redis_writer,
+                                        *account_id,
+                                        *instrument_id,
+                                    )
+                                    .await;
                                 }
                                 _ => {}
                             }
@@ -227,11 +253,11 @@ async fn main() -> anyhow::Result<()> {
     let (cmd_tx, cmd_rx) = mpsc::channel::<OmsCommand>(cfg.cmd_channel_buf);
 
     // Build initial snapshot from warm-started state.
-    use zk_oms_rs::snapshot_v2::OmsSnapshotWriterV2;
     use crate::oms_actor::{
-        build_managed_positions, build_exch_positions, build_exch_balances,
-        build_snapshot_order_from_live, build_snapshot_detail_from_core,
+        build_exch_balances, build_exch_positions, build_managed_positions,
+        build_snapshot_detail_from_core, build_snapshot_order_from_live,
     };
+    use zk_oms_rs::snapshot_v2::OmsSnapshotWriterV2;
 
     let snap_meta = Arc::new(core.build_snapshot_metadata());
     let mut snap_writer = OmsSnapshotWriterV2::new(snap_meta);
@@ -246,7 +272,11 @@ async fn main() -> anyhow::Result<()> {
 
             if let Some(detail_log) = core.orders.get_detail(*oid) {
                 let snap_detail = build_snapshot_detail_from_core(
-                    *oid, live, detail_log, &core.metadata, &core.orders.dyn_strings,
+                    *oid,
+                    live,
+                    detail_log,
+                    &core.metadata,
+                    &core.orders.dyn_strings,
                 );
                 snap_writer.apply_order_detail(snap_detail);
             }
@@ -263,7 +293,11 @@ async fn main() -> anyhow::Result<()> {
         unknown_bal,
         zk_oms_rs::utils::gen_timestamp_ms(),
     );
-    info!(seq = initial_snap.seq, orders = initial_snap.orders.len(), "initial snapshot built");
+    info!(
+        seq = initial_snap.seq,
+        orders = initial_snap.orders.len(),
+        "initial snapshot built"
+    );
 
     let replica: ReadReplica = Arc::new(ArcSwap::new(Arc::new(initial_snap)));
 
@@ -284,7 +318,14 @@ async fn main() -> anyhow::Result<()> {
         })
         .collect();
 
-    let gw_executor = GwExecutorPool::new(256, &gw_id_to_key, &gw_pool, latency_tx.clone(), cmd_tx.clone());
+    let gw_executor = GwExecutorPool::new(
+        cfg.gw_exec_shard_count,
+        cfg.gw_exec_queue_capacity,
+        &gw_id_to_key,
+        &gw_pool,
+        latency_tx.clone(),
+        cmd_tx.clone(),
+    );
 
     let persist_executor = PersistExecutorPool::new(1024, redis_writer.clone_writer());
 
@@ -311,9 +352,9 @@ async fn main() -> anyhow::Result<()> {
 
     // ── 10. Start gRPC server ─────────────────────────────────────────────────
     let handler = OmsGrpcHandler {
-        cmd_tx:  cmd_tx.clone(),
+        cmd_tx: cmd_tx.clone(),
         replica: replica.clone(),
-        oms_id:  Arc::new(cfg.oms_id.clone()),
+        oms_id: Arc::new(cfg.oms_id.clone()),
     };
 
     let listen_addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port)
@@ -334,12 +375,16 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // ── 11. Register in NATS KV with heartbeat ────────────────────────────────
-    let kv_key   = format!("svc.oms.{}", cfg.oms_id);
-    let kv_value = Bytes::from(serde_json::json!({
-        "service_type": "OMS",
-        "instance_id":  cfg.oms_id,
-        "grpc_port":    cfg.grpc_port,
-    }).to_string().into_bytes());
+    let kv_key = format!("svc.oms.{}", cfg.oms_id);
+    let kv_value = Bytes::from(
+        serde_json::json!({
+            "service_type": "OMS",
+            "instance_id":  cfg.oms_id,
+            "grpc_port":    cfg.grpc_port,
+        })
+        .to_string()
+        .into_bytes(),
+    );
 
     let mut registration = ServiceRegistration::register_direct(
         &js,
@@ -370,8 +415,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── 13. Periodic tasks ────────────────────────────────────────────────────
-    let cleanup_tx    = cmd_tx.clone();
-    let cleanup_secs  = cfg.cleanup_interval_secs;
+    let cleanup_tx = cmd_tx.clone();
+    let cleanup_secs = cfg.cleanup_interval_secs;
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(cleanup_secs));
         loop {
@@ -381,7 +426,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let recheck_tx   = cmd_tx.clone();
+    let recheck_tx = cmd_tx.clone();
     let recheck_secs = cfg.position_recheck_interval_secs;
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(recheck_secs));
@@ -410,7 +455,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Wait for writer and gRPC server to drain.
     let _ = tokio::join!(writer_handle, grpc_handle);
-    for h in sub_handles { h.abort(); }
+    for h in sub_handles {
+        h.abort();
+    }
 
     // Deregister from NATS KV only on clean shutdown (not when fenced — the
     // new owner already holds the key).

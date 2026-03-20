@@ -16,6 +16,12 @@ pub struct GwSvcConfig {
     /// Real venue adapters (okx, ibkr, oanda) parse their typed config from this.
     pub venue_config: serde_json::Value,
 
+    // ── Internal execution pool ──────────────────────────────────────────
+    /// Number of internal execution shards (default 4).
+    pub exec_shard_count: usize,
+    /// Per-shard queue capacity (default 256).
+    pub exec_queue_capacity: usize,
+
     // ── Simulator-specific ────────────────────────────────────────────────
     /// Initial balances ("BTC:10,USDT:100000").
     pub mock_balances: String,
@@ -33,10 +39,22 @@ impl GwSvcConfig {
     pub fn from_env() -> Self {
         let venue_config_str =
             std::env::var("ZK_VENUE_CONFIG").unwrap_or_else(|_| "{}".to_string());
-        let venue_config: serde_json::Value =
-            serde_json::from_str(&venue_config_str).unwrap_or(serde_json::Value::Object(
-                serde_json::Map::new(),
-            ));
+        let venue_config: serde_json::Value = serde_json::from_str(&venue_config_str)
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+        let exec_shard_count: usize = std::env::var("ZK_EXEC_SHARD_COUNT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4);
+        let exec_queue_capacity: usize = std::env::var("ZK_EXEC_QUEUE_CAPACITY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(256);
+        assert!(exec_shard_count >= 1, "ZK_EXEC_SHARD_COUNT must be >= 1");
+        assert!(
+            exec_queue_capacity >= 1,
+            "ZK_EXEC_QUEUE_CAPACITY must be >= 1"
+        );
 
         Self {
             gw_id: std::env::var("ZK_GW_ID").unwrap_or_else(|_| "gw_sim_1".to_string()),
@@ -50,6 +68,8 @@ impl GwSvcConfig {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(51051),
             nats_url: std::env::var("ZK_NATS_URL").ok(),
+            exec_shard_count,
+            exec_queue_capacity,
             venue_config,
             mock_balances: std::env::var("ZK_MOCK_BALANCES")
                 .unwrap_or_else(|_| "BTC:10,USDT:100000,ETH:50".to_string()),
@@ -75,7 +95,10 @@ impl GwSvcConfig {
         for entry in s.split(',') {
             let mut parts = entry.splitn(2, ':');
             let symbol = parts.next().unwrap_or("").trim().to_uppercase();
-            let qty: f64 = parts.next().and_then(|v| v.trim().parse().ok()).unwrap_or(0.0);
+            let qty: f64 = parts
+                .next()
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0.0);
             if !symbol.is_empty() {
                 map.insert(symbol, qty);
             }

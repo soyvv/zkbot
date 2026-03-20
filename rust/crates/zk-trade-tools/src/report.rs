@@ -415,41 +415,25 @@ fn print_oms_benchmark_report(report: &OmsBenchmarkReport) {
             if let Some(latency) = queue {
                 println!(
                     "           writer queue   p50={:.3} p90={:.3} p99={:.3} max={:.3} avg={:.3}",
-                    latency.p50_ms,
-                    latency.p90_ms,
-                    latency.p99_ms,
-                    latency.max_ms,
-                    latency.avg_ms
+                    latency.p50_ms, latency.p90_ms, latency.p99_ms, latency.max_ms, latency.avg_ms
                 );
             }
             if let Some(latency) = core {
                 println!(
                     "           writer core    p50={:.3} p90={:.3} p99={:.3} max={:.3} avg={:.3}",
-                    latency.p50_ms,
-                    latency.p90_ms,
-                    latency.p99_ms,
-                    latency.max_ms,
-                    latency.avg_ms
+                    latency.p50_ms, latency.p90_ms, latency.p99_ms, latency.max_ms, latency.avg_ms
                 );
             }
             if let Some(latency) = post_core {
                 println!(
                     "           post-core prep p50={:.3} p90={:.3} p99={:.3} max={:.3} avg={:.3}",
-                    latency.p50_ms,
-                    latency.p90_ms,
-                    latency.p99_ms,
-                    latency.max_ms,
-                    latency.avg_ms
+                    latency.p50_ms, latency.p90_ms, latency.p99_ms, latency.max_ms, latency.avg_ms
                 );
             }
             if let Some(latency) = gw_queue {
                 println!(
                     "           gw-exec queue  p50={:.3} p90={:.3} p99={:.3} max={:.3} avg={:.3}",
-                    latency.p50_ms,
-                    latency.p90_ms,
-                    latency.p99_ms,
-                    latency.max_ms,
-                    latency.avg_ms
+                    latency.p50_ms, latency.p90_ms, latency.p99_ms, latency.max_ms, latency.avg_ms
                 );
             }
         }

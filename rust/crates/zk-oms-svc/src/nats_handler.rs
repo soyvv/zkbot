@@ -41,13 +41,16 @@ use crate::oms_actor::OmsCommand;
 /// Clone-friendly handle for publishing OMS events to NATS.
 #[derive(Clone)]
 pub struct NatsPublisher {
-    pub nats:   NatsClient,
+    pub nats: NatsClient,
     pub oms_id: Arc<String>,
 }
 
 impl NatsPublisher {
     pub fn new(nats: NatsClient, oms_id: impl Into<String>) -> Self {
-        Self { nats, oms_id: Arc::new(oms_id.into()) }
+        Self {
+            nats,
+            oms_id: Arc::new(oms_id.into()),
+        }
     }
 
     /// Publish a proto-encoded message to `subject`.
@@ -85,14 +88,14 @@ impl NatsPublisher {
 /// Returns handles to both spawned tasks (report + balance).  Abort them to
 /// stop the subscriptions on gateway disconnect.
 pub async fn spawn_gw_subscriber(
-    nats:   &NatsClient,
-    gw_id:  &str,
+    nats: &NatsClient,
+    gw_id: &str,
     cmd_tx: mpsc::Sender<OmsCommand>,
 ) -> Result<Vec<tokio::task::JoinHandle<()>>, async_nats::SubscribeError> {
-    let report_subj  = subject::gw_report(gw_id);
+    let report_subj = subject::gw_report(gw_id);
     let balance_subj = subject::gw_balance(gw_id);
 
-    let mut report_sub  = nats.subscribe(report_subj.clone()).await?;
+    let mut report_sub = nats.subscribe(report_subj.clone()).await?;
     let mut balance_sub = nats.subscribe(balance_subj.clone()).await?;
 
     // ── Order report task ───────────────────────────────────────────────────
@@ -118,15 +121,19 @@ pub async fn spawn_gw_subscriber(
     Ok(vec![report_handle, balance_handle])
 }
 
-async fn handle_order_report_msg(
-    msg:    Message,
-    cmd_tx: &mpsc::Sender<OmsCommand>,
-    gw_id:  &str,
-) {
+async fn handle_order_report_msg(msg: Message, cmd_tx: &mpsc::Sender<OmsCommand>, gw_id: &str) {
     match OrderReport::decode(msg.payload.as_ref()) {
         Ok(report) => {
-            debug!(gw_id, order_ref = report.exch_order_ref, "received OrderReport");
-            if cmd_tx.send(OmsCommand::GatewayOrderReport(report)).await.is_err() {
+            debug!(
+                gw_id,
+                order_ref = report.exch_order_ref,
+                "received OrderReport"
+            );
+            if cmd_tx
+                .send(OmsCommand::GatewayOrderReport(report))
+                .await
+                .is_err()
+            {
                 error!(gw_id, "OMS command channel closed — dropping order report");
             }
         }
@@ -136,16 +143,19 @@ async fn handle_order_report_msg(
     }
 }
 
-async fn handle_balance_msg(
-    msg:    Message,
-    cmd_tx: &mpsc::Sender<OmsCommand>,
-    gw_id:  &str,
-) {
+async fn handle_balance_msg(msg: Message, cmd_tx: &mpsc::Sender<OmsCommand>, gw_id: &str) {
     match BalanceUpdate::decode(msg.payload.as_ref()) {
         Ok(update) => {
             debug!(gw_id, "received BalanceUpdate");
-            if cmd_tx.send(OmsCommand::GatewayBalanceUpdate(update)).await.is_err() {
-                error!(gw_id, "OMS command channel closed — dropping balance update");
+            if cmd_tx
+                .send(OmsCommand::GatewayBalanceUpdate(update))
+                .await
+                .is_err()
+            {
+                error!(
+                    gw_id,
+                    "OMS command channel closed — dropping balance update"
+                );
             }
         }
         Err(e) => {

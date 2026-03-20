@@ -6,8 +6,10 @@ use zk_proto_rs::zk::{
         order_report_entry::Report, ExchangeOrderStatus, OrderIdLinkageReport, OrderInfo,
         OrderReport, OrderReportEntry, OrderReportType, OrderStateReport, TradeReport,
     },
+    gateway::v1::{
+        CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest,
+    },
     rtmd::v1::TickData,
-    gateway::v1::{CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest},
 };
 
 use crate::{
@@ -51,10 +53,18 @@ impl SimulatorCore {
         self.on_new_order_inner(req, ts, true)
     }
 
-    fn on_new_order_inner(&mut self, req: ExchSendOrderRequest, ts: i64, book_only: bool) -> Vec<SimResult> {
+    fn on_new_order_inner(
+        &mut self,
+        req: ExchSendOrderRequest,
+        ts: i64,
+        book_only: bool,
+    ) -> Vec<SimResult> {
         if !Self::validate(&req) {
             let report = make_rejected_report(req.correlation_id, next_id(), ts);
-            return vec![SimResult { ts_ms: ts, order_report: report }];
+            return vec![SimResult {
+                ts_ms: ts,
+                order_report: report,
+            }];
         }
 
         let exch_id = next_id();
@@ -89,7 +99,8 @@ impl SimulatorCore {
             }
         }
 
-        self.order_cache.insert(sim_order.req.correlation_id, sim_order);
+        self.order_cache
+            .insert(sim_order.req.correlation_id, sim_order);
         results
     }
 
@@ -133,7 +144,10 @@ impl SimulatorCore {
                 order.remaining_qty = 0.0;
                 order.update_ts = ts + 1;
                 let report = make_cancelled_report(order, ts + 1);
-                return vec![SimResult { ts_ms: ts + 1, order_report: report }];
+                return vec![SimResult {
+                    ts_ms: ts + 1,
+                    order_report: report,
+                }];
             }
         }
         vec![]
@@ -235,7 +249,10 @@ fn make_booked_report(order: &mut SimOrder, ts: i64) -> SimResult {
         order_report_entries: vec![linkage_entry, state_entry],
         ..Default::default()
     };
-    SimResult { ts_ms: ts, order_report: report }
+    SimResult {
+        ts_ms: ts,
+        order_report: report,
+    }
 }
 
 fn make_cancelled_report(order: &SimOrder, ts: i64) -> OrderReport {
@@ -293,7 +310,10 @@ fn apply_match(order: &mut SimOrder, m: MatchResult, add_linkage: bool) -> SimRe
         order_report_entries: entries,
         ..Default::default()
     };
-    SimResult { ts_ms: ts, order_report: report }
+    SimResult {
+        ts_ms: ts,
+        order_report: report,
+    }
 }
 
 fn make_state_entry(order: &SimOrder) -> OrderReportEntry {

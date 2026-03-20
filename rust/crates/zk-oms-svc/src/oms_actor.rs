@@ -28,6 +28,10 @@
 //!   the response comes back via the NATS report subscription.
 //!   On gateway RPC failure, the gw_worker sends `GatewaySendFailed` /
 //!   `GatewayCancelSendFailed` commands back to the writer for state convergence.
+//! - gRPC ACK = validated + accepted for async processing. Queue-full dispatch
+//!   drops are handled inline by calling core.process_message(GatewaySendFailed)
+//!   directly, so the order is synthetically rejected and the client is notified
+//!   asynchronously. The gRPC reply is always success after core validation.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -42,7 +46,10 @@ use crate::latency::{publish_latency_batch, system_time_ns, LatencyEvent, Latenc
 
 use zk_oms_rs::{
     config::ConfdataManager,
-    models::{CancelRecheckRequest, ExchBalanceSnapshot, ExchPositionSnapshot, OmsMessage, OrderRecheckRequest},
+    models::{
+        CancelRecheckRequest, ExchBalanceSnapshot, ExchPositionSnapshot, OmsMessage,
+        OrderRecheckRequest,
+    },
     models_v2::OmsActionV2,
     oms_core_v2::OmsCoreV2,
     snapshot_v2::{
@@ -53,9 +60,7 @@ use zk_oms_rs::{
 };
 use zk_proto_rs::zk::{
     exch_gw::v1::{BalanceUpdate, OrderReport},
-    oms::v1::{
-        oms_response, OmsResponse, OrderCancelRequest, OrderRequest, OmsErrorType,
-    },
+    oms::v1::{oms_response, OmsErrorType, OmsResponse, OrderCancelRequest, OrderRequest},
 };
 
 use crate::{
@@ -73,37 +78,39 @@ pub type ReadReplica = Arc<ArcSwap<OmsSnapshotV2>>;
 /// All commands the OMS writer task can receive.
 pub enum OmsCommand {
     PlaceOrder {
-        req:             OrderRequest,
+        req: OrderRequest,
         oms_received_ns: i64,
-        reply:           oneshot::Sender<OmsResponse>,
+        reply: oneshot::Sender<OmsResponse>,
     },
     BatchPlaceOrders {
-        reqs:  Vec<OrderRequest>,
+        reqs: Vec<OrderRequest>,
         reply: oneshot::Sender<OmsResponse>,
     },
     CancelOrder {
-        req:   OrderCancelRequest,
+        req: OrderCancelRequest,
         reply: oneshot::Sender<OmsResponse>,
     },
     BatchCancelOrders {
-        reqs:  Vec<OrderCancelRequest>,
+        reqs: Vec<OrderCancelRequest>,
         reply: oneshot::Sender<OmsResponse>,
     },
     GatewayOrderReport(OrderReport),
     GatewayBalanceUpdate(BalanceUpdate),
     Panic {
         account_id: i64,
-        reply:      oneshot::Sender<OmsResponse>,
+        reply: oneshot::Sender<OmsResponse>,
     },
     DontPanic {
         account_id: i64,
-        reply:      oneshot::Sender<OmsResponse>,
+        reply: oneshot::Sender<OmsResponse>,
     },
     ReloadConfig {
         new_config: ConfdataManager,
-        reply:      oneshot::Sender<OmsResponse>,
+        reply: oneshot::Sender<OmsResponse>,
     },
-    Cleanup { ts_ms: i64 },
+    Cleanup {
+        ts_ms: i64,
+    },
     RecheckOrder(OrderRecheckRequest),
     RecheckCancel(CancelRecheckRequest),
     PositionRecheck,
@@ -124,46 +131,58 @@ pub enum OmsCommand {
 // ── Writer loop ──────────────────────────────────────────────────────────────
 
 pub fn spawn_writer(
-    core:                 OmsCoreV2,
-    writer:               OmsSnapshotWriterV2,
-    rx:                   mpsc::Receiver<OmsCommand>,
-    replica:              ReadReplica,
-    nats:                 NatsPublisher,
-    redis:                RedisWriter,
-    gw_pool:              GwClientPool,
-    gw_executor:          GwExecutorPool,
-    persist_executor:     PersistExecutorPool,
-    publish_executor:     PublishExecutorPool,
-    latency_rx:           mpsc::Receiver<LatencyEvent>,
-    shutdown:             CancellationToken,
-    metrics_interval:     Duration,
-    metrics_max_pending:  usize,
+    core: OmsCoreV2,
+    writer: OmsSnapshotWriterV2,
+    rx: mpsc::Receiver<OmsCommand>,
+    replica: ReadReplica,
+    nats: NatsPublisher,
+    redis: RedisWriter,
+    gw_pool: GwClientPool,
+    gw_executor: GwExecutorPool,
+    persist_executor: PersistExecutorPool,
+    publish_executor: PublishExecutorPool,
+    latency_rx: mpsc::Receiver<LatencyEvent>,
+    shutdown: CancellationToken,
+    metrics_interval: Duration,
+    metrics_max_pending: usize,
     metrics_max_complete: usize,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(oms_writer_loop(
-        core, writer, rx, replica, nats, redis, gw_pool,
-        gw_executor, persist_executor, publish_executor, latency_rx,
-        shutdown, metrics_interval, metrics_max_pending, metrics_max_complete,
+        core,
+        writer,
+        rx,
+        replica,
+        nats,
+        redis,
+        gw_pool,
+        gw_executor,
+        persist_executor,
+        publish_executor,
+        latency_rx,
+        shutdown,
+        metrics_interval,
+        metrics_max_pending,
+        metrics_max_complete,
     ))
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn oms_writer_loop(
-    mut core:              OmsCoreV2,
-    mut writer:            OmsSnapshotWriterV2,
-    mut rx:                mpsc::Receiver<OmsCommand>,
-    replica:               ReadReplica,
-    nats:                  NatsPublisher,
-    mut redis:             RedisWriter,
-    mut gw_pool:           GwClientPool,
-    mut gw_executor:       GwExecutorPool,
-    mut persist_executor:  PersistExecutorPool,
-    mut publish_executor:  PublishExecutorPool,
-    mut latency_rx:        mpsc::Receiver<LatencyEvent>,
-    shutdown:              CancellationToken,
-    metrics_interval:      Duration,
-    metrics_max_pending:   usize,
-    metrics_max_complete:  usize,
+    mut core: OmsCoreV2,
+    mut writer: OmsSnapshotWriterV2,
+    mut rx: mpsc::Receiver<OmsCommand>,
+    replica: ReadReplica,
+    nats: NatsPublisher,
+    mut redis: RedisWriter,
+    mut gw_pool: GwClientPool,
+    gw_executor: GwExecutorPool,
+    mut persist_executor: PersistExecutorPool,
+    mut publish_executor: PublishExecutorPool,
+    mut latency_rx: mpsc::Receiver<LatencyEvent>,
+    shutdown: CancellationToken,
+    metrics_interval: Duration,
+    metrics_max_pending: usize,
+    metrics_max_complete: usize,
 ) {
     info!("OMS writer loop started");
 
@@ -192,7 +211,7 @@ async fn oms_writer_loop(
                     &nats,
                     &mut redis,
                     &mut gw_pool,
-                    &mut gw_executor,
+                    &gw_executor,
                     &mut persist_executor,
                     &mut publish_executor,
                     &mut tracker,
@@ -250,6 +269,7 @@ fn drain_latency_events(
                 t3_ns,
                 t3r_ns,
                 writer_dispatch_ts,
+                gw_exec_dequeue_ns,
             } => {
                 tracker.record_order_sent(
                     order_id,
@@ -260,9 +280,16 @@ fn drain_latency_events(
                     t3_ns,
                     t3r_ns,
                     writer_dispatch_ts,
+                    gw_exec_dequeue_ns,
                 );
             }
-            LatencyEvent::ReportPublished { order_id, t4_ns, t5_ns, t6_ns, t7_ns } => {
+            LatencyEvent::ReportPublished {
+                order_id,
+                t4_ns,
+                t5_ns,
+                t6_ns,
+                t7_ns,
+            } => {
                 tracker.record_report_published(order_id, t4_ns, t5_ns, t6_ns, t7_ns);
             }
         }
@@ -273,17 +300,17 @@ fn drain_latency_events(
 
 #[allow(clippy::too_many_arguments)]
 fn process_command(
-    cmd:              OmsCommand,
-    core:             &mut OmsCoreV2,
-    writer:           &mut OmsSnapshotWriterV2,
-    replica:          &ReadReplica,
-    _nats:            &NatsPublisher,
-    _redis:           &mut RedisWriter,
-    _gw_pool:         &mut GwClientPool,
-    gw_executor:      &mut GwExecutorPool,
+    cmd: OmsCommand,
+    core: &mut OmsCoreV2,
+    writer: &mut OmsSnapshotWriterV2,
+    replica: &ReadReplica,
+    _nats: &NatsPublisher,
+    _redis: &mut RedisWriter,
+    _gw_pool: &mut GwClientPool,
+    gw_executor: &GwExecutorPool,
     persist_executor: &mut PersistExecutorPool,
     publish_executor: &mut PublishExecutorPool,
-    _tracker:         &mut LatencyTracker,
+    _tracker: &mut LatencyTracker,
 ) {
     let writer_start_ts = system_time_ns();
 
@@ -291,13 +318,20 @@ fn process_command(
     let report_latency_ctx: Option<(i64, i64, i64, i64)> = match &cmd {
         OmsCommand::GatewayOrderReport(r) => {
             let t6 = system_time_ns();
-            Some((r.order_id, t6, r.gw_received_at_ns, r.update_timestamp * 1_000_000))
+            Some((
+                r.order_id,
+                t6,
+                r.gw_received_at_ns,
+                r.update_timestamp * 1_000_000,
+            ))
         }
         _ => None,
     };
 
     let place_order_t1: i64 = match &cmd {
-        OmsCommand::PlaceOrder { oms_received_ns, .. } => *oms_received_ns,
+        OmsCommand::PlaceOrder {
+            oms_received_ns, ..
+        } => *oms_received_ns,
         _ => 0,
     };
 
@@ -305,25 +339,23 @@ fn process_command(
     let is_hot_path = matches!(
         &cmd,
         OmsCommand::PlaceOrder { .. }
-        | OmsCommand::BatchPlaceOrders { .. }
-        | OmsCommand::CancelOrder { .. }
-        | OmsCommand::BatchCancelOrders { .. }
+            | OmsCommand::BatchPlaceOrders { .. }
+            | OmsCommand::CancelOrder { .. }
+            | OmsCommand::BatchCancelOrders { .. }
     );
 
     // Convert to OmsMessage (and capture reply channel if present).
     let (oms_msg, reply): (OmsMessage, Option<oneshot::Sender<OmsResponse>>) = match cmd {
-        OmsCommand::PlaceOrder { req, reply, .. } =>
-            (OmsMessage::PlaceOrder(req), Some(reply)),
-        OmsCommand::BatchPlaceOrders { reqs, reply } =>
-            (OmsMessage::BatchPlaceOrders(reqs), Some(reply)),
-        OmsCommand::CancelOrder { req, reply } =>
-            (OmsMessage::CancelOrder(req), Some(reply)),
-        OmsCommand::BatchCancelOrders { reqs, reply } =>
-            (OmsMessage::BatchCancelOrders(reqs), Some(reply)),
-        OmsCommand::GatewayOrderReport(r) =>
-            (OmsMessage::GatewayOrderReport(r), None),
-        OmsCommand::GatewayBalanceUpdate(u) =>
-            (OmsMessage::BalanceUpdate(u), None),
+        OmsCommand::PlaceOrder { req, reply, .. } => (OmsMessage::PlaceOrder(req), Some(reply)),
+        OmsCommand::BatchPlaceOrders { reqs, reply } => {
+            (OmsMessage::BatchPlaceOrders(reqs), Some(reply))
+        }
+        OmsCommand::CancelOrder { req, reply } => (OmsMessage::CancelOrder(req), Some(reply)),
+        OmsCommand::BatchCancelOrders { reqs, reply } => {
+            (OmsMessage::BatchCancelOrders(reqs), Some(reply))
+        }
+        OmsCommand::GatewayOrderReport(r) => (OmsMessage::GatewayOrderReport(r), None),
+        OmsCommand::GatewayBalanceUpdate(u) => (OmsMessage::BalanceUpdate(u), None),
         OmsCommand::Panic { account_id, reply } => {
             writer.apply_panic(account_id);
             (OmsMessage::Panic { account_id }, Some(reply))
@@ -341,18 +373,34 @@ fn process_command(
             let _ = reply.send(resp);
             return;
         }
-        OmsCommand::Cleanup { ts_ms } =>
-            (OmsMessage::Cleanup { ts_ms }, None),
-        OmsCommand::RecheckOrder(r) =>
-            (OmsMessage::RecheckOrder(r), None),
-        OmsCommand::RecheckCancel(r) =>
-            (OmsMessage::RecheckCancel(r), None),
-        OmsCommand::PositionRecheck =>
-            (OmsMessage::PositionRecheck, None),
-        OmsCommand::GatewaySendFailed { order_id, gw_id, error_msg } =>
-            (OmsMessage::GatewaySendFailed { order_id, gw_id, error_msg }, None),
-        OmsCommand::GatewayCancelSendFailed { order_id, gw_id, error_msg } =>
-            (OmsMessage::GatewayCancelSendFailed { order_id, gw_id, error_msg }, None),
+        OmsCommand::Cleanup { ts_ms } => (OmsMessage::Cleanup { ts_ms }, None),
+        OmsCommand::RecheckOrder(r) => (OmsMessage::RecheckOrder(r), None),
+        OmsCommand::RecheckCancel(r) => (OmsMessage::RecheckCancel(r), None),
+        OmsCommand::PositionRecheck => (OmsMessage::PositionRecheck, None),
+        OmsCommand::GatewaySendFailed {
+            order_id,
+            gw_id,
+            error_msg,
+        } => (
+            OmsMessage::GatewaySendFailed {
+                order_id,
+                gw_id,
+                error_msg,
+            },
+            None,
+        ),
+        OmsCommand::GatewayCancelSendFailed {
+            order_id,
+            gw_id,
+            error_msg,
+        } => (
+            OmsMessage::GatewayCancelSendFailed {
+                order_id,
+                gw_id,
+                error_msg,
+            },
+            None,
+        ),
     };
 
     // ── Drive OmsCoreV2 ──────────────────────────────────────────────────────
@@ -363,16 +411,26 @@ fn process_command(
     //
     // All side effects dispatch immediately. Gateway sends are fire-and-forget;
     // failures come back as OmsCommand::GatewaySendFailed / GatewayCancelSendFailed.
+    // If dispatch itself fails (queue full), we handle the failure inline by
+    // calling core.process_message(GatewaySendFailed/GatewayCancelSendFailed)
+    // and processing the resulting persist/publish actions. The gRPC reply is
+    // always success after core validation — queue-full drops are surfaced
+    // asynchronously through the normal failure path.
+    //
     // On the place/cancel hot path, Redis persistence is skipped (deferred to
     // the report/failure path). Snapshot update is always immediate.
-    let mut gw_enqueue_failed = false;
+    let mut failure_actions: Vec<OmsActionV2> = Vec::new();
     let mut balances_dirty = false;
     let mut positions_dirty = false;
 
     for action in &actions {
         match action {
             // ── LOCAL: snapshot bookkeeping ──────────────────────────────
-            OmsActionV2::PersistOrder { order_id, set_expire, set_closed } => {
+            OmsActionV2::PersistOrder {
+                order_id,
+                set_expire,
+                set_closed,
+            } => {
                 // Snapshot update (always immediate for reader visibility)
                 if let Some(live) = core.orders.get_live(*order_id) {
                     let snap_order = build_snapshot_order_from_live(live, &core.orders.dyn_strings);
@@ -381,7 +439,11 @@ fn process_command(
                 if let Some(live) = core.orders.get_live(*order_id) {
                     if let Some(detail) = core.orders.get_detail(*order_id) {
                         let snap_detail = build_snapshot_detail_from_core(
-                            *order_id, live, detail, &core.metadata, &core.orders.dyn_strings,
+                            *order_id,
+                            live,
+                            detail,
+                            &core.metadata,
+                            &core.orders.dyn_strings,
                         );
                         writer.apply_order_detail(snap_detail);
                     }
@@ -400,9 +462,15 @@ fn process_command(
             }
 
             // ── GATEWAY: fire-and-forget dispatch ───────────────────────
-            OmsActionV2::SendOrderToGw { gw_id, order_id, order_created_at } => {
+            OmsActionV2::SendOrderToGw {
+                gw_id,
+                order_id,
+                order_created_at,
+            } => {
                 let gw_key = core.resolve_gw_key(*gw_id).unwrap_or("").to_string();
-                let request = core.orders.get_detail(*order_id)
+                let request = core
+                    .orders
+                    .get_detail(*order_id)
                     .and_then(|d| d.last_gw_req.as_ref())
                     .map(|r| (**r).clone())
                     .unwrap_or_default();
@@ -415,68 +483,165 @@ fn process_command(
                     tw_core_ns: writer_core_done_ts,
                     writer_dispatch_ts,
                 });
-                if let Err(_action) = gw_executor.dispatch(*gw_id, GwAction::SendOrder {
-                    gw_key, request, order_id: *order_id, gw_id: *gw_id, latency,
-                }) {
-                    warn!(gw_id, "gateway executor queue full — SendOrder dropped");
-                    gw_enqueue_failed = true;
+                if let Err(_action) = gw_executor.dispatch(
+                    *order_id,
+                    GwAction::SendOrder {
+                        gw_key,
+                        request,
+                        order_id: *order_id,
+                        gw_id: *gw_id,
+                        latency,
+                    },
+                ) {
+                    warn!(
+                        gw_id,
+                        order_id,
+                        "gateway executor queue full — SendOrder dropped, injecting async failure"
+                    );
+                    failure_actions.extend(core.process_message(OmsMessage::GatewaySendFailed {
+                        order_id: *order_id,
+                        gw_id: *gw_id,
+                        error_msg: "dispatch queue full".into(),
+                    }));
                 }
             }
             OmsActionV2::BatchSendOrdersToGw { gw_id, order_ids } => {
                 let gw_key = core.resolve_gw_key(*gw_id).unwrap_or("").to_string();
-                let requests: Vec<_> = order_ids.iter().filter_map(|oid| {
-                    core.orders.get_detail(*oid)
-                        .and_then(|d| d.last_gw_req.as_ref())
-                        .map(|r| (**r).clone())
-                }).collect();
-                let batch_req = zk_proto_rs::zk::gateway::v1::BatchSendOrdersRequest {
-                    order_requests: requests,
-                };
-                if let Err(_action) = gw_executor.dispatch(*gw_id, GwAction::BatchSendOrders {
-                    gw_key, request: batch_req, order_ids: order_ids.clone(), gw_id: *gw_id,
-                }) {
-                    warn!(gw_id, "gateway executor queue full — BatchSendOrders dropped");
-                    gw_enqueue_failed = true;
+                // Partition order_ids by shard key so each sub-batch lands on the
+                // correct shard, preserving per-order ordering guarantees.
+                let sc = gw_executor.shard_count();
+                let mut by_shard: Vec<Vec<i64>> = vec![vec![]; sc];
+                for oid in order_ids {
+                    by_shard[(*oid as u64 % sc as u64) as usize].push(*oid);
+                }
+                for (shard_idx, shard_oids) in by_shard.into_iter().enumerate() {
+                    if shard_oids.is_empty() {
+                        continue;
+                    }
+                    let requests: Vec<_> = shard_oids
+                        .iter()
+                        .filter_map(|oid| {
+                            core.orders
+                                .get_detail(*oid)
+                                .and_then(|d| d.last_gw_req.as_ref())
+                                .map(|r| (**r).clone())
+                        })
+                        .collect();
+                    let batch_req = zk_proto_rs::zk::gateway::v1::BatchSendOrdersRequest {
+                        order_requests: requests,
+                    };
+                    // All oids in this group hash to the same shard, so any works as route_id.
+                    let route_id = shard_oids[0];
+                    if let Err(_action) = gw_executor.dispatch(
+                        route_id,
+                        GwAction::BatchSendOrders {
+                            gw_key: gw_key.clone(),
+                            request: batch_req,
+                            order_ids: shard_oids.clone(),
+                            gw_id: *gw_id,
+                        },
+                    ) {
+                        warn!(gw_id, shard_idx, "gateway executor queue full — BatchSendOrders dropped, injecting async failures");
+                        for oid in &shard_oids {
+                            failure_actions.extend(core.process_message(
+                                OmsMessage::GatewaySendFailed {
+                                    order_id: *oid,
+                                    gw_id: *gw_id,
+                                    error_msg: "dispatch queue full".into(),
+                                },
+                            ));
+                        }
+                    }
                 }
             }
             OmsActionV2::SendCancelToGw { gw_id, order_id } => {
                 let gw_key = core.resolve_gw_key(*gw_id).unwrap_or("").to_string();
-                let request = core.orders.get_detail(*order_id)
+                let request = core
+                    .orders
+                    .get_detail(*order_id)
                     .and_then(|d| d.cancel_req.as_ref())
                     .map(|r| (**r).clone())
                     .unwrap_or_default();
-                if let Err(_action) = gw_executor.dispatch(*gw_id, GwAction::CancelOrder {
-                    gw_key, request, order_id: *order_id, gw_id: *gw_id,
-                }) {
-                    warn!(gw_id, "gateway executor queue full — CancelOrder dropped");
-                    gw_enqueue_failed = true;
+                if let Err(_action) = gw_executor.dispatch(
+                    *order_id,
+                    GwAction::CancelOrder {
+                        gw_key,
+                        request,
+                        order_id: *order_id,
+                        gw_id: *gw_id,
+                    },
+                ) {
+                    warn!(gw_id, order_id, "gateway executor queue full — CancelOrder dropped, injecting async failure");
+                    failure_actions.extend(core.process_message(
+                        OmsMessage::GatewayCancelSendFailed {
+                            order_id: *order_id,
+                            gw_id: *gw_id,
+                            error_msg: "dispatch queue full".into(),
+                        },
+                    ));
                 }
             }
             OmsActionV2::BatchCancelToGw { gw_id, order_ids } => {
                 let gw_key = core.resolve_gw_key(*gw_id).unwrap_or("").to_string();
-                let requests: Vec<_> = order_ids.iter().filter_map(|oid| {
-                    core.orders.get_detail(*oid)
-                        .and_then(|d| d.cancel_req.as_ref())
-                        .map(|r| (**r).clone())
-                }).collect();
-                let batch_req = zk_proto_rs::zk::gateway::v1::BatchCancelOrdersRequest {
-                    cancel_requests: requests,
-                };
-                if let Err(_action) = gw_executor.dispatch(*gw_id, GwAction::BatchCancel {
-                    gw_key, request: batch_req, order_ids: order_ids.clone(), gw_id: *gw_id,
-                }) {
-                    warn!(gw_id, "gateway executor queue full — BatchCancel dropped");
-                    gw_enqueue_failed = true;
+                // Partition by shard key — same pattern as BatchSendOrdersToGw.
+                let sc = gw_executor.shard_count();
+                let mut by_shard: Vec<Vec<i64>> = vec![vec![]; sc];
+                for oid in order_ids {
+                    by_shard[(*oid as u64 % sc as u64) as usize].push(*oid);
+                }
+                for (shard_idx, shard_oids) in by_shard.into_iter().enumerate() {
+                    if shard_oids.is_empty() {
+                        continue;
+                    }
+                    let requests: Vec<_> = shard_oids
+                        .iter()
+                        .filter_map(|oid| {
+                            core.orders
+                                .get_detail(*oid)
+                                .and_then(|d| d.cancel_req.as_ref())
+                                .map(|r| (**r).clone())
+                        })
+                        .collect();
+                    let batch_req = zk_proto_rs::zk::gateway::v1::BatchCancelOrdersRequest {
+                        cancel_requests: requests,
+                    };
+                    let route_id = shard_oids[0];
+                    if let Err(_action) = gw_executor.dispatch(
+                        route_id,
+                        GwAction::BatchCancel {
+                            gw_key: gw_key.clone(),
+                            request: batch_req,
+                            order_ids: shard_oids.clone(),
+                            gw_id: *gw_id,
+                        },
+                    ) {
+                        warn!(gw_id, shard_idx, "gateway executor queue full — BatchCancel dropped, injecting async failures");
+                        for oid in &shard_oids {
+                            failure_actions.extend(core.process_message(
+                                OmsMessage::GatewayCancelSendFailed {
+                                    order_id: *oid,
+                                    gw_id: *gw_id,
+                                    error_msg: "dispatch queue full".into(),
+                                },
+                            ));
+                        }
+                    }
                 }
             }
 
             // ── PERSIST (balance/position) — always immediate ───────────
-            OmsActionV2::PersistBalance { account_id, asset_id } => {
+            OmsActionV2::PersistBalance {
+                account_id,
+                asset_id,
+            } => {
                 if let Some(pa) = build_persist_balance(core, *account_id, *asset_id) {
                     persist_executor.try_dispatch(pa);
                 }
             }
-            OmsActionV2::PersistPosition { account_id, instrument_id } => {
+            OmsActionV2::PersistPosition {
+                account_id,
+                instrument_id,
+            } => {
                 if let Some(pa) = build_persist_position(core, *account_id, *instrument_id) {
                     persist_executor.try_dispatch(pa);
                 }
@@ -497,9 +662,13 @@ fn process_command(
                     *include_exec_message,
                     *include_inferred_trade,
                 ) {
-                    let latency_ctx = report_latency_ctx.map(|(oid, t6, t4, t5)| {
-                        ReportLatencyCtx { order_id: oid, t4_ns: t4, t5_ns: t5, t6_ns: t6 }
-                    });
+                    let latency_ctx =
+                        report_latency_ctx.map(|(oid, t6, t4, t5)| ReportLatencyCtx {
+                            order_id: oid,
+                            t4_ns: t4,
+                            t5_ns: t5,
+                            t6_ns: t6,
+                        });
                     let pa = PublishAction::OrderUpdate { event, latency_ctx };
                     publish_executor.dispatch(*order_id, pa);
                 }
@@ -521,15 +690,90 @@ fn process_command(
         }
     }
 
+    // ── Process inline failure actions (from queue-full dispatch drops) ────────
+    //
+    // These are persist/publish actions from core.process_message(GatewaySendFailed/
+    // GatewayCancelSendFailed) called inline above. They never contain gateway
+    // dispatch actions, so no recursion risk.
+    for action in &failure_actions {
+        match action {
+            OmsActionV2::PersistOrder {
+                order_id,
+                set_expire,
+                set_closed,
+            } => {
+                if let Some(live) = core.orders.get_live(*order_id) {
+                    let snap_order = build_snapshot_order_from_live(live, &core.orders.dyn_strings);
+                    writer.apply_order_update(snap_order, *set_closed);
+                }
+                if let Some(live) = core.orders.get_live(*order_id) {
+                    if let Some(detail) = core.orders.get_detail(*order_id) {
+                        let snap_detail = build_snapshot_detail_from_core(
+                            *order_id,
+                            live,
+                            detail,
+                            &core.metadata,
+                            &core.orders.dyn_strings,
+                        );
+                        writer.apply_order_detail(snap_detail);
+                    }
+                }
+                if let Some(persisted) = build_persisted_order(core, *order_id) {
+                    let pa = PersistAction::Order {
+                        order: persisted,
+                        set_expire: *set_expire,
+                        set_closed: *set_closed,
+                    };
+                    persist_executor.try_dispatch(pa);
+                }
+            }
+            OmsActionV2::PublishOrderUpdate {
+                order_id,
+                include_last_trade,
+                include_last_fee,
+                include_exec_message,
+                include_inferred_trade,
+            } => {
+                if let Some(event) = core.build_order_update_event(
+                    *order_id,
+                    *include_last_trade,
+                    *include_last_fee,
+                    *include_exec_message,
+                    *include_inferred_trade,
+                ) {
+                    let pa = PublishAction::OrderUpdate {
+                        event,
+                        latency_ctx: None,
+                    };
+                    publish_executor.dispatch(*order_id, pa);
+                }
+            }
+            OmsActionV2::PersistBalance {
+                account_id,
+                asset_id,
+            } => {
+                if let Some(pa) = build_persist_balance(core, *account_id, *asset_id) {
+                    persist_executor.try_dispatch(pa);
+                }
+            }
+            OmsActionV2::PublishBalanceUpdate { account_id } => {
+                balances_dirty = true;
+                if let Some(event) = core.build_balance_update_event(*account_id) {
+                    let pa = PublishAction::BalanceUpdate { event };
+                    publish_executor.dispatch(*account_id, pa);
+                }
+            }
+            _ => {} // No other action types expected from failure path
+        }
+    }
+
     // ── Publish updated snapshot (synchronous, writer-owned) ─────────────────
     publish_snapshot(core, writer, replica, balances_dirty, positions_dirty);
 
     // ── Reply immediately ────────────────────────────────────────────────────
-    if gw_enqueue_failed {
-        send_reply(reply, false, "gateway executor queue full");
-    } else {
-        send_reply(reply, true, "");
-    }
+    // ACK = validated + accepted for async processing. Queue-full dispatch
+    // drops are handled inline above (synthetic rejection via core).
+    send_reply(reply, true, "");
 }
 
 /// Send the gRPC reply if a reply channel exists.
@@ -638,7 +882,10 @@ pub async fn persist_position_to_redis(
             first_diverged_ts: pos.first_diverged_ts,
             divergence_count: pos.divergence_count,
         };
-        if let Err(e) = redis.write_position(account_id, &inst_code, side, &managed_pos).await {
+        if let Err(e) = redis
+            .write_position(account_id, &inst_code, side, &managed_pos)
+            .await
+        {
             warn!(account_id, instrument_code = %inst_code, error = %e, "Redis write_position failed");
         }
     }
@@ -647,26 +894,40 @@ pub async fn persist_position_to_redis(
 // ── Snapshot helper ──────────────────────────────────────────────────────────
 
 fn publish_snapshot(
-    core:             &OmsCoreV2,
-    writer:           &mut OmsSnapshotWriterV2,
-    replica:          &ReadReplica,
-    balances_dirty:   bool,
-    positions_dirty:  bool,
+    core: &OmsCoreV2,
+    writer: &mut OmsSnapshotWriterV2,
+    replica: &ReadReplica,
+    balances_dirty: bool,
+    positions_dirty: bool,
 ) {
     let (managed, exch_pos, unknown_pos) = if positions_dirty {
         let (resolved, unknown) = build_exch_positions(core);
         (build_managed_positions(core), resolved, unknown)
     } else {
         let prev = replica.load();
-        (prev.managed_positions.clone(), prev.exch_positions.clone(), prev.unknown_exch_positions.clone())
+        (
+            prev.managed_positions.clone(),
+            prev.exch_positions.clone(),
+            prev.unknown_exch_positions.clone(),
+        )
     };
     let (exch_bal, unknown_bal) = if balances_dirty {
         build_exch_balances(core)
     } else {
         let prev = replica.load();
-        (prev.exch_balances.clone(), prev.unknown_exch_balances.clone())
+        (
+            prev.exch_balances.clone(),
+            prev.unknown_exch_balances.clone(),
+        )
     };
-    let snap = writer.publish(managed, exch_pos, exch_bal, unknown_pos, unknown_bal, gen_timestamp_ms());
+    let snap = writer.publish(
+        managed,
+        exch_pos,
+        exch_bal,
+        unknown_pos,
+        unknown_bal,
+        gen_timestamp_ms(),
+    );
     replica.store(Arc::new(snap));
 }
 
@@ -697,7 +958,10 @@ pub fn build_managed_positions(core: &OmsCoreV2) -> HashMap<(i64, u32), Snapshot
 /// Returns (resolved map, unknown overflow vec).
 pub fn build_exch_positions(
     core: &OmsCoreV2,
-) -> (HashMap<(i64, u32), ExchPositionSnapshot>, Vec<ExchPositionSnapshot>) {
+) -> (
+    HashMap<(i64, u32), ExchPositionSnapshot>,
+    Vec<ExchPositionSnapshot>,
+) {
     let mut resolved = HashMap::new();
     let mut unknown = Vec::new();
     for snap in core.positions.all_exch_positions() {
@@ -719,13 +983,15 @@ pub fn build_exch_positions(
 /// Returns (resolved map, unknown overflow vec).
 pub fn build_exch_balances(
     core: &OmsCoreV2,
-) -> (HashMap<(i64, u32), ExchBalanceSnapshot>, Vec<ExchBalanceSnapshot>) {
+) -> (
+    HashMap<(i64, u32), ExchBalanceSnapshot>,
+    Vec<ExchBalanceSnapshot>,
+) {
     let mut resolved = HashMap::new();
     let mut unknown = Vec::new();
     for snap in core.balances.all_balances() {
         let asset_sym = core.metadata.strings.lookup(&snap.asset);
-        let asset_id = asset_sym
-            .and_then(|s| core.metadata.asset_by_symbol.get(&s).copied());
+        let asset_id = asset_sym.and_then(|s| core.metadata.asset_by_symbol.get(&s).copied());
         if let Some(id) = asset_id {
             resolved.insert((snap.account_id, id), snap.clone());
         } else {
@@ -761,7 +1027,8 @@ pub fn build_snapshot_order_from_live(
         qty: live.qty,
         filled_qty: live.filled_qty,
         filled_avg_price: live.filled_avg_price,
-        exch_order_ref: live.exch_order_ref_id
+        exch_order_ref: live
+            .exch_order_ref_id
             .map(|id| dyn_strings.resolve(id).into()),
         created_at: live.created_at,
         updated_at: live.updated_at,
@@ -780,10 +1047,12 @@ pub fn build_snapshot_detail_from_core(
     SnapshotOrderDetail {
         order_id,
         source_sym: live.source_sym,
-        instrument_exch_sym: metadata.instrument(live.instrument_id)
+        instrument_exch_sym: metadata
+            .instrument(live.instrument_id)
             .map(|i| i.instrument_exch_sym)
             .unwrap_or(0),
-        exch_order_ref: live.exch_order_ref_id
+        exch_order_ref: live
+            .exch_order_ref_id
             .map(|id| dyn_strings.resolve(id).into()),
         error_msg: live.error_msg.clone().into_boxed_str(),
         trades: detail.trades.clone(),
@@ -794,10 +1063,7 @@ pub fn build_snapshot_detail_from_core(
 }
 
 /// Build a V1 PersistedOrder from V2 core state, for Redis persistence.
-fn build_persisted_order(
-    core: &OmsCoreV2,
-    order_id: i64,
-) -> Option<zk_oms_rs::models::OmsOrder> {
+fn build_persisted_order(core: &OmsCoreV2, order_id: i64) -> Option<zk_oms_rs::models::OmsOrder> {
     let live = core.orders.get_live(order_id)?;
     let detail = core.orders.get_detail(order_id);
     let order_state = core.build_proto_order(live);
@@ -806,7 +1072,8 @@ fn build_persisted_order(
         is_from_external: live.is_external,
         order_id: live.order_id,
         account_id: live.account_id,
-        exch_order_ref: live.exch_order_ref_id
+        exch_order_ref: live
+            .exch_order_ref_id
             .map(|id| core.orders.dyn_strings.resolve(id).to_string()),
         oms_req: detail.and_then(|d| d.original_req.as_ref().map(|r| (**r).clone())),
         gw_req: detail.and_then(|d| d.last_gw_req.as_ref().map(|r| (**r).clone())),
@@ -815,7 +1082,9 @@ fn build_persisted_order(
         trades: detail.map(|d| d.trades.clone()).unwrap_or_default(),
         acc_trades_filled_qty: live.acc_trades_filled_qty,
         acc_trades_value: live.acc_trades_value,
-        order_inferred_trades: detail.map(|d| d.inferred_trades.clone()).unwrap_or_default(),
+        order_inferred_trades: detail
+            .map(|d| d.inferred_trades.clone())
+            .unwrap_or_default(),
         exec_msgs: detail.map(|d| d.exec_msgs.clone()).unwrap_or_default(),
         fees: detail.map(|d| d.fees.clone()).unwrap_or_default(),
         cancel_attempts: live.cancel_attempts,
@@ -826,19 +1095,19 @@ fn build_persisted_order(
 
 pub fn ok_response(msg: &str) -> OmsResponse {
     OmsResponse {
-        status:     oms_response::Status::OmsRespStatusSuccess as i32,
+        status: oms_response::Status::OmsRespStatusSuccess as i32,
         error_type: OmsErrorType::OmsErrTypeUnspecified as i32,
-        message:    msg.to_string(),
-        timestamp:  gen_timestamp_ms(),
+        message: msg.to_string(),
+        timestamp: gen_timestamp_ms(),
     }
 }
 
 pub fn err_response(error_type: OmsErrorType, msg: &str) -> OmsResponse {
     OmsResponse {
-        status:     oms_response::Status::OmsRespStatusFail as i32,
+        status: oms_response::Status::OmsRespStatusFail as i32,
         error_type: error_type as i32,
-        message:    msg.to_string(),
-        timestamp:  gen_timestamp_ms(),
+        message: msg.to_string(),
+        timestamp: gen_timestamp_ms(),
     }
 }
 

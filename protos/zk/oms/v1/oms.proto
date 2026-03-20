@@ -55,6 +55,7 @@ message OrderRequest {
     zk.common.v1.ExtraData extra_properties = 12;
     zk.common.v1.TimeInForceType time_inforce_type = 13;
     repeated zk.common.v1.ExtraOrderTagType extra_order_tags = 14;
+    zk.common.v1.TriggerContext trigger_context = 15;
 }
 
 message OrderCancelRequest {
@@ -63,6 +64,7 @@ message OrderCancelRequest {
     zk.common.v1.ExtraData extra_info_required = 3;
     string sourceId = 7;
     int64 timestamp = 8;
+    zk.common.v1.TriggerContext trigger_context = 9;
 }
 
 message Order {

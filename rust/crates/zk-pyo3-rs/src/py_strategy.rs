@@ -140,15 +140,26 @@ impl Strategy for PyStrategyAdapter {
             // Resolve and cache the Kline class on first call — avoids a module
             // import + attribute lookup on every bar (was ~2 Python ops per call).
             if self.kline_cls.is_none() {
-                match py.import_bound("zk_datamodel.rtmd").and_then(|m| m.getattr("Kline")) {
-                    Ok(cls) => { self.kline_cls = Some(cls.into()); }
-                    Err(e) => { e.print(py); return vec![]; }
+                match py
+                    .import_bound("zk_datamodel.rtmd")
+                    .and_then(|m| m.getattr("Kline"))
+                {
+                    Ok(cls) => {
+                        self.kline_cls = Some(cls.into());
+                    }
+                    Err(e) => {
+                        e.print(py);
+                        return vec![];
+                    }
                 }
             }
             let cls = self.kline_cls.as_ref().unwrap().bind(py);
             let py_bar = match make_py_kline_with_cls(py, &cls, bar) {
                 Ok(b) => b,
-                Err(e) => { e.print(py); return vec![]; }
+                Err(e) => {
+                    e.print(py);
+                    return vec![];
+                }
             };
             self.with_adapter(py, ctx, |s, py, tq| {
                 Self::call_method(py, &s.py_strategy, "on_bar", (py_bar, tq))
@@ -156,21 +167,16 @@ impl Strategy for PyStrategyAdapter {
         })
     }
 
-    fn on_order_update(
-        &mut self,
-        oue: &OrderUpdateEvent,
-        ctx: &StrategyContext,
-    ) -> Vec<SAction> {
+    fn on_order_update(&mut self, oue: &OrderUpdateEvent, ctx: &StrategyContext) -> Vec<SAction> {
         Python::with_gil(|py| {
             // Serialize Rust proto → bytes → betterproto parse
-            let py_oue =
-                match rust_proto_to_py(py, oue, "zk_datamodel.oms", "OrderUpdateEvent") {
-                    Ok(o) => o,
-                    Err(e) => {
-                        e.print(py);
-                        return vec![];
-                    }
-                };
+            let py_oue = match rust_proto_to_py(py, oue, "zk_datamodel.oms", "OrderUpdateEvent") {
+                Ok(o) => o,
+                Err(e) => {
+                    e.print(py);
+                    return vec![];
+                }
+            };
             self.with_adapter(py, ctx, |s, py, tq| {
                 // Try ETS legacy name first, then canonical name
                 if s.py_strategy
@@ -192,14 +198,13 @@ impl Strategy for PyStrategyAdapter {
         ctx: &StrategyContext,
     ) -> Vec<SAction> {
         Python::with_gil(|py| {
-            let py_bue =
-                match rust_proto_to_py(py, bue, "zk_datamodel.oms", "BalanceUpdateEvent") {
-                    Ok(o) => o,
-                    Err(e) => {
-                        e.print(py);
-                        return vec![];
-                    }
-                };
+            let py_bue = match rust_proto_to_py(py, bue, "zk_datamodel.oms", "BalanceUpdateEvent") {
+                Ok(o) => o,
+                Err(e) => {
+                    e.print(py);
+                    return vec![];
+                }
+            };
             self.with_adapter(py, ctx, |s, py, tq| {
                 Self::call_method(py, &s.py_strategy, "on_balanceupdate", (py_bue, tq))
             })
@@ -212,14 +217,14 @@ impl Strategy for PyStrategyAdapter {
         ctx: &StrategyContext,
     ) -> Vec<SAction> {
         Python::with_gil(|py| {
-            let py_pue =
-                match rust_proto_to_py(py, pue, "zk_datamodel.oms", "PositionUpdateEvent") {
-                    Ok(o) => o,
-                    Err(e) => {
-                        e.print(py);
-                        return vec![];
-                    }
-                };
+            let py_pue = match rust_proto_to_py(py, pue, "zk_datamodel.oms", "PositionUpdateEvent")
+            {
+                Ok(o) => o,
+                Err(e) => {
+                    e.print(py);
+                    return vec![];
+                }
+            };
             self.with_adapter(py, ctx, |s, py, tq| {
                 Self::call_method(py, &s.py_strategy, "on_positionupdate", (py_pue, tq))
             })
@@ -259,7 +264,11 @@ impl Strategy for PyStrategyAdapter {
 ///
 /// Avoids `py.import_bound` + `getattr` on every call. The class is cached in
 /// `PyStrategyAdapter::kline_cls` and passed in as a `Bound` reference.
-fn make_py_kline_with_cls(_py: Python<'_>, cls: &Bound<'_, PyAny>, bar: &Kline) -> PyResult<PyObject> {
+fn make_py_kline_with_cls(
+    _py: Python<'_>,
+    cls: &Bound<'_, PyAny>,
+    bar: &Kline,
+) -> PyResult<PyObject> {
     let obj = cls.call0()?;
     obj.setattr("symbol", bar.symbol.as_str())?;
     obj.setattr("open", bar.open)?;

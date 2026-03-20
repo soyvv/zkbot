@@ -21,7 +21,10 @@ fn test_snowflake_id_monotonic_within_thread() {
     let mut prev = gen.next_id();
     for _ in 0..100 {
         let id = gen.next_id();
-        assert!(id > prev, "IDs must be monotonically increasing: {prev} >= {id}");
+        assert!(
+            id > prev,
+            "IDs must be monotonically increasing: {prev} >= {id}"
+        );
         prev = id;
     }
 }
@@ -32,9 +35,7 @@ fn test_snowflake_id_uniqueness_parallel() {
     let threads: Vec<_> = (0..4)
         .map(|_| {
             let g = Arc::clone(&gen);
-            std::thread::spawn(move || {
-                (0..2500).map(|_| g.next_id()).collect::<Vec<i64>>()
-            })
+            std::thread::spawn(move || (0..2500).map(|_| g.next_id()).collect::<Vec<i64>>())
         })
         .collect();
 

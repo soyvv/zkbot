@@ -33,11 +33,10 @@ use tonic::{Request, Response, Status};
 use zk_proto_rs::zk::{
     common::v1::{DummyRequest, ServiceHealthResponse},
     oms::v1::{
-        AlgoOrderRequest, BatchCancelOrdersRequest,
-        BatchPlaceOrdersRequest, CancelAlgoOrderRequest, DontPanicRequest,
-        OmsResponse, OmsErrorType, OrderDetailResponse, PanicRequest, PlaceOrderRequest,
-        CancelOrderRequest, PositionResponse, QueryBalancesRequest, QueryBalancesResponse,
-        QueryInstrumentRefdataRequest,
+        AlgoOrderRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+        CancelAlgoOrderRequest, CancelOrderRequest, DontPanicRequest, OmsErrorType, OmsResponse,
+        OrderDetailResponse, PanicRequest, PlaceOrderRequest, PositionResponse,
+        QueryBalancesRequest, QueryBalancesResponse, QueryInstrumentRefdataRequest,
         QueryInstrumentRefdataResponse, QueryOpenOrderRequest, QueryOrderDetailRequest,
         QueryPositionRequest, QueryTradeDetailRequest, TradeDetailResponse,
     },
@@ -53,9 +52,9 @@ use zk_oms_rs::utils::gen_timestamp_ms;
 // ── Handler struct ────────────────────────────────────────────────────────────
 
 pub struct OmsGrpcHandler {
-    pub cmd_tx:  mpsc::Sender<OmsCommand>,
+    pub cmd_tx: mpsc::Sender<OmsCommand>,
     pub replica: ReadReplica,
-    pub oms_id:  Arc<String>,
+    pub oms_id: Arc<String>,
 }
 
 // ── OmsService implementation ─────────────────────────────────────────────────
@@ -69,9 +68,9 @@ impl OmsService for OmsGrpcHandler {
         request: Request<PlaceOrderRequest>,
     ) -> Result<Response<OmsResponse>, Status> {
         let req = request.into_inner();
-        let order_req = req.order_request.ok_or_else(|| {
-            Status::invalid_argument("place_order: missing order_request")
-        })?;
+        let order_req = req
+            .order_request
+            .ok_or_else(|| Status::invalid_argument("place_order: missing order_request"))?;
 
         // Idempotency: reject duplicate order_id without hitting the writer.
         let order_id = order_req.order_id;
@@ -152,10 +151,7 @@ impl OmsService for OmsGrpcHandler {
         Err(Status::unimplemented("CancelAlgoOrder not yet supported"))
     }
 
-    async fn panic(
-        &self,
-        request: Request<PanicRequest>,
-    ) -> Result<Response<OmsResponse>, Status> {
+    async fn panic(&self, request: Request<PanicRequest>) -> Result<Response<OmsResponse>, Status> {
         let req = request.into_inner();
         let account_id = req.panic_account_id;
         let resp = send_cmd_await(&self.cmd_tx, |reply| OmsCommand::Panic {
@@ -186,9 +182,9 @@ impl OmsService for OmsGrpcHandler {
         &self,
         request: Request<QueryBalancesRequest>,
     ) -> Result<Response<QueryBalancesResponse>, Status> {
-        let req  = request.into_inner();
+        let req = request.into_inner();
         let snap = self.replica.load();
-        let ts   = gen_timestamp_ms();
+        let ts = gen_timestamp_ms();
 
         let mut balances: Vec<_> = snap
             .balance_asset_ids_by_account
@@ -204,7 +200,8 @@ impl OmsService for OmsGrpcHandler {
 
         // Append unknown (unresolved) balances for this account.
         balances.extend(
-            snap.unknown_exch_balances.iter()
+            snap.unknown_exch_balances
+                .iter()
                 .filter(|b| b.account_id == req.account_id)
                 .map(|b| b.balance_state.clone()),
         );
@@ -212,7 +209,7 @@ impl OmsService for OmsGrpcHandler {
         Ok(Response::new(QueryBalancesResponse {
             account_id: req.account_id,
             balances,
-            timestamp:  ts,
+            timestamp: ts,
         }))
     }
 
@@ -220,10 +217,11 @@ impl OmsService for OmsGrpcHandler {
         &self,
         request: Request<QueryPositionRequest>,
     ) -> Result<Response<PositionResponse>, Status> {
-        let req  = request.into_inner();
+        let req = request.into_inner();
         let snap = self.replica.load();
         let positions = if req.query_gw {
-            let mut pos: Vec<_> = snap.exch_position_ids_by_account
+            let mut pos: Vec<_> = snap
+                .exch_position_ids_by_account
                 .get(&req.account_id)
                 .map(|inst_ids| {
                     inst_ids
@@ -235,7 +233,8 @@ impl OmsService for OmsGrpcHandler {
                 .unwrap_or_default();
             // Append unknown (unresolved) positions for this account.
             pos.extend(
-                snap.unknown_exch_positions.iter()
+                snap.unknown_exch_positions
+                    .iter()
                     .filter(|p| p.account_id == req.account_id)
                     .map(|p| p.position_state.clone()),
             );
@@ -259,7 +258,7 @@ impl OmsService for OmsGrpcHandler {
         &self,
         request: Request<QueryOpenOrderRequest>,
     ) -> Result<Response<OrderDetailResponse>, Status> {
-        let req  = request.into_inner();
+        let req = request.into_inner();
         let snap = self.replica.load();
 
         let orders: Vec<_> = snap
@@ -285,7 +284,7 @@ impl OmsService for OmsGrpcHandler {
         &self,
         request: Request<QueryOrderDetailRequest>,
     ) -> Result<Response<OrderDetailResponse>, Status> {
-        let req  = request.into_inner();
+        let req = request.into_inner();
         let snap = self.replica.load();
 
         let unique_refs: std::collections::HashSet<&str> =
@@ -303,14 +302,17 @@ impl OmsService for OmsGrpcHandler {
             })
             .collect();
 
-        Ok(Response::new(OrderDetailResponse { orders, pagination: None }))
+        Ok(Response::new(OrderDetailResponse {
+            orders,
+            pagination: None,
+        }))
     }
 
     async fn query_trade_details(
         &self,
         request: Request<QueryTradeDetailRequest>,
     ) -> Result<Response<TradeDetailResponse>, Status> {
-        let req  = request.into_inner();
+        let req = request.into_inner();
         let snap = self.replica.load();
 
         let unique_refs: std::collections::HashSet<&str> =
@@ -326,7 +328,10 @@ impl OmsService for OmsGrpcHandler {
             .flat_map(|d| d.trades.clone())
             .collect();
 
-        Ok(Response::new(TradeDetailResponse { trades, pagination: None }))
+        Ok(Response::new(TradeDetailResponse {
+            trades,
+            pagination: None,
+        }))
     }
 
     async fn query_instrument_refdata(
@@ -346,15 +351,19 @@ impl OmsService for OmsGrpcHandler {
         _request: Request<DummyRequest>,
     ) -> Result<Response<ServiceHealthResponse>, Status> {
         let snap = self.replica.load();
-        let open_orders: usize = snap.open_order_ids_by_account.values().map(|s| s.len()).sum();
+        let open_orders: usize = snap
+            .open_order_ids_by_account
+            .values()
+            .map(|s| s.len())
+            .sum();
         Ok(Response::new(ServiceHealthResponse {
             service_id: self.oms_id.as_ref().clone(),
-            status:     "HEALTHY".into(),
-            detail:     format!(
+            status: "HEALTHY".into(),
+            detail: format!(
                 "oms_id={} snapshot_seq={} open_orders={}",
                 self.oms_id, snap.seq, open_orders
             ),
-            uptime_ms:  0, // TODO: track process start time
+            uptime_ms: 0, // TODO: track process start time
         }))
     }
 }

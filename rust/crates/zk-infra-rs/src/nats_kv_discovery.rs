@@ -57,7 +57,7 @@ const SNAPSHOT_SETTLE_MS: u64 = 200;
 /// In-memory cache of all service registrations from the shared NATS KV registry.
 #[derive(Clone)]
 pub struct KvDiscoveryClient {
-    kv:    KvRegistryClient,
+    kv: KvRegistryClient,
     cache: Arc<RwLock<HashMap<String, ServiceRegistration>>>,
 }
 
@@ -81,13 +81,13 @@ impl KvDiscoveryClient {
     ///
     /// The returned `JoinHandle` can be aborted on shutdown.
     pub fn spawn_watch_loop(&self) -> JoinHandle<()> {
-        let kv    = self.kv.clone();
+        let kv = self.kv.clone();
         let cache = Arc::clone(&self.cache);
 
         tokio::spawn(async move {
             loop {
                 let mut watch = match kv.watch(">").await {
-                    Ok(w)  => w,
+                    Ok(w) => w,
                     Err(e) => {
                         warn!(error = %e, "discovery: watch failed, retrying in 5s");
                         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -114,8 +114,8 @@ impl KvDiscoveryClient {
                             stream_error = true;
                             break;
                         }
-                        Ok(None) => break,  // stream ended
-                        Err(_)  => break,   // settle timeout → snapshot complete
+                        Ok(None) => break, // stream ended
+                        Err(_) => break,   // settle timeout → snapshot complete
                     }
                 }
                 if stream_error {
@@ -172,7 +172,11 @@ fn apply_entry(map: &mut HashMap<String, ServiceRegistration>, entry: KvEntry) {
     match entry.operation {
         KvOperation::Put => match ServiceRegistration::decode(entry.value.as_ref()) {
             Ok(reg) => {
-                debug!(key = entry.key, service_type = reg.service_type, "discovery: upsert");
+                debug!(
+                    key = entry.key,
+                    service_type = reg.service_type,
+                    "discovery: upsert"
+                );
                 map.insert(entry.key, reg);
             }
             Err(e) => warn!(key = entry.key, error = %e, "discovery: malformed entry, skipping"),
@@ -196,7 +200,10 @@ mod tests {
     #[tokio::test]
     async fn discovery_watch_put_populates_cache() {
         let cache = make_cache();
-        let reg = SvcReg { service_type: "OMS".to_string(), ..Default::default() };
+        let reg = SvcReg {
+            service_type: "OMS".to_string(),
+            ..Default::default()
+        };
         cache.write().await.insert("svc.oms.oms1".to_string(), reg);
         assert!(cache.read().await.contains_key("svc.oms.oms1"));
     }
@@ -206,7 +213,10 @@ mod tests {
         let cache = make_cache();
         cache.write().await.insert(
             "svc.oms.oms1".to_string(),
-            SvcReg { service_type: "OMS".to_string(), ..Default::default() },
+            SvcReg {
+                service_type: "OMS".to_string(),
+                ..Default::default()
+            },
         );
         cache.write().await.remove("svc.oms.oms1");
         assert!(!cache.read().await.contains_key("svc.oms.oms1"));
@@ -222,12 +232,30 @@ mod tests {
     fn snapshot_swap_replaces_old_entries() {
         // Old cache: k1. New snapshot: k2 only. After swap, k1 gone, k2 present.
         let mut cache: HashMap<String, SvcReg> = HashMap::new();
-        cache.insert("k1".into(), SvcReg { service_type: "OMS".into(), ..Default::default() });
+        cache.insert(
+            "k1".into(),
+            SvcReg {
+                service_type: "OMS".into(),
+                ..Default::default()
+            },
+        );
         let mut staging: HashMap<String, SvcReg> = HashMap::new();
-        staging.insert("k2".into(), SvcReg { service_type: "GW".into(), ..Default::default() });
+        staging.insert(
+            "k2".into(),
+            SvcReg {
+                service_type: "GW".into(),
+                ..Default::default()
+            },
+        );
         cache = staging; // simulates *cache.write().await = staging
-        assert!(!cache.contains_key("k1"), "stale entry should be removed by swap");
-        assert!(cache.contains_key("k2"), "new entry should be present after swap");
+        assert!(
+            !cache.contains_key("k1"),
+            "stale entry should be removed by swap"
+        );
+        assert!(
+            cache.contains_key("k2"),
+            "new entry should be present after swap"
+        );
     }
 
     #[test]
@@ -244,8 +272,20 @@ mod tests {
         let cache = make_cache();
         {
             let mut w = cache.write().await;
-            w.insert("k1".to_string(), SvcReg { service_type: "OMS".to_string(), ..Default::default() });
-            w.insert("k2".to_string(), SvcReg { service_type: "GW".to_string(), ..Default::default() });
+            w.insert(
+                "k1".to_string(),
+                SvcReg {
+                    service_type: "OMS".to_string(),
+                    ..Default::default()
+                },
+            );
+            w.insert(
+                "k2".to_string(),
+                SvcReg {
+                    service_type: "GW".to_string(),
+                    ..Default::default()
+                },
+            );
         }
         let oms: Vec<_> = cache
             .read()

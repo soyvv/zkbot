@@ -10,15 +10,15 @@ use std::sync::atomic::{AtomicI64, AtomicU16, Ordering};
 use crate::error::SdkError;
 
 const MAX_INSTANCE_ID: u16 = 1023; // 10 bits
-const MAX_SEQUENCE: u16    = 4095; // 12 bits
+const MAX_SEQUENCE: u16 = 4095; // 12 bits
 const INSTANCE_ID_SHIFT: i64 = 12;
-const TIMESTAMP_SHIFT: i64   = 22; // 10 + 12
+const TIMESTAMP_SHIFT: i64 = 22; // 10 + 12
 
 /// Snowflake ID generator. Thread-safe.
 pub struct SnowflakeIdGen {
     instance_id: u16,
-    sequence:    AtomicU16,
-    last_ms:     AtomicI64,
+    sequence: AtomicU16,
+    last_ms: AtomicI64,
 }
 
 impl SnowflakeIdGen {
@@ -30,7 +30,7 @@ impl SnowflakeIdGen {
         Ok(Self {
             instance_id,
             sequence: AtomicU16::new(0),
-            last_ms:  AtomicI64::new(0),
+            last_ms: AtomicI64::new(0),
         })
     }
 
@@ -40,11 +40,12 @@ impl SnowflakeIdGen {
     pub fn next_id(&self) -> i64 {
         loop {
             let now_ms = current_ms();
-            let last   = self.last_ms.load(Ordering::Acquire);
+            let last = self.last_ms.load(Ordering::Acquire);
 
             if now_ms > last {
                 // New millisecond: try to claim it atomically.
-                if self.last_ms
+                if self
+                    .last_ms
                     .compare_exchange(last, now_ms, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
                 {

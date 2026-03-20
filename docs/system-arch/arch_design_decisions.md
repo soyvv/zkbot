@@ -122,3 +122,72 @@ where `suffix = instrument_id` (no param) or `instrument_id_param` (with channel
 This maps `<channel_type>.<suffix>` to the `<subscription_id>` slot in the protocol's suggested
 shape `sub.<scope>.<subscriber_id>.<subscription_id>`. Different channel_types and different
 channel_params produce distinct keys, which is required for the RTMD gateway's aggregation logic.
+
+## OMS + Gateway: order_id sharding & queue-then-reply (2026-03-17)
+
+### OMS gateway executor: shard by order_id (not gw_id)
+
+`GwExecutorPool` was rewritten from `ShardedPool<u32, GwAction>` keyed by `gw_id` (one lazy-spawned
+worker per gateway) to fixed N pre-spawned shards keyed by `order_id % shard_count`. This provides:
+- **More concurrency**: N shards (default 4) vs 1 per gateway. A slow gateway no longer blocks all
+  orders to that gateway.
+- **Per-order ordering**: place/cancel for the same `order_id` always land on the same shard worker,
+  preserving FIFO ordering within an order.
+- **Non-blocking dispatch**: `dispatch(&self, order_id, action)` uses `try_send` — the writer loop
+  never awaits gateway I/O. Queue full = sync `Err` returned to writer. Async failures surface via
+  `OmsCommand::GatewaySendFailed` / `GatewayCancelSendFailed` feedback.
+- **Shared client map**: `Arc<RwLock<HashMap<u32, (String, GatewayClient)>>>` — read-locked on hot
+  path (cheap), write-locked only during startup/discovery.
+
+Config: `ZK_GW_EXEC_SHARD_COUNT` (default 16), `ZK_GW_EXEC_QUEUE_CAPACITY` (default 256).
+
+Batch routing: batches are partitioned by `order_id % shard_count`, one sub-batch per shard group.
+This preserves per-order shard affinity while keeping the batch gRPC optimization (fewer OMS → GW
+round trips). Individual sub-batch dispatch failures are handled inline.
+
+### OMS ACK semantics (relaxed)
+
+OMS gRPC reply is **always success** after core validation. The reply does NOT wait for gateway RTT
+and does not guarantee the downstream action was already enqueued.
+
+Queue-full dispatch drops are handled **inline** by calling `core.process_message(GatewaySendFailed)`
+directly in the writer, which marks the order as synthetically rejected and emits persist + publish
+actions. This uses the same failure path as async gateway RPC failures. No separate async feedback
+loop is needed for dispatch drops.
+
+### Gateway queue-then-reply semantics
+
+`GrpcHandler` uses `dispatch_or_reject()` for all execution commands. The gRPC reply is **always
+success** after request validation — "validated and accepted for asynchronous processing". It does
+NOT mean venue acknowledged, enqueued to a worker, or even accepted into the internal queue.
+
+Queue-full drops: `dispatch_or_reject()` spawns a task to publish a synthetic rejection `OrderReport`
+directly to NATS, so the OMS receives it through the normal async report path.
+
+Batch RPCs (`batch_place_orders`, `batch_cancel_orders`): loop and `dispatch_or_reject()` each item
+individually. No atomic batch guarantee — individual drops get individual async failure reports.
+This is intentional: the relaxed ACK contract means the caller doesn't need atomic batch semantics.
+
+`GwExecPool`: pre-spawned N shard workers (default 4), each receiving `Arc<dyn VenueAdapter>` +
+`Arc<NatsPublisher>`. Workers call `adapter.place_order()` / `adapter.cancel_order()` asynchronously.
+On worker-level failure: builds synthetic rejection `OrderReport` with `ExecReport { exec_type:
+Rejected }` and publishes directly to NATS (bypasses `SemanticPipeline` — correct because rejections
+have no trades to dedup).
+
+Config: `ZK_EXEC_SHARD_COUNT` (default 4), `ZK_EXEC_QUEUE_CAPACITY` (default 256).
+
+Query RPCs (`query_account_balance`, etc.) still call adapter synchronously — they aren't execution
+commands and don't need queue-then-reply.
+
+### Latency extensions
+
+Added `gw_exec_dequeue_ns` to `TimestampRecord` and `LatencyEvent::OrderSent`. New tag
+`"t_gw_dequeue"` in published `LatencyMetric`. New derivable metric segment:
+`gw_exec_queue_wait = t_gw_dequeue - writer_dispatch_ts`.
+
+### Caveats
+
+- `exch_order_ref` in GW gRPC response is empty in queue-then-reply model. OMS doesn't use it
+  (comes via NATS reports). Safe.
+- Synthetic rejections bypass `SemanticPipeline`. Correct because rejections have no trades.
+- Dynamic GW registration acquires write lock — startup-only, not hot path.

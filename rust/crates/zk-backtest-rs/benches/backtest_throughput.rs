@@ -63,7 +63,7 @@ fn make_refdata() -> InstrumentRefData {
 /// Generates `N_BARS` synthetic 1-minute klines starting at 2021-01-01T00:00Z.
 fn make_bars() -> Vec<(i64, BtEventKind)> {
     let base_ms: i64 = 1_609_459_200_000; // 2021-01-01T00:00:00Z in ms
-    let step_ms: i64 = 60_000;            // 1 minute
+    let step_ms: i64 = 60_000; // 1 minute
 
     (0..N_BARS as i64)
         .map(|i| {
@@ -91,9 +91,7 @@ fn make_backtester() -> Backtester {
     let config = BacktestConfig {
         account_ids: vec![ACCOUNT_ID],
         refdata: vec![refdata],
-        init_balances: Some(
-            [(ACCOUNT_ID, [("USD".to_string(), 1500.0)].into())].into(),
-        ),
+        init_balances: Some([(ACCOUNT_ID, [("USD".to_string(), 1500.0)].into())].into()),
         init_positions: None,
         match_policy: Box::new(ImmediateMatchPolicy),
         init_data_fetcher: None,

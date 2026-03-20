@@ -49,5 +49,8 @@ zk-proto-rs = { path = "../zk-proto-rs" }
 zk-infra-rs = { path = "../zk-infra-rs" }
 zk-sim-core = { path = "../zk-sim-core" }
 
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+
 [build-dependencies]
 tonic-build = "0.12"

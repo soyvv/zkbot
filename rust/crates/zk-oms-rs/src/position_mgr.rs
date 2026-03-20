@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use tracing::error;
 use zk_proto_rs::{
+    ods::OmsRouteEntry,
     zk::{
         common::v1::{InstrumentRefData, LongShortType},
         exch_gw::v1::PositionReport,
         oms::v1::{Position, PositionUpdateEvent},
     },
-    ods::OmsRouteEntry,
 };
 
 use crate::models::{ExchPositionSnapshot, OmsManagedPosition, PositionDelta, ReconcileStatus};
@@ -86,9 +86,7 @@ impl PositionManager {
         account_id: i64,
         instrument_code: &str,
     ) -> Option<&OmsManagedPosition> {
-        self.managed
-            .get(&account_id)?
-            .get(instrument_code)
+        self.managed.get(&account_id)?.get(instrument_code)
     }
 
     pub fn get_position_mut(
@@ -149,9 +147,7 @@ impl PositionManager {
             .entry(account_id)
             .or_default()
             .entry(instrument_code.to_string())
-            .or_insert_with(|| {
-                OmsManagedPosition::new(account_id, instrument_code, 0, is_short)
-            });
+            .or_insert_with(|| OmsManagedPosition::new(account_id, instrument_code, 0, is_short));
         pos.qty_available -= qty;
         pos.qty_frozen += qty;
         Ok(())
@@ -186,12 +182,7 @@ impl PositionManager {
             .or_default()
             .entry(delta.instrument_code.clone())
             .or_insert_with(|| {
-                OmsManagedPosition::new(
-                    delta.account_id,
-                    &delta.instrument_code,
-                    0,
-                    delta.is_short,
-                )
+                OmsManagedPosition::new(delta.account_id, &delta.instrument_code, 0, delta.is_short)
             });
 
         pos.qty_total += delta.total_change;
@@ -294,7 +285,12 @@ impl PositionManager {
                     .or_default()
                     .entry(symbol.clone())
                     .or_insert_with(|| {
-                        OmsManagedPosition::new(account_id, &symbol, entry.instrument_type, is_short)
+                        OmsManagedPosition::new(
+                            account_id,
+                            &symbol,
+                            entry.instrument_type,
+                            is_short,
+                        )
                     });
                 pos.qty_total = entry.qty;
                 pos.qty_available = entry.avail_qty;
@@ -347,11 +343,7 @@ impl PositionManager {
     }
 
     /// Check reconcile status for a position.
-    pub fn check_reconcile(
-        &self,
-        account_id: i64,
-        instrument_code: &str,
-    ) -> ReconcileStatus {
+    pub fn check_reconcile(&self, account_id: i64, instrument_code: &str) -> ReconcileStatus {
         self.managed
             .get(&account_id)
             .and_then(|m| m.get(instrument_code))
@@ -364,11 +356,7 @@ impl PositionManager {
     // ------------------------------------------------------------------
 
     /// Build a `PositionUpdateEvent` from managed positions for an account.
-    pub fn build_position_snapshot(
-        &self,
-        account_id: i64,
-        ts: i64,
-    ) -> PositionUpdateEvent {
+    pub fn build_position_snapshot(&self, account_id: i64, ts: i64) -> PositionUpdateEvent {
         let positions = self.get_positions_for_account(account_id);
         PositionUpdateEvent {
             account_id,

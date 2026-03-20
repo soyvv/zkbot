@@ -15,19 +15,19 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OrderInfo {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub exch_order_ref: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub client_order_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub instrument: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub exch_account_id: ::prost::alloc::string::String,
-    #[prost(enumeration="super::common::BuySellType", tag="5")]
+    #[prost(enumeration = "super::common::BuySellType", tag = "5")]
     pub buy_sell_type: i32,
-    #[prost(double, tag="6")]
+    #[prost(double, tag = "6")]
     pub place_qty: f64,
-    #[prost(double, tag="7")]
+    #[prost(double, tag = "7")]
     pub place_price: f64,
 }
 /// deprecated; use common.Rejection instead
@@ -35,56 +35,56 @@ pub struct OrderInfo {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExchErrorInfo {
     /// exchange error code
-    #[prost(int32, tag="1")]
+    #[prost(int32, tag = "1")]
     pub error_code: i32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub error_message: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OrderReport {
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub exchange: ::prost::alloc::string::String,
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub account_id: i64,
     /// required
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub exch_order_ref: ::prost::alloc::string::String,
     /// optional
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub order_id: i64,
     /// optional
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub extra_order_id: ::prost::alloc::string::String,
-    #[prost(enumeration="OrderSourceType", tag="8")]
+    #[prost(enumeration = "OrderSourceType", tag = "8")]
     pub order_source_type: i32,
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag = "4")]
     pub order_report_entries: ::prost::alloc::vec::Vec<OrderReportEntry>,
-    #[prost(int64, tag="6")]
+    #[prost(int64, tag = "6")]
     pub update_timestamp: i64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OrderReportEntry {
-    #[prost(enumeration="OrderReportType", tag="1")]
+    #[prost(enumeration = "OrderReportType", tag = "1")]
     pub report_type: i32,
-    #[prost(oneof="order_report_entry::Report", tags="7, 8, 9, 10, 11")]
+    #[prost(oneof = "order_report_entry::Report", tags = "7, 8, 9, 10, 11")]
     pub report: ::core::option::Option<order_report_entry::Report>,
 }
 /// Nested message and enum types in `OrderReportEntry`.
 pub mod order_report_entry {
     #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Report {
-        #[prost(message, tag="7")]
+        #[prost(message, tag = "7")]
         TradeReport(super::TradeReport),
-        #[prost(message, tag="8")]
+        #[prost(message, tag = "8")]
         OrderStateReport(super::OrderStateReport),
-        #[prost(message, tag="9")]
+        #[prost(message, tag = "9")]
         OrderIdLinkageReport(super::OrderIdLinkageReport),
-        #[prost(message, tag="10")]
+        #[prost(message, tag = "10")]
         FeeReport(super::FeeReport),
-        #[prost(message, tag="11")]
+        #[prost(message, tag = "11")]
         ExecReport(super::ExecReport),
     }
 }
@@ -93,75 +93,75 @@ pub mod order_report_entry {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OrderIdLinkageReport {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub exch_order_ref: ::prost::alloc::string::String,
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub order_id: i64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OrderStateReport {
-    #[prost(enumeration="ExchangeOrderStatus", tag="1")]
+    #[prost(enumeration = "ExchangeOrderStatus", tag = "1")]
     pub exch_order_status: i32,
-    #[prost(double, tag="2")]
+    #[prost(double, tag = "2")]
     pub filled_qty: f64,
-    #[prost(double, tag="3")]
+    #[prost(double, tag = "3")]
     pub unfilled_qty: f64,
     /// avg price for all filled trades; 0 means no info provided;
-    #[prost(double, tag="4")]
+    #[prost(double, tag = "4")]
     pub avg_price: f64,
     /// ExchErrorInfo error_info = 5;
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub order_info: ::core::option::Option<OrderInfo>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TradeReport {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub exch_trade_id: ::prost::alloc::string::String,
-    #[prost(double, tag="2")]
+    #[prost(double, tag = "2")]
     pub filled_qty: f64,
-    #[prost(double, tag="3")]
+    #[prost(double, tag = "3")]
     pub filled_price: f64,
-    #[prost(enumeration="super::common::FillType", tag="4")]
+    #[prost(enumeration = "super::common::FillType", tag = "4")]
     pub fill_type: i32,
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub filled_ts: i64,
-    #[prost(double, tag="6")]
+    #[prost(double, tag = "6")]
     pub exch_pnl: f64,
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag = "7")]
     pub order_info: ::core::option::Option<OrderInfo>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct FeeReport {
-    #[prost(enumeration="FeeUnitType", tag="1")]
+    #[prost(enumeration = "FeeUnitType", tag = "1")]
     pub fee_unit_type: i32,
-    #[prost(double, tag="2")]
+    #[prost(double, tag = "2")]
     pub fee_qty: f64,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub fee_symbol: ::prost::alloc::string::String,
-    #[prost(enumeration="super::common::FeeType", tag="4")]
+    #[prost(enumeration = "super::common::FeeType", tag = "4")]
     pub fee_type: i32,
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub fee_ts: i64,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub inst_symbol: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExecReport {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub exec_id: ::prost::alloc::string::String,
-    #[prost(enumeration="ExchExecType", tag="2")]
+    #[prost(enumeration = "ExchExecType", tag = "2")]
     pub exec_type: i32,
     /// wrap execType etc.
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub exec_message: ::prost::alloc::string::String,
     /// deprecated;
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub error_info: ::core::option::Option<ExchErrorInfo>,
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag = "5")]
     pub rejection_info: ::core::option::Option<super::common::Rejection>,
 }
 /// shared structure
@@ -169,22 +169,22 @@ pub struct ExecReport {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PositionReport {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub instrument_code: ::prost::alloc::string::String,
-    #[prost(enumeration="super::common::InstrumentType", tag="2")]
+    #[prost(enumeration = "super::common::InstrumentType", tag = "2")]
     pub instrument_type: i32,
-    #[prost(enumeration="super::common::LongShortType", tag="3")]
+    #[prost(enumeration = "super::common::LongShortType", tag = "3")]
     pub long_short_type: i32,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub exch_account_code: ::prost::alloc::string::String,
     /// account id in OMS
-    #[prost(int64, tag="15")]
+    #[prost(int64, tag = "15")]
     pub account_id: i64,
-    #[prost(double, tag="5")]
+    #[prost(double, tag = "5")]
     pub qty: f64,
-    #[prost(double, tag="6")]
+    #[prost(double, tag = "6")]
     pub avail_qty: f64,
-    #[prost(double, tag="7")]
+    #[prost(double, tag = "7")]
     pub value: f64,
     // for margin trading positions
     //     double leverage = 8;
@@ -192,93 +192,93 @@ pub struct PositionReport {
     //     double mark_price = 10;
     //     double liquidation_price = 11;
     //     double margin = 12;
-
-    #[prost(int64, tag="13")]
+    #[prost(int64, tag = "13")]
     pub update_timestamp: i64,
     /// raw message from exchange
-    #[prost(string, tag="14")]
+    #[prost(string, tag = "14")]
     pub message_raw: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="22")]
+    #[prost(message, optional, tag = "22")]
     pub margin_pos_info: ::core::option::Option<super::common::MarginPositionInfo>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BalanceUpdate {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub balances: ::prost::alloc::vec::Vec<PositionReport>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GatewaySystemEvent {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub gw_name: ::prost::alloc::string::String,
-    #[prost(enumeration="GatewayEventType", tag="2")]
+    #[prost(enumeration = "GatewayEventType", tag = "2")]
     pub event_type: i32,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub service_endpoint: ::prost::alloc::string::String,
-    #[prost(int64, tag="4")]
+    #[prost(int64, tag = "4")]
     pub event_timestamp: i64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AccountSummaryEntry {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub account_code: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub cash_asset: ::prost::alloc::string::String,
-    #[prost(double, tag="3")]
+    #[prost(double, tag = "3")]
     pub total_avail_value: f64,
-    #[prost(double, tag="4")]
+    #[prost(double, tag = "4")]
     pub total_value: f64,
-    #[prost(double, tag="5")]
+    #[prost(double, tag = "5")]
     pub total_frozen_value: f64,
-    #[prost(double, tag="6")]
+    #[prost(double, tag = "6")]
     pub unrealized_pnl: f64,
-    #[prost(double, tag="7")]
+    #[prost(double, tag = "7")]
     pub leverage: f64,
-    #[prost(enumeration="MarginModeType", tag="8")]
+    #[prost(enumeration = "MarginModeType", tag = "8")]
     pub margin_mode_type: i32,
-    #[prost(double, tag="9")]
+    #[prost(double, tag = "9")]
     pub total_margin: f64,
-    #[prost(int64, tag="14")]
+    #[prost(int64, tag = "14")]
     pub update_timestamp: i64,
-    #[prost(string, tag="15")]
+    #[prost(string, tag = "15")]
     pub original_info: ::prost::alloc::string::String,
-    #[prost(double, tag="16")]
+    #[prost(double, tag = "16")]
     pub buying_power: f64,
-    #[prost(double, tag="17")]
+    #[prost(double, tag = "17")]
     pub maintenance_margin: f64,
-    #[prost(double, tag="18")]
+    #[prost(double, tag = "18")]
     pub net_liquidation_value: f64,
-    #[prost(enumeration="super::common::AccountType", tag="19")]
+    #[prost(enumeration = "super::common::AccountType", tag = "19")]
     pub account_type: i32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AccountSettingEntry {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub exch_account_id: ::prost::alloc::string::String,
-    #[prost(double, tag="2")]
+    #[prost(double, tag = "2")]
     pub long_leverage: f64,
-    #[prost(double, tag="3")]
+    #[prost(double, tag = "3")]
     pub short_leverage: f64,
-    #[prost(enumeration="MarginModeType", tag="4")]
+    #[prost(enumeration = "MarginModeType", tag = "4")]
     pub margin_mode_type: i32,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub instrument: ::prost::alloc::string::String,
-    #[prost(enumeration="super::common::BrokerType", tag="6")]
+    #[prost(enumeration = "super::common::BrokerType", tag = "6")]
     pub broker_type: i32,
-    #[prost(enumeration="super::common::AccountType", tag="7")]
+    #[prost(enumeration = "super::common::AccountType", tag = "7")]
     pub account_type: i32,
     /// account denomination currency (e.g., "USD")
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub base_currency: ::prost::alloc::string::String,
     /// e.g., "SEC Reg-T", "FCA"
-    #[prost(string, tag="9")]
+    #[prost(string, tag = "9")]
     pub regulatory_info: ::prost::alloc::string::String,
     /// broker-specific config
-    #[prost(map="string, string", tag="10")]
-    pub extra_settings: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "10")]
+    pub extra_settings:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

@@ -32,7 +32,9 @@ pub enum SdkError {
     #[error("config error: {0}")]
     Config(String),
 
-    #[error("instance_id not set: provide ZK_CLIENT_INSTANCE_ID or use Pilot-granted enriched_config")]
+    #[error(
+        "instance_id not set: provide ZK_CLIENT_INSTANCE_ID or use Pilot-granted enriched_config"
+    )]
     InstanceIdMissing,
 
     #[error("instance_id {0} out of range (must be 0–1023)")]

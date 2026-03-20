@@ -15,7 +15,7 @@ use crate::{
     balance_mgr::BalanceManager,
     config::ConfdataManager,
     models::{
-        CancelRecheckRequest, ExchBalanceSnapshot, OmsAction, OmsMessage, OmsManagedPosition,
+        CancelRecheckRequest, ExchBalanceSnapshot, OmsAction, OmsManagedPosition, OmsMessage,
         OmsOrder, OrderContext, OrderRecheckRequest, PositionDelta,
     },
     order_mgr::OrderManager,
@@ -93,7 +93,10 @@ impl OmsCore {
     #[cfg(feature = "replica")]
     pub fn take_snapshot(
         &self,
-    ) -> (crate::snapshot::OmsSnapshot, crate::snapshot::OmsSnapshotWriter) {
+    ) -> (
+        crate::snapshot::OmsSnapshot,
+        crate::snapshot::OmsSnapshotWriter,
+    ) {
         use crate::snapshot::OmsSnapshotWriter;
 
         let mut writer = OmsSnapshotWriter::new();
@@ -143,10 +146,20 @@ impl OmsCore {
         self.position_mgr
             .reload_symbol_map(self.config.refdata_by_account_id.clone());
         self.position_mgr.reload_account_config(
-            &self.config.account_routes.values().cloned().collect::<Vec<_>>(),
+            &self
+                .config
+                .account_routes
+                .values()
+                .cloned()
+                .collect::<Vec<_>>(),
         );
         self.balance_mgr.reload_account_config(
-            &self.config.account_routes.values().cloned().collect::<Vec<_>>(),
+            &self
+                .config
+                .account_routes
+                .values()
+                .cloned()
+                .collect::<Vec<_>>(),
             &self.config.gw_configs.values().cloned().collect::<Vec<_>>(),
         );
     }
@@ -181,7 +194,9 @@ impl OmsCore {
             }
             OmsMessage::PositionRecheck => self.process_position_recheck(),
             // V1 OmsCore does not handle gateway failure feedback — V2 only.
-            OmsMessage::GatewaySendFailed { .. } | OmsMessage::GatewayCancelSendFailed { .. } => vec![],
+            OmsMessage::GatewaySendFailed { .. } | OmsMessage::GatewayCancelSendFailed { .. } => {
+                vec![]
+            }
         }
     }
 
@@ -201,9 +216,9 @@ impl OmsCore {
                     error_message: e.to_string(),
                     ..Default::default()
                 };
-                let update_event =
-                    self.order_mgr
-                        .update_with_oms_error(None, &req, &e, rejection);
+                let update_event = self
+                    .order_mgr
+                    .update_with_oms_error(None, &req, &e, rejection);
                 vec![OmsAction::PublishOrderUpdate(Box::new(update_event))]
             }
         }
@@ -267,12 +282,7 @@ impl OmsCore {
                                 .map(|b| b.balance_state.avail_qty)
                                 .unwrap_or(0.0);
                             self.reservation_mgr
-                                .check_available(
-                                    req.account_id,
-                                    &fund_sym,
-                                    order_value,
-                                    exch_avail,
-                                )
+                                .check_available(req.account_id, &fund_sym, order_value, exch_avail)
                                 .map_err(|e| {
                                     ctx.errors.push(e.clone());
                                     e
@@ -281,13 +291,7 @@ impl OmsCore {
                         }
                         if !ctx.has_error() {
                             self.reservation_mgr
-                                .reserve(
-                                    req.order_id,
-                                    req.account_id,
-                                    fund_sym,
-                                    order_value,
-                                    false,
-                                )
+                                .reserve(req.order_id, req.account_id, fund_sym, order_value, false)
                                 .ok();
                         }
                     }
@@ -633,9 +637,7 @@ impl OmsCore {
 
             if is_external || is_known_external {
                 let mut actions = Vec::new();
-                let oue = self
-                    .order_mgr
-                    .handle_external_order_report(&mut report);
+                let oue = self.order_mgr.handle_external_order_report(&mut report);
 
                 let pending = self.pop_pending_reports(&gw_key, &exch_order_ref);
 
@@ -728,12 +730,12 @@ impl OmsCore {
                             .map(|t| t.bookkeeping_balance && t.balance_check)
                             .unwrap_or(false);
                         if bookkeeping {
-                            let is_sell = order.order_state.buy_sell_type
-                                == BuySellType::BsSell as i32;
+                            let is_sell =
+                                order.order_state.buy_sell_type == BuySellType::BsSell as i32;
                             if is_sell {
                                 if let Some(pos_sym) = &ctx.pos_symbol {
-                                    let unfilled = order.order_state.qty
-                                        - order.order_state.filled_qty;
+                                    let unfilled =
+                                        order.order_state.qty - order.order_state.filled_qty;
                                     if unfilled > 0.0 {
                                         self.position_mgr.unfreeze(
                                             ctx.account_id,
@@ -988,9 +990,7 @@ impl OmsCore {
         let is_pending = self
             .order_mgr
             .get_order_by_id(req.order_id)
-            .map(|o| {
-                OrderStatus::try_from(o.order_state.order_status) == Ok(OrderStatus::Pending)
-            })
+            .map(|o| OrderStatus::try_from(o.order_state.order_status) == Ok(OrderStatus::Pending))
             .unwrap_or(false);
 
         if is_pending {

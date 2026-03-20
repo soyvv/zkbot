@@ -25,10 +25,7 @@ pub struct KvRegistryClient {
 
 impl KvRegistryClient {
     /// Open an existing KV bucket by name.
-    pub async fn open(
-        js: &jetstream::Context,
-        bucket: &str,
-    ) -> Result<Self, async_nats::Error> {
+    pub async fn open(js: &jetstream::Context, bucket: &str) -> Result<Self, async_nats::Error> {
         let store = js.get_key_value(bucket).await?;
         Ok(Self { store })
     }
@@ -108,11 +105,18 @@ impl KvRegistryClient {
         fenced_tx: watch::Sender<bool>,
     ) -> JoinHandle<()> {
         let k = key.clone();
-        heartbeat_loop_inner(key, value, interval, initial_revision, fenced_tx, move |val, rev| {
-            let kv = Arc::clone(&self);
-            let k = k.clone();
-            async move { kv.update(&k, val, rev).await }
-        })
+        heartbeat_loop_inner(
+            key,
+            value,
+            interval,
+            initial_revision,
+            fenced_tx,
+            move |val, rev| {
+                let kv = Arc::clone(&self);
+                let k = k.clone();
+                async move { kv.update(&k, val, rev).await }
+            },
+        )
     }
 }
 
@@ -181,7 +185,10 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         handle.abort();
         assert!(!*fenced_rx.borrow(), "should not be fenced on success");
-        assert!(revision.load(Ordering::SeqCst) > 1, "revision should have advanced");
+        assert!(
+            revision.load(Ordering::SeqCst) > 1,
+            "revision should have advanced"
+        );
     }
 
     #[tokio::test]
@@ -194,9 +201,7 @@ mod tests {
             Duration::from_millis(10),
             1,
             fenced_tx,
-            |_val, _rev| async {
-                Err(async_nats::Error::from("CAS conflict"))
-            },
+            |_val, _rev| async { Err(async_nats::Error::from("CAS conflict")) },
         );
         tokio::time::timeout(std::time::Duration::from_secs(1), fenced_rx.changed())
             .await

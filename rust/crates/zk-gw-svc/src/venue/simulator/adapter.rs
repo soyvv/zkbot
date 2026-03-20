@@ -5,17 +5,19 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tracing::info;
 
-use zk_proto_rs::zk::exch_gw::v1::{
-    order_report_entry::Report, OrderReport, OrderReportType,
-};
-use zk_proto_rs::zk::gateway::v1::SendOrderRequest as ExchSendOrderRequest;
+use zk_proto_rs::zk::exch_gw::v1::{order_report_entry::Report, OrderReport, OrderReportType};
 use zk_proto_rs::zk::gateway::v1::CancelOrderRequest as ExchCancelOrderRequest;
+use zk_proto_rs::zk::gateway::v1::SendOrderRequest as ExchSendOrderRequest;
 
-use zk_sim_core::match_policy::{FirstComeFirstServedMatchPolicy, ImmediateMatchPolicy, MatchPolicy};
+use zk_sim_core::match_policy::{
+    FirstComeFirstServedMatchPolicy, ImmediateMatchPolicy, MatchPolicy,
+};
 
-use crate::venue_adapter::*;
-use crate::venue::simulator::error_injection::{ErrorEffect, ErrorScope, RequestContext, evaluate_rules};
+use crate::venue::simulator::error_injection::{
+    evaluate_rules, ErrorEffect, ErrorScope, RequestContext,
+};
 use crate::venue::simulator::state::SimulatorState;
+use crate::venue_adapter::*;
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -266,7 +268,10 @@ impl VenueAdapter for SimulatorVenueAdapter {
         })
     }
 
-    async fn query_balance(&self, _req: VenueBalanceQuery) -> anyhow::Result<Vec<VenueBalanceFact>> {
+    async fn query_balance(
+        &self,
+        _req: VenueBalanceQuery,
+    ) -> anyhow::Result<Vec<VenueBalanceFact>> {
         // Single lock for error injection + query.
         let mut state = self.state.lock().await;
         let ctx = RequestContext::default();

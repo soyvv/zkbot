@@ -9,11 +9,11 @@ use crate::nats_publisher::NatsPublisher;
 use crate::proto::zk_gw_v1::gateway_simulator_admin_service_server::GatewaySimulatorAdminService;
 use crate::proto::zk_gw_v1::*;
 use crate::semantic_pipeline::SemanticPipeline;
+use crate::venue::simulator::adapter::{make_match_policy, SimulatorVenueAdapter};
 use crate::venue::simulator::error_injection::{
     ErrorEffect, ErrorScope, InjectedErrorRule, MatchCriteria, TriggerPolicy,
 };
 use crate::venue::simulator::state::{BalanceEntry, PositionEntry, SimulatorState};
-use crate::venue::simulator::adapter::{make_match_policy, SimulatorVenueAdapter};
 use crate::venue_adapter::{VenueBalanceFact, VenueEvent, VenuePositionFact};
 
 use zk_sim_core::match_policy::{FirstComeFirstServedMatchPolicy, ImmediateMatchPolicy};
@@ -65,9 +65,12 @@ impl GatewaySimulatorAdminService for SimAdminHandler {
                         if let Some((instrument, side, qty, price)) =
                             SimulatorVenueAdapter::extract_fill_info(&result.order_report)
                         {
-                            state
-                                .account_state
-                                .apply_fill_to_balances(&instrument, side, qty, price);
+                            state.account_state.apply_fill_to_balances(
+                                &instrument,
+                                side,
+                                qty,
+                                price,
+                            );
                         }
                     }
                     results
@@ -105,9 +108,7 @@ impl GatewaySimulatorAdminService for SimAdminHandler {
                     })
                     .collect()
             };
-            self.adapter
-                .queue_event(VenueEvent::Balance(facts))
-                .await;
+            self.adapter.queue_event(VenueEvent::Balance(facts)).await;
         }
 
         let remaining = {
@@ -146,54 +147,51 @@ impl GatewaySimulatorAdminService for SimAdminHandler {
         let scope = match req.scope {
             x if x == ErrorScope_::PlaceOrder as i32 => ErrorScope::PlaceOrder,
             x if x == ErrorScope_::CancelOrder as i32 => ErrorScope::CancelOrder,
-            x if x == ErrorScope_::QueryAccountBalance as i32 => {
-                ErrorScope::QueryAccountBalance
-            }
-            x if x == ErrorScope_::QueryOrderDetail as i32 => {
-                ErrorScope::QueryOrderDetail
-            }
+            x if x == ErrorScope_::QueryAccountBalance as i32 => ErrorScope::QueryAccountBalance,
+            x if x == ErrorScope_::QueryOrderDetail as i32 => ErrorScope::QueryOrderDetail,
             _ => return Err(Status::invalid_argument("invalid error scope")),
         };
 
-        let criteria = req.match_criteria.map(|c| MatchCriteria {
-            account_id: if c.account_id != 0 {
-                Some(c.account_id)
-            } else {
-                None
-            },
-            side: if c.side != 0 { Some(c.side) } else { None },
-            instrument: if c.instrument.is_empty() {
-                None
-            } else {
-                Some(c.instrument)
-            },
-            order_id: if c.order_id != 0 {
-                Some(c.order_id)
-            } else {
-                None
-            },
-            client_order_id: if c.client_order_id != 0 {
-                Some(c.client_order_id)
-            } else {
-                None
-            },
-            exch_account_id: if c.exch_account_id.is_empty() {
-                None
-            } else {
-                Some(c.exch_account_id)
-            },
-        }).unwrap_or_default();
+        let criteria = req
+            .match_criteria
+            .map(|c| MatchCriteria {
+                account_id: if c.account_id != 0 {
+                    Some(c.account_id)
+                } else {
+                    None
+                },
+                side: if c.side != 0 { Some(c.side) } else { None },
+                instrument: if c.instrument.is_empty() {
+                    None
+                } else {
+                    Some(c.instrument)
+                },
+                order_id: if c.order_id != 0 {
+                    Some(c.order_id)
+                } else {
+                    None
+                },
+                client_order_id: if c.client_order_id != 0 {
+                    Some(c.client_order_id)
+                } else {
+                    None
+                },
+                exch_account_id: if c.exch_account_id.is_empty() {
+                    None
+                } else {
+                    Some(c.exch_account_id)
+                },
+            })
+            .unwrap_or_default();
 
         let effect = match req.effect {
             x if x == ErrorEffectType::ErrorEffectRpcError as i32 => ErrorEffect::RpcError {
                 grpc_status_code: req.grpc_status_code,
                 error_message: req.error_message.clone(),
             },
-            x if x == ErrorEffectType::ErrorEffectRejectOrder as i32 => {
-                ErrorEffect::RejectOrder {
-                    error_message: req.error_message.clone(),
-                }
-            }
+            x if x == ErrorEffectType::ErrorEffectRejectOrder as i32 => ErrorEffect::RejectOrder {
+                error_message: req.error_message.clone(),
+            },
             x if x == ErrorEffectType::ErrorEffectDelayResponse as i32 => {
                 ErrorEffect::DelayResponse {
                     delay_ms: req.delay_ms as u64,
@@ -207,9 +205,7 @@ impl GatewaySimulatorAdminService for SimAdminHandler {
             x if x == TriggerPolicy_::Times as i32 => {
                 TriggerPolicy::Times(req.trigger_times as u32)
             }
-            x if x == TriggerPolicy_::UntilCleared as i32 => {
-                TriggerPolicy::UntilCleared
-            }
+            x if x == TriggerPolicy_::UntilCleared as i32 => TriggerPolicy::UntilCleared,
             _ => TriggerPolicy::Once,
         };
 
@@ -260,12 +256,8 @@ impl GatewaySimulatorAdminService for SimAdminHandler {
                 scope: match r.scope {
                     ErrorScope::PlaceOrder => ErrorScope_::PlaceOrder as i32,
                     ErrorScope::CancelOrder => ErrorScope_::CancelOrder as i32,
-                    ErrorScope::QueryAccountBalance => {
-                        ErrorScope_::QueryAccountBalance as i32
-                    }
-                    ErrorScope::QueryOrderDetail => {
-                        ErrorScope_::QueryOrderDetail as i32
-                    }
+                    ErrorScope::QueryAccountBalance => ErrorScope_::QueryAccountBalance as i32,
+                    ErrorScope::QueryOrderDetail => ErrorScope_::QueryOrderDetail as i32,
                 },
                 priority: r.priority,
                 enabled: r.enabled,
@@ -492,9 +484,7 @@ impl GatewaySimulatorAdminService for SimAdminHandler {
                     })
                     .collect()
             };
-            self.adapter
-                .queue_event(VenueEvent::Balance(facts))
-                .await;
+            self.adapter.queue_event(VenueEvent::Balance(facts)).await;
         }
 
         Ok(Response::new(SubmitSyntheticTickResponse {
@@ -567,21 +557,19 @@ impl GatewaySimulatorAdminService for SimAdminHandler {
 
         let previous = state.control_state.current_match_policy.clone();
 
-        let new_policy: Box<dyn zk_sim_core::match_policy::MatchPolicy> = match req
-            .policy_name
-            .as_str()
-        {
-            "immediate" => Box::new(ImmediateMatchPolicy),
-            "fcfs" => Box::new(FirstComeFirstServedMatchPolicy),
-            _ => {
-                return Ok(Response::new(SetMatchPolicyResponse {
-                    previous_policy: previous,
-                    current_policy: state.control_state.current_match_policy.clone(),
-                    accepted: false,
-                    message: format!("unknown policy: {}", req.policy_name),
-                }));
-            }
-        };
+        let new_policy: Box<dyn zk_sim_core::match_policy::MatchPolicy> =
+            match req.policy_name.as_str() {
+                "immediate" => Box::new(ImmediateMatchPolicy),
+                "fcfs" => Box::new(FirstComeFirstServedMatchPolicy),
+                _ => {
+                    return Ok(Response::new(SetMatchPolicyResponse {
+                        previous_policy: previous,
+                        current_policy: state.control_state.current_match_policy.clone(),
+                        accepted: false,
+                        message: format!("unknown policy: {}", req.policy_name),
+                    }));
+                }
+            };
 
         state.sim_core.match_policy = new_policy;
         state.control_state.current_match_policy = req.policy_name.clone();

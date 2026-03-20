@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // OMS service client — message types reused from zk-proto-rs
     tonic_build::configure()
         .extern_path(".zk.common.v1", "::zk_proto_rs::zk::common::v1")
-        .extern_path(".zk.oms.v1",    "::zk_proto_rs::zk::oms::v1")
+        .extern_path(".zk.oms.v1", "::zk_proto_rs::zk::oms::v1")
         .build_server(false)
         .build_client(true)
         .compile_protos(

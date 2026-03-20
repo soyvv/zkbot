@@ -8,11 +8,11 @@ use zk_proto_rs::zk::common::v1::{
     AuditMeta, BasicOrderType, BuySellType, OpenCloseType, TimeInForceType,
 };
 use zk_proto_rs::zk::oms::v1::{
-    Balance as ProtoBalance, BalanceUpdateEvent, QueryBalancesRequest,
-    oms_response, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest,
-    Order as ProtoOrder, OrderCancelRequest, OrderRequest, OrderUpdateEvent as ProtoOrderUpdateEvent,
-    PlaceOrderRequest, Position as ProtoPosition, PositionUpdateEvent as ProtoPositionUpdateEvent,
-    QueryOpenOrderRequest, QueryPositionRequest,
+    oms_response, Balance as ProtoBalance, BalanceUpdateEvent, BatchCancelOrdersRequest,
+    BatchPlaceOrdersRequest, CancelOrderRequest, Order as ProtoOrder, OrderCancelRequest,
+    OrderRequest, OrderUpdateEvent as ProtoOrderUpdateEvent, PlaceOrderRequest,
+    Position as ProtoPosition, PositionUpdateEvent as ProtoPositionUpdateEvent,
+    QueryBalancesRequest, QueryOpenOrderRequest, QueryPositionRequest,
 };
 use zk_proto_rs::zk::rtmd::v1::{
     FundingRate as ProtoFundingRate, Kline as ProtoKline, OrderBook as ProtoOrderBook,
@@ -76,7 +76,14 @@ impl TradingClient {
         let oms_pool = OmsChannelPool::new();
         let id_gen = Arc::new(SnowflakeIdGen::new(config.client_instance_id)?);
 
-        let client = Self { config, nats, discovery, oms_pool, refdata, id_gen };
+        let client = Self {
+            config,
+            nats,
+            discovery,
+            oms_pool,
+            refdata,
+            id_gen,
+        };
         client.preconnect_oms().await?;
         Ok(client)
     }
@@ -89,7 +96,13 @@ impl TradingClient {
         self.id_gen.next_id()
     }
 
-    pub async fn place_order(&self, account_id: i64, mut order: TradingOrder) -> Result<CommandAck, SdkError> {
+    /// Place a single order via the OMS. Returns a [`CommandAck`] indicating whether the
+    /// OMS accepted the request — subscribe to order updates for execution status.
+    pub async fn place_order(
+        &self,
+        account_id: i64,
+        mut order: TradingOrder,
+    ) -> Result<CommandAck, SdkError> {
         if order.order_id == 0 {
             order.order_id = self.next_order_id();
         }
@@ -105,7 +118,12 @@ impl TradingClient {
         Ok(map_command_ack(response))
     }
 
-    pub async fn cancel_order(&self, account_id: i64, cancel: TradingCancel) -> Result<CommandAck, SdkError> {
+    /// Cancel an order via the OMS. See [`CommandAck`] for async semantics.
+    pub async fn cancel_order(
+        &self,
+        account_id: i64,
+        cancel: TradingCancel,
+    ) -> Result<CommandAck, SdkError> {
         let mut client = self.oms_client(account_id).await?;
         let response = client
             .cancel_order(CancelOrderRequest {
@@ -118,9 +136,17 @@ impl TradingClient {
         Ok(map_command_ack(response))
     }
 
-    pub async fn batch_place_orders(&self, account_id: i64, orders: Vec<TradingOrder>) -> Result<CommandAck, SdkError> {
+    /// Place multiple orders in a single OMS call. See [`CommandAck`] for async semantics.
+    pub async fn batch_place_orders(
+        &self,
+        account_id: i64,
+        orders: Vec<TradingOrder>,
+    ) -> Result<CommandAck, SdkError> {
         let mut client = self.oms_client(account_id).await?;
-        let source_id = orders.first().map(|o| o.source_id.clone()).unwrap_or_else(|| "sdk".to_string());
+        let source_id = orders
+            .first()
+            .map(|o| o.source_id.clone())
+            .unwrap_or_else(|| "sdk".to_string());
         let requests = orders
             .into_iter()
             .map(|mut order| {
@@ -140,9 +166,17 @@ impl TradingClient {
         Ok(map_command_ack(response))
     }
 
-    pub async fn batch_cancel_orders(&self, account_id: i64, cancels: Vec<TradingCancel>) -> Result<CommandAck, SdkError> {
+    /// Cancel multiple orders in a single OMS call. See [`CommandAck`] for async semantics.
+    pub async fn batch_cancel_orders(
+        &self,
+        account_id: i64,
+        cancels: Vec<TradingCancel>,
+    ) -> Result<CommandAck, SdkError> {
         let mut client = self.oms_client(account_id).await?;
-        let source_id = cancels.first().map(|o| o.source_id.clone()).unwrap_or_else(|| "sdk".to_string());
+        let source_id = cancels
+            .first()
+            .map(|o| o.source_id.clone())
+            .unwrap_or_else(|| "sdk".to_string());
         let response = client
             .batch_cancel_orders(BatchCancelOrdersRequest {
                 order_cancel_requests: cancels.iter().map(map_cancel_request).collect(),
@@ -215,7 +249,11 @@ impl TradingClient {
     }
 
     /// Subscribe to balance updates from OMS instances.
-    pub async fn subscribe_balance_updates<F>(&self, asset: &str, handler: F) -> tokio::task::JoinHandle<()>
+    pub async fn subscribe_balance_updates<F>(
+        &self,
+        asset: &str,
+        handler: F,
+    ) -> tokio::task::JoinHandle<()>
     where
         F: Fn(BalanceUpdateEvent) + Send + Sync + 'static,
     {
@@ -238,21 +276,38 @@ impl TradingClient {
         })
     }
 
-    pub async fn subscribe_position_updates<F>(&self, instrument: &str, handler: F) -> tokio::task::JoinHandle<()>
+    /// Subscribe to position updates from OMS instances.
+    ///
+    /// If `instrument` is non-empty, only position snapshots matching that instrument
+    /// code are retained in each event (client-side filtering, since the OMS publishes
+    /// a single bare topic for all instruments).
+    pub async fn subscribe_position_updates<F>(
+        &self,
+        instrument: &str,
+        handler: F,
+    ) -> tokio::task::JoinHandle<()>
     where
         F: Fn(ProtoPositionUpdateEvent) + Send + Sync + 'static,
     {
         let handler = Arc::new(handler);
         let nc = self.nats.clone();
         let subjects = self.position_update_subjects(instrument).await;
+        let filter_instrument = instrument.to_string();
 
         tokio::spawn(async move {
             let mut handles = Vec::new();
             for subject in subjects {
+                let filter = filter_instrument.clone();
                 handles.push(spawn_protobuf_subscription(
                     nc.clone(),
                     subject,
-                    std::convert::identity,
+                    move |mut pue: ProtoPositionUpdateEvent| {
+                        if !filter.is_empty() {
+                            pue.position_snapshots
+                                .retain(|p| p.instrument_code == filter);
+                        }
+                        pue
+                    },
                     Arc::clone(&handler),
                 ));
             }
@@ -262,7 +317,11 @@ impl TradingClient {
         })
     }
 
-    pub async fn subscribe_ticks<F>(&self, instrument_id: &str, handler: F) -> Result<tokio::task::JoinHandle<()>, SdkError>
+    pub async fn subscribe_ticks<F>(
+        &self,
+        instrument_id: &str,
+        handler: F,
+    ) -> Result<tokio::task::JoinHandle<()>, SdkError>
     where
         F: Fn(ProtoTickData) + Send + Sync + 'static,
     {
@@ -285,7 +344,10 @@ impl TradingClient {
         F: Fn(ProtoKline) + Send + Sync + 'static,
     {
         let subject = self
-            .rtmd_subject(instrument_id, RtmdChannel::Kline(Some(interval.to_string())))
+            .rtmd_subject(
+                instrument_id,
+                RtmdChannel::Kline(Some(interval.to_string())),
+            )
             .await?;
         Ok(spawn_protobuf_subscription(
             self.nats.clone(),
@@ -295,11 +357,17 @@ impl TradingClient {
         ))
     }
 
-    pub async fn subscribe_funding<F>(&self, instrument_id: &str, handler: F) -> Result<tokio::task::JoinHandle<()>, SdkError>
+    pub async fn subscribe_funding<F>(
+        &self,
+        instrument_id: &str,
+        handler: F,
+    ) -> Result<tokio::task::JoinHandle<()>, SdkError>
     where
         F: Fn(ProtoFundingRate) + Send + Sync + 'static,
     {
-        let subject = self.rtmd_subject(instrument_id, RtmdChannel::Funding).await?;
+        let subject = self
+            .rtmd_subject(instrument_id, RtmdChannel::Funding)
+            .await?;
         Ok(spawn_protobuf_subscription(
             self.nats.clone(),
             subject,
@@ -308,11 +376,17 @@ impl TradingClient {
         ))
     }
 
-    pub async fn subscribe_orderbook<F>(&self, instrument_id: &str, handler: F) -> Result<tokio::task::JoinHandle<()>, SdkError>
+    pub async fn subscribe_orderbook<F>(
+        &self,
+        instrument_id: &str,
+        handler: F,
+    ) -> Result<tokio::task::JoinHandle<()>, SdkError>
     where
         F: Fn(ProtoOrderBook) + Send + Sync + 'static,
     {
-        let subject = self.rtmd_subject(instrument_id, RtmdChannel::OrderBook).await?;
+        let subject = self
+            .rtmd_subject(instrument_id, RtmdChannel::OrderBook)
+            .await?;
         Ok(spawn_protobuf_subscription(
             self.nats.clone(),
             subject,
@@ -335,14 +409,20 @@ impl TradingClient {
     async fn oms_client(
         &self,
         account_id: i64,
-    ) -> Result<crate::proto::oms_svc::oms_service_client::OmsServiceClient<tonic::transport::Channel>, SdkError> {
+    ) -> Result<
+        crate::proto::oms_svc::oms_service_client::OmsServiceClient<tonic::transport::Channel>,
+        SdkError,
+    > {
         let endpoint = self.resolve_account_endpoint(account_id).await?;
         self.oms_pool.get_or_connect(&endpoint).await
     }
 
     async fn resolve_account_endpoint(&self, account_id: i64) -> Result<OmsEndpoint, SdkError> {
         self.discovery.refresh_account_cache().await?;
-        self.discovery.resolve_oms(account_id).await.ok_or(SdkError::OmsNotFound(account_id))
+        self.discovery
+            .resolve_oms(account_id)
+            .await
+            .ok_or(SdkError::OmsNotFound(account_id))
     }
 
     fn audit_meta(&self, source_id: &str) -> AuditMeta {
@@ -361,7 +441,11 @@ impl TradingClient {
         self.config
             .account_ids
             .iter()
-            .filter_map(|account_id| snapshot.get(account_id).map(|ep| order_update_topic(&ep.oms_id, *account_id)))
+            .filter_map(|account_id| {
+                snapshot
+                    .get(account_id)
+                    .map(|ep| order_update_topic(&ep.oms_id, *account_id))
+            })
             .collect()
     }
 
@@ -383,7 +467,11 @@ impl TradingClient {
             .collect()
     }
 
-    async fn rtmd_subject(&self, instrument_id: &str, channel: RtmdChannel) -> Result<String, SdkError> {
+    async fn rtmd_subject(
+        &self,
+        instrument_id: &str,
+        channel: RtmdChannel,
+    ) -> Result<String, SdkError> {
         let instrument = self.refdata.query_instrument(instrument_id).await?;
         Ok(match channel {
             RtmdChannel::Tick => tick_topic(&instrument.venue, &instrument.instrument_exch),
@@ -391,7 +479,9 @@ impl TradingClient {
                 kline_topic(&instrument.venue, &instrument.instrument_exch, &interval)
             }
             RtmdChannel::Funding => funding_topic(&instrument.venue, &instrument.instrument_exch),
-            RtmdChannel::OrderBook => orderbook_topic(&instrument.venue, &instrument.instrument_exch),
+            RtmdChannel::OrderBook => {
+                orderbook_topic(&instrument.venue, &instrument.instrument_exch)
+            }
             RtmdChannel::Kline(None) => {
                 return Err(SdkError::Config("kline interval is required".into()));
             }
@@ -436,6 +526,7 @@ fn map_order_request(account_id: i64, order: &TradingOrder) -> OrderRequest {
         extra_properties: None,
         time_inforce_type: TimeInForceType::TimeinforceGtc as i32,
         extra_order_tags: Vec::new(),
+        trigger_context: order.trigger_context.clone(),
     }
 }
 
@@ -446,6 +537,7 @@ fn map_cancel_request(cancel: &TradingCancel) -> OrderCancelRequest {
         extra_info_required: None,
         source_id: cancel.source_id.clone(),
         timestamp: now_ms(),
+        trigger_context: cancel.trigger_context.clone(),
     }
 }
 

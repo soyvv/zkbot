@@ -32,13 +32,19 @@ pub struct GwClientPool {
 
 impl GwClientPool {
     pub fn new() -> Self {
-        Self { clients: HashMap::new() }
+        Self {
+            clients: HashMap::new(),
+        }
     }
 
     /// Connect to a gateway at `addr` and register it under `gw_key`.
     ///
     /// Uses a 5s connect timeout and keeps the channel alive for reconnects.
-    pub async fn connect(&mut self, gw_key: String, addr: &str) -> Result<(), tonic::transport::Error> {
+    pub async fn connect(
+        &mut self,
+        gw_key: String,
+        addr: &str,
+    ) -> Result<(), tonic::transport::Error> {
         let endpoint = Endpoint::from_shared(addr.to_string())
             .expect("invalid gateway address")
             .connect_timeout(Duration::from_secs(5))
@@ -46,7 +52,8 @@ impl GwClientPool {
 
         let channel = endpoint.connect().await?;
         info!(gw_key, addr, "gateway client connected");
-        self.clients.insert(gw_key, GatewayServiceClient::new(channel));
+        self.clients
+            .insert(gw_key, GatewayServiceClient::new(channel));
         Ok(())
     }
 
@@ -82,7 +89,10 @@ impl GwClientPool {
         gw_key: &str,
         req: SendOrderRequest,
     ) -> Result<GatewayResponse, GwError> {
-        let client = self.clients.get_mut(gw_key).ok_or_else(|| GwError::NotFound(gw_key.into()))?;
+        let client = self
+            .clients
+            .get_mut(gw_key)
+            .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
         let resp = client
             .place_order(tonic::Request::new(req))
             .await
@@ -95,7 +105,10 @@ impl GwClientPool {
         gw_key: &str,
         req: BatchSendOrdersRequest,
     ) -> Result<GatewayResponse, GwError> {
-        let client = self.clients.get_mut(gw_key).ok_or_else(|| GwError::NotFound(gw_key.into()))?;
+        let client = self
+            .clients
+            .get_mut(gw_key)
+            .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
         let resp = client
             .batch_place_orders(tonic::Request::new(req))
             .await
@@ -108,7 +121,10 @@ impl GwClientPool {
         gw_key: &str,
         req: CancelOrderRequest,
     ) -> Result<GatewayResponse, GwError> {
-        let client = self.clients.get_mut(gw_key).ok_or_else(|| GwError::NotFound(gw_key.into()))?;
+        let client = self
+            .clients
+            .get_mut(gw_key)
+            .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
         let resp = client
             .cancel_order(tonic::Request::new(req))
             .await
@@ -121,7 +137,10 @@ impl GwClientPool {
         gw_key: &str,
         req: BatchCancelOrdersRequest,
     ) -> Result<GatewayResponse, GwError> {
-        let client = self.clients.get_mut(gw_key).ok_or_else(|| GwError::NotFound(gw_key.into()))?;
+        let client = self
+            .clients
+            .get_mut(gw_key)
+            .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
         let resp = client
             .batch_cancel_orders(tonic::Request::new(req))
             .await
@@ -136,7 +155,10 @@ impl GwClientPool {
         gw_key: &str,
         req: QueryAccountRequest,
     ) -> Result<AccountResponse, GwError> {
-        let client = self.clients.get_mut(gw_key).ok_or_else(|| GwError::NotFound(gw_key.into()))?;
+        let client = self
+            .clients
+            .get_mut(gw_key)
+            .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
         let resp = client
             .query_account_balance(tonic::Request::new(req))
             .await
@@ -146,7 +168,9 @@ impl GwClientPool {
 }
 
 impl Default for GwClientPool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

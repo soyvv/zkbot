@@ -1,12 +1,16 @@
 use std::collections::HashMap;
 
 use zk_proto_rs::{
+    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     zk::{
-        common::v1::{BasicOrderType, InstrumentRefData, InstrumentType, OpenCloseType, TimeInForceType},
-        exch_gw::v1::{BalanceUpdate, OrderReport, PositionReport, order_report_entry::Report, OrderReportType},
+        common::v1::{
+            BasicOrderType, InstrumentRefData, InstrumentType, OpenCloseType, TimeInForceType,
+        },
+        exch_gw::v1::{
+            order_report_entry::Report, BalanceUpdate, OrderReport, OrderReportType, PositionReport,
+        },
         oms::v1::{Balance, OrderCancelRequest, OrderRequest},
     },
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
 };
 
 use zk_oms_rs::{
@@ -16,11 +20,7 @@ use zk_oms_rs::{
 };
 use zk_strategy_sdk_rs::models::{StrategyCancel, StrategyOrder};
 
-use crate::{
-    match_policy::MatchPolicy,
-    models::BtOmsOutput,
-    simulator::SimulatorCore,
-};
+use crate::{match_policy::MatchPolicy, models::BtOmsOutput, simulator::SimulatorCore};
 
 const SIM_GW_KEY: &str = "SIM1";
 
@@ -93,20 +93,26 @@ impl BacktestOms {
         let mut derived_positions = Vec::new();
         if let Some(bals) = init_balances {
             for (&acc_id, sym_map) in bals {
-                derived_positions.extend(
-                    zk_oms_rs::utils::derive_spot_positions_from_balances(acc_id, sym_map, &spot_assets),
-                );
+                derived_positions.extend(zk_oms_rs::utils::derive_spot_positions_from_balances(
+                    acc_id,
+                    sym_map,
+                    &spot_assets,
+                ));
             }
         }
         let explicit_positions = init_positions
             .map(|p| build_init_managed_positions(p, &refdata))
             .unwrap_or_default();
-        let merged_positions = zk_oms_rs::utils::merge_positions_with_override(
-            derived_positions,
-            explicit_positions,
-        );
+        let merged_positions =
+            zk_oms_rs::utils::merge_positions_with_override(derived_positions, explicit_positions);
 
-        let confdata = ConfdataManager::new(oms_config, account_routes, gw_configs, refdata, trading_configs);
+        let confdata = ConfdataManager::new(
+            oms_config,
+            account_routes,
+            gw_configs,
+            refdata,
+            trading_configs,
+        );
 
         let mut oms = OmsCore::new(confdata, true, false, false, 10_000);
         oms.init_state(vec![], merged_positions, init_exch_balances);
@@ -115,7 +121,11 @@ impl BacktestOms {
 
         let sim_balances = init_balances.cloned().unwrap_or_default();
 
-        Self { oms, simulator, sim_balances }
+        Self {
+            oms,
+            simulator,
+            sim_balances,
+        }
     }
 
     /// Process a strategy order placement.
@@ -237,14 +247,22 @@ impl BacktestOms {
             // and feed it through OMS so BalanceManager gets updated.
             if !fills.is_empty() {
                 for fill in &fills {
-                    self.apply_sim_fill(fill.account_id, &fill.instrument, fill.side, fill.qty, fill.price);
+                    self.apply_sim_fill(
+                        fill.account_id,
+                        &fill.instrument,
+                        fill.side,
+                        fill.qty,
+                        fill.price,
+                    );
                 }
                 let mut accounts: Vec<i64> = fills.iter().map(|f| f.account_id).collect();
                 accounts.sort_unstable();
                 accounts.dedup();
                 for acc_id in accounts {
                     let balance_update = self.build_sim_balance_update(acc_id);
-                    let bal_actions = self.oms.process_message(OmsMessage::BalanceUpdate(balance_update));
+                    let bal_actions = self
+                        .oms
+                        .process_message(OmsMessage::BalanceUpdate(balance_update));
                     for action in bal_actions {
                         match action {
                             OmsAction::PublishBalanceUpdate(bue) => {
@@ -273,7 +291,14 @@ impl BacktestOms {
     }
 
     /// Apply a fill to the simulated exchange balance ledger.
-    fn apply_sim_fill(&mut self, account_id: i64, instrument: &str, side: i32, qty: f64, price: f64) {
+    fn apply_sim_fill(
+        &mut self,
+        account_id: i64,
+        instrument: &str,
+        side: i32,
+        qty: f64,
+        price: f64,
+    ) {
         let (base, quote) = instrument
             .split_once('-')
             .map(|(b, q)| (b.to_string(), Some(q.to_string())))
@@ -299,7 +324,8 @@ impl BacktestOms {
     /// Build a simulated exchange BalanceUpdate for a given account.
     fn build_sim_balance_update(&self, account_id: i64) -> BalanceUpdate {
         let acct_code = account_id.to_string();
-        let entries = self.sim_balances
+        let entries = self
+            .sim_balances
             .get(&account_id)
             .map(|m| {
                 m.iter()
@@ -379,7 +405,8 @@ fn build_init_managed_positions(
                 .unwrap_or(InstrumentType::InstTypePerp as i32);
             let is_short = qty < 0.0;
             let abs_qty = qty.abs();
-            let mut pos = OmsManagedPosition::new(acc_id, instrument_code.clone(), inst_type, is_short);
+            let mut pos =
+                OmsManagedPosition::new(acc_id, instrument_code.clone(), inst_type, is_short);
             pos.qty_total = abs_qty;
             pos.qty_available = abs_qty;
             result.push(pos);

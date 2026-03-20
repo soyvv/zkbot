@@ -131,9 +131,9 @@ impl MetadataTables {
         let mut asset_by_symbol: HashMap<u32, u32> = HashMap::new();
 
         let ensure_asset = |strings: &mut InternTable,
-                                assets: &mut Vec<AssetMeta>,
-                                asset_by_symbol: &mut HashMap<u32, u32>,
-                                name: &str|
+                            assets: &mut Vec<AssetMeta>,
+                            asset_by_symbol: &mut HashMap<u32, u32>,
+                            name: &str|
          -> Option<u32> {
             if name.is_empty() {
                 return None;
@@ -151,8 +151,18 @@ impl MetadataTables {
         };
 
         for ref_data in config.refdata.values() {
-            ensure_asset(&mut strings, &mut assets, &mut asset_by_symbol, &ref_data.base_asset);
-            ensure_asset(&mut strings, &mut assets, &mut asset_by_symbol, &ref_data.quote_asset);
+            ensure_asset(
+                &mut strings,
+                &mut assets,
+                &mut asset_by_symbol,
+                &ref_data.base_asset,
+            );
+            ensure_asset(
+                &mut strings,
+                &mut assets,
+                &mut asset_by_symbol,
+                &ref_data.quote_asset,
+            );
             ensure_asset(
                 &mut strings,
                 &mut assets,
@@ -321,11 +331,11 @@ impl MetadataTables {
         let mut next_asset_id = self.assets.len() as u32;
 
         let ensure_asset_stable = |strings: &mut InternTable,
-                                        assets: &mut Vec<AssetMeta>,
-                                        existing_map: &HashMap<u32, u32>,
-                                        new_map: &mut HashMap<u32, u32>,
-                                        next_id: &mut u32,
-                                        name: &str|
+                                   assets: &mut Vec<AssetMeta>,
+                                   existing_map: &HashMap<u32, u32>,
+                                   new_map: &mut HashMap<u32, u32>,
+                                   next_id: &mut u32,
+                                   name: &str|
          -> Option<u32> {
             if name.is_empty() {
                 return None;
@@ -339,30 +349,48 @@ impl MetadataTables {
             if let Some(&existing_id) = existing_map.get(&sym) {
                 new_map.insert(sym, existing_id);
                 // Update in place (asset content is trivial, but stay consistent).
-                assets[existing_id as usize] = AssetMeta { asset_id: existing_id, asset_sym: sym };
+                assets[existing_id as usize] = AssetMeta {
+                    asset_id: existing_id,
+                    asset_sym: sym,
+                };
                 return Some(existing_id);
             }
             // New asset — append.
             let id = *next_id;
             *next_id += 1;
             new_map.insert(sym, id);
-            assets.push(AssetMeta { asset_id: id, asset_sym: sym });
+            assets.push(AssetMeta {
+                asset_id: id,
+                asset_sym: sym,
+            });
             Some(id)
         };
 
         let old_asset_map = std::mem::take(&mut self.asset_by_symbol);
         for ref_data in config.refdata.values() {
             ensure_asset_stable(
-                &mut self.strings, &mut self.assets, &old_asset_map,
-                &mut new_asset_by_symbol, &mut next_asset_id, &ref_data.base_asset,
+                &mut self.strings,
+                &mut self.assets,
+                &old_asset_map,
+                &mut new_asset_by_symbol,
+                &mut next_asset_id,
+                &ref_data.base_asset,
             );
             ensure_asset_stable(
-                &mut self.strings, &mut self.assets, &old_asset_map,
-                &mut new_asset_by_symbol, &mut next_asset_id, &ref_data.quote_asset,
+                &mut self.strings,
+                &mut self.assets,
+                &old_asset_map,
+                &mut new_asset_by_symbol,
+                &mut next_asset_id,
+                &ref_data.quote_asset,
             );
             ensure_asset_stable(
-                &mut self.strings, &mut self.assets, &old_asset_map,
-                &mut new_asset_by_symbol, &mut next_asset_id, &ref_data.settlement_asset,
+                &mut self.strings,
+                &mut self.assets,
+                &old_asset_map,
+                &mut new_asset_by_symbol,
+                &mut next_asset_id,
+                &ref_data.settlement_asset,
             );
         }
         self.asset_by_symbol = new_asset_by_symbol;
@@ -620,7 +648,13 @@ mod tests {
             InstrumentTradingConfig::default_for("ETH/USD@EX2"),
         ];
 
-        ConfdataManager::new(oms_config, account_routes, gw_configs, refdata, trading_configs)
+        ConfdataManager::new(
+            oms_config,
+            account_routes,
+            gw_configs,
+            refdata,
+            trading_configs,
+        )
     }
 
     #[test]
@@ -630,7 +664,10 @@ mod tests {
 
         let inst = tables.resolve_instrument("ETH-P/USDC@EX1").unwrap();
         assert_eq!(inst.instrument_type, InstrumentType::InstTypePerp as i32);
-        assert_eq!(tables.str_resolve(inst.instrument_code_sym), "ETH-P/USDC@EX1");
+        assert_eq!(
+            tables.str_resolve(inst.instrument_code_sym),
+            "ETH-P/USDC@EX1"
+        );
         assert_eq!(tables.str_resolve(inst.instrument_exch_sym), "ETH");
         assert_eq!(inst.qty_precision, 3);
         assert_eq!(inst.price_precision, 2);
@@ -683,16 +720,12 @@ mod tests {
 
         // GW1 serves EX1 -> "ETH" should resolve to the perp
         let r100 = tables.route(100).unwrap();
-        let inst = tables
-            .resolve_instrument_by_gw(r100.gw_id, "ETH")
-            .unwrap();
+        let inst = tables.resolve_instrument_by_gw(r100.gw_id, "ETH").unwrap();
         assert_eq!(inst.instrument_type, InstrumentType::InstTypePerp as i32);
 
         // GW2 serves EX2 -> "ETH" should resolve to the spot
         let r101 = tables.route(101).unwrap();
-        let inst2 = tables
-            .resolve_instrument_by_gw(r101.gw_id, "ETH")
-            .unwrap();
+        let inst2 = tables.resolve_instrument_by_gw(r101.gw_id, "ETH").unwrap();
         assert_eq!(inst2.instrument_type, InstrumentType::InstTypeSpot as i32);
 
         // Unknown symbol
@@ -739,9 +772,18 @@ mod tests {
         let quote_id = inst.quote_asset_id.unwrap();
         let settle_id = inst.settlement_asset_id.unwrap();
 
-        assert_eq!(tables.str_resolve(tables.assets[base_id as usize].asset_sym), "ETH");
-        assert_eq!(tables.str_resolve(tables.assets[quote_id as usize].asset_sym), "USDC");
-        assert_eq!(tables.str_resolve(tables.assets[settle_id as usize].asset_sym), "USDC");
+        assert_eq!(
+            tables.str_resolve(tables.assets[base_id as usize].asset_sym),
+            "ETH"
+        );
+        assert_eq!(
+            tables.str_resolve(tables.assets[quote_id as usize].asset_sym),
+            "USDC"
+        );
+        assert_eq!(
+            tables.str_resolve(tables.assets[settle_id as usize].asset_sym),
+            "USDC"
+        );
 
         // Spot instrument has no settlement_asset (empty string -> None)
         let inst2 = tables.resolve_instrument("ETH/USD@EX2").unwrap();
@@ -756,8 +798,14 @@ mod tests {
         // Record original IDs.
         let gw1_id = tables.gw_by_key[&tables.strings.lookup("GW1").unwrap()];
         let gw2_id = tables.gw_by_key[&tables.strings.lookup("GW2").unwrap()];
-        let eth_perp_id = tables.resolve_instrument("ETH-P/USDC@EX1").unwrap().instrument_id;
-        let eth_spot_id = tables.resolve_instrument("ETH/USD@EX2").unwrap().instrument_id;
+        let eth_perp_id = tables
+            .resolve_instrument("ETH-P/USDC@EX1")
+            .unwrap()
+            .instrument_id;
+        let eth_spot_id = tables
+            .resolve_instrument("ETH/USD@EX2")
+            .unwrap()
+            .instrument_id;
         let eth_asset_id = tables.asset_by_symbol[&tables.strings.lookup("ETH").unwrap()];
         let usdc_asset_id = tables.asset_by_symbol[&tables.strings.lookup("USDC").unwrap()];
 
@@ -790,7 +838,9 @@ mod tests {
                 ..Default::default()
             },
         );
-        config2.exch_name_to_gw_keys.insert("EX3".into(), ["GW3".into()].into_iter().collect());
+        config2
+            .exch_name_to_gw_keys
+            .insert("EX3".into(), ["GW3".into()].into_iter().collect());
 
         tables.rebuild_from_config(&config2);
 
@@ -806,12 +856,18 @@ mod tests {
             "GW2 ID changed after rebuild",
         );
         assert_eq!(
-            tables.resolve_instrument("ETH-P/USDC@EX1").unwrap().instrument_id,
+            tables
+                .resolve_instrument("ETH-P/USDC@EX1")
+                .unwrap()
+                .instrument_id,
             eth_perp_id,
             "ETH-P/USDC@EX1 instrument_id changed after rebuild",
         );
         assert_eq!(
-            tables.resolve_instrument("ETH/USD@EX2").unwrap().instrument_id,
+            tables
+                .resolve_instrument("ETH/USD@EX2")
+                .unwrap()
+                .instrument_id,
             eth_spot_id,
             "ETH/USD@EX2 instrument_id changed after rebuild",
         );
@@ -828,7 +884,10 @@ mod tests {
 
         // New entries got appended IDs (larger than any pre-existing).
         let gw3_id = tables.gw_by_key[&tables.strings.lookup("GW3").unwrap()];
-        assert!(gw3_id > gw1_id && gw3_id > gw2_id, "GW3 should have a new appended ID");
+        assert!(
+            gw3_id > gw1_id && gw3_id > gw2_id,
+            "GW3 should have a new appended ID"
+        );
 
         let btc_inst = tables.resolve_instrument("BTC/USDT@EX3").unwrap();
         assert!(

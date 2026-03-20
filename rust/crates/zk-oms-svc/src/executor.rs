@@ -83,9 +83,4 @@ impl<K: Eq + Hash + Clone, A: Send + 'static> ShardedPool<K, A> {
     pub fn shard_count(&self) -> usize {
         self.shards.len()
     }
-
-    /// Total queued items across all shards (sum of max_capacity - capacity).
-    pub fn total_queue_depth(&self) -> usize {
-        self.shards.values().map(|tx| tx.max_capacity() - tx.capacity()).sum()
-    }
 }

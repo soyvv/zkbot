@@ -1,0 +1,10 @@
+[package]
+name = "zk-strategy-mm-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Placeholder Rust-native market-making strategy"
+
+[dependencies]
+zk-strategy-sdk-rs = { path = "../../crates/zk-strategy-sdk-rs" }
+zk-proto-rs = { path = "../../crates/zk-proto-rs" }
+

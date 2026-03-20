@@ -18,6 +18,7 @@ use zk_oms_rs::{
     oms_core_v2::OmsCoreV2,
 };
 use zk_proto_rs::{
+    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     zk::{
         common::v1::{BasicOrderType, BuySellType, InstrumentRefData, InstrumentType},
         exch_gw::v1::{
@@ -26,7 +27,6 @@ use zk_proto_rs::{
         },
         oms::v1::OrderRequest,
     },
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
 };
 
 // ---------------------------------------------------------------------------
@@ -80,7 +80,13 @@ fn make_confdata() -> ConfdataManager {
         bookkeeping_balance: true,
         ..InstrumentTradingConfig::default_for(INSTRUMENT)
     }];
-    ConfdataManager::new(oms_config, account_routes, gw_configs, refdata, trading_configs)
+    ConfdataManager::new(
+        oms_config,
+        account_routes,
+        gw_configs,
+        refdata,
+        trading_configs,
+    )
 }
 
 fn make_oms_v1() -> OmsCore {

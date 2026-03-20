@@ -82,11 +82,7 @@ pub async fn publish_booked_report(
 
 /// Spawned as a tokio task per placed order. Sleeps for fill_delay_ms then
 /// publishes a FILLED OrderReport to NATS `zk.gw.{gw_id}.report`.
-pub async fn simulate_fill(
-    state: Arc<Mutex<MockGwState>>,
-    exch_order_ref: String,
-    order_id: i64,
-) {
+pub async fn simulate_fill(state: Arc<Mutex<MockGwState>>, exch_order_ref: String, order_id: i64) {
     let delay_ms = {
         let s = state.lock().await;
         s.fill_delay_ms
@@ -103,7 +99,15 @@ pub async fn simulate_fill(
                 let gw_id = s.gw_id.clone();
                 let nats = s.nats_client.clone();
                 s.fill_tasks.remove(&exch_order_ref);
-                (gw_id, order.account_id, order.qty, order.price, order.instrument.clone(), order.side, nats)
+                (
+                    gw_id,
+                    order.account_id,
+                    order.qty,
+                    order.price,
+                    order.instrument.clone(),
+                    order.side,
+                    nats,
+                )
             }
             None => {
                 // Order was already cancelled.
@@ -155,8 +159,14 @@ pub async fn simulate_fill(
         s.balance_snapshot()
     };
     let balance_subject = format!("zk.gw.{gw_id}.balance");
-    let balance_bytes = BalanceUpdate { balances: balance_entries }.encode_to_vec();
-    if let Err(e) = nats.publish(balance_subject.clone(), balance_bytes.into()).await {
+    let balance_bytes = BalanceUpdate {
+        balances: balance_entries,
+    }
+    .encode_to_vec();
+    if let Err(e) = nats
+        .publish(balance_subject.clone(), balance_bytes.into())
+        .await
+    {
         warn!(balance_subject, error = %e, "failed to publish balance update");
     }
 }

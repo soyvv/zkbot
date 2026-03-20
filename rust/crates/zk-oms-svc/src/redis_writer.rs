@@ -32,7 +32,10 @@ pub struct RedisWriter {
 
 impl RedisWriter {
     pub fn new(conn: redis::aio::MultiplexedConnection, oms_id: impl Into<String>) -> Self {
-        Self { conn, oms_id: oms_id.into() }
+        Self {
+            conn,
+            oms_id: oms_id.into(),
+        }
     }
 
     /// Clone the writer.
@@ -59,13 +62,13 @@ impl RedisWriter {
         set_expire: bool,
         set_closed: bool,
     ) -> Result<(), RedisWriterError> {
-        let order_key  = key::order(&self.oms_id, order.order_id);
-        let open_key   = key::open_orders(&self.oms_id, order.account_id);
-        let order_ttl  = if set_expire { 3_600i64 } else { 86_400i64 };
-        let open_ttl   = 86_400i64;
+        let order_key = key::order(&self.oms_id, order.order_id);
+        let open_key = key::open_orders(&self.oms_id, order.account_id);
+        let order_ttl = if set_expire { 3_600i64 } else { 86_400i64 };
+        let open_ttl = 86_400i64;
 
         let persisted = PersistedOrder::from_oms_order(order);
-        let payload   = serde_json::to_vec(&persisted).map_err(RedisWriterError::Serialize)?;
+        let payload = serde_json::to_vec(&persisted).map_err(RedisWriterError::Serialize)?;
 
         let mut pipe = redis::pipe();
         pipe.set(&order_key, payload.as_slice());
@@ -76,7 +79,9 @@ impl RedisWriter {
             pipe.sadd(&open_key, order.order_id);
             pipe.expire(&open_key, open_ttl);
         }
-        pipe.query_async::<()>(&mut self.conn).await.map_err(RedisWriterError::Redis)?;
+        pipe.query_async::<()>(&mut self.conn)
+            .await
+            .map_err(RedisWriterError::Redis)?;
         Ok(())
     }
 
@@ -89,7 +94,7 @@ impl RedisWriter {
         asset: &str,
         snap: &ExchBalanceSnapshot,
     ) -> Result<(), RedisWriterError> {
-        let k       = key::balance(&self.oms_id, account_id, asset);
+        let k = key::balance(&self.oms_id, account_id, asset);
         let payload = serde_json::to_vec(&PersistedBalance::from(snap))
             .map_err(RedisWriterError::Serialize)?;
         self.conn
@@ -107,7 +112,7 @@ impl RedisWriter {
         side: &str,
         pos: &OmsManagedPosition,
     ) -> Result<(), RedisWriterError> {
-        let k       = key::position(&self.oms_id, account_id, instrument, side);
+        let k = key::position(&self.oms_id, account_id, instrument, side);
         let payload = serde_json::to_vec(&PersistedManagedPosition::from(pos))
             .map_err(RedisWriterError::Serialize)?;
         self.conn
@@ -123,9 +128,7 @@ impl RedisWriter {
     ///
     /// Called at startup before `OmsCore::init_state`.  Orders whose Redis
     /// TTL has expired (i.e. terminal orders older than 1h) are silently skipped.
-    pub async fn load_orders(
-        &mut self,
-    ) -> Result<Vec<PersistedOrder>, RedisWriterError> {
+    pub async fn load_orders(&mut self) -> Result<Vec<PersistedOrder>, RedisWriterError> {
         // Collect all open order IDs across accounts via SCAN, then load each.
         // Pattern: oms:{oms_id}:open_orders:*
         let pattern = format!("oms:{}:open_orders:*", self.oms_id);
@@ -152,17 +155,16 @@ impl RedisWriter {
                 order_ids.extend(ids);
             }
             cursor = next_cursor;
-            if cursor == 0 { break; }
+            if cursor == 0 {
+                break;
+            }
         }
 
         let mut orders = Vec::with_capacity(order_ids.len());
         for order_id in order_ids {
             let k = key::order(&self.oms_id, order_id);
-            let payload: Option<Vec<u8>> = self
-                .conn
-                .get(&k)
-                .await
-                .map_err(RedisWriterError::Redis)?;
+            let payload: Option<Vec<u8>> =
+                self.conn.get(&k).await.map_err(RedisWriterError::Redis)?;
             if let Some(bytes) = payload {
                 match serde_json::from_slice::<PersistedOrder>(&bytes) {
                     Ok(o) => orders.push(o),
@@ -179,7 +181,8 @@ impl RedisWriter {
         let keys = self.scan_keys(&pattern).await?;
         let mut result = Vec::new();
         for k in keys {
-            let payload: Option<Vec<u8>> = self.conn.get(&k).await.map_err(RedisWriterError::Redis)?;
+            let payload: Option<Vec<u8>> =
+                self.conn.get(&k).await.map_err(RedisWriterError::Redis)?;
             if let Some(bytes) = payload {
                 match serde_json::from_slice::<PersistedBalance>(&bytes) {
                     Ok(pb) => result.push(pb.into_exch_balance_snapshot()),
@@ -196,11 +199,14 @@ impl RedisWriter {
         let keys = self.scan_keys(&pattern).await?;
         let mut result = Vec::new();
         for k in keys {
-            let payload: Option<Vec<u8>> = self.conn.get(&k).await.map_err(RedisWriterError::Redis)?;
+            let payload: Option<Vec<u8>> =
+                self.conn.get(&k).await.map_err(RedisWriterError::Redis)?;
             if let Some(bytes) = payload {
                 match serde_json::from_slice::<PersistedManagedPosition>(&bytes) {
                     Ok(pp) => result.push(pp.into_oms_managed_position()),
-                    Err(e) => warn!(key = k, error = %e, "failed to deserialise persisted position"),
+                    Err(e) => {
+                        warn!(key = k, error = %e, "failed to deserialise persisted position")
+                    }
                 }
             }
         }
@@ -239,49 +245,49 @@ impl RedisWriter {
 /// Using JSON for human readability; proto encoding can replace it for perf.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedOrder {
-    pub order_id:          i64,
-    pub account_id:        i64,
-    pub is_from_external:  bool,
-    pub exch_order_ref:    Option<String>,
+    pub order_id: i64,
+    pub account_id: i64,
+    pub is_from_external: bool,
+    pub exch_order_ref: Option<String>,
     // Core order state fields (flattened from proto Order)
-    pub instrument:        String,
-    pub buy_sell_type:     i32,
-    pub open_close_type:   i32,
-    pub price:             f64,
-    pub qty:               f64,
-    pub filled_qty:        f64,
-    pub filled_avg_price:  f64,
-    pub order_status:      i32,
-    pub gw_key:            String,
-    pub source_id:         String,
-    pub created_at:        i64,
-    pub updated_at:        i64,
-    pub error_msg:         String,
-    pub instrument_exch:   String,
+    pub instrument: String,
+    pub buy_sell_type: i32,
+    pub open_close_type: i32,
+    pub price: f64,
+    pub qty: f64,
+    pub filled_qty: f64,
+    pub filled_avg_price: f64,
+    pub order_status: i32,
+    pub gw_key: String,
+    pub source_id: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub error_msg: String,
+    pub instrument_exch: String,
 }
 
 impl PersistedOrder {
     pub fn from_oms_order(o: &OmsOrder) -> Self {
         let s = &o.order_state;
         Self {
-            order_id:         o.order_id,
-            account_id:       o.account_id,
+            order_id: o.order_id,
+            account_id: o.account_id,
             is_from_external: o.is_from_external,
-            exch_order_ref:   o.exch_order_ref.clone(),
-            instrument:       s.instrument.clone(),
-            buy_sell_type:    s.buy_sell_type,
-            open_close_type:  s.open_close_type,
-            price:            s.price,
-            qty:              s.qty,
-            filled_qty:       s.filled_qty,
+            exch_order_ref: o.exch_order_ref.clone(),
+            instrument: s.instrument.clone(),
+            buy_sell_type: s.buy_sell_type,
+            open_close_type: s.open_close_type,
+            price: s.price,
+            qty: s.qty,
+            filled_qty: s.filled_qty,
             filled_avg_price: s.filled_avg_price,
-            order_status:     s.order_status,
-            gw_key:           s.gw_key.clone(),
-            source_id:        s.source_id.clone(),
-            created_at:       s.created_at,
-            updated_at:       s.updated_at,
-            error_msg:        s.error_msg.clone(),
-            instrument_exch:  s.instrument_exch.clone(),
+            order_status: s.order_status,
+            gw_key: s.gw_key.clone(),
+            source_id: s.source_id.clone(),
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+            error_msg: s.error_msg.clone(),
+            instrument_exch: s.instrument_exch.clone(),
         }
     }
 
@@ -292,40 +298,40 @@ impl PersistedOrder {
     pub fn into_oms_order(self) -> OmsOrder {
         use zk_proto_rs::zk::oms::v1::Order;
         let mut order_state = Order::default();
-        order_state.order_id        = self.order_id;
-        order_state.account_id      = self.account_id;
-        order_state.exch_order_ref  = self.exch_order_ref.clone().unwrap_or_default();
-        order_state.instrument      = self.instrument;
-        order_state.buy_sell_type   = self.buy_sell_type;
+        order_state.order_id = self.order_id;
+        order_state.account_id = self.account_id;
+        order_state.exch_order_ref = self.exch_order_ref.clone().unwrap_or_default();
+        order_state.instrument = self.instrument;
+        order_state.buy_sell_type = self.buy_sell_type;
         order_state.open_close_type = self.open_close_type;
-        order_state.price           = self.price;
-        order_state.qty             = self.qty;
-        order_state.filled_qty      = self.filled_qty;
+        order_state.price = self.price;
+        order_state.qty = self.qty;
+        order_state.filled_qty = self.filled_qty;
         order_state.filled_avg_price = self.filled_avg_price;
-        order_state.order_status    = self.order_status;
-        order_state.gw_key          = self.gw_key;
-        order_state.source_id       = self.source_id;
-        order_state.created_at      = self.created_at;
-        order_state.updated_at      = self.updated_at;
-        order_state.error_msg       = self.error_msg;
+        order_state.order_status = self.order_status;
+        order_state.gw_key = self.gw_key;
+        order_state.source_id = self.source_id;
+        order_state.created_at = self.created_at;
+        order_state.updated_at = self.updated_at;
+        order_state.error_msg = self.error_msg;
         order_state.instrument_exch = self.instrument_exch;
 
         OmsOrder {
-            is_from_external:        self.is_from_external,
-            order_id:                self.order_id,
-            account_id:              self.account_id,
-            exch_order_ref:          self.exch_order_ref,
-            oms_req:                 None,
-            gw_req:                  None,
-            cancel_req:              None,
+            is_from_external: self.is_from_external,
+            order_id: self.order_id,
+            account_id: self.account_id,
+            exch_order_ref: self.exch_order_ref,
+            oms_req: None,
+            gw_req: None,
+            cancel_req: None,
             order_state,
-            trades:                  vec![],
-            acc_trades_filled_qty:   0.0,
-            acc_trades_value:        0.0,
-            order_inferred_trades:   vec![],
-            exec_msgs:               vec![],
-            fees:                    vec![],
-            cancel_attempts:         0,
+            trades: vec![],
+            acc_trades_filled_qty: 0.0,
+            acc_trades_value: 0.0,
+            order_inferred_trades: vec![],
+            exec_msgs: vec![],
+            fees: vec![],
+            cancel_attempts: 0,
         }
     }
 }
@@ -333,14 +339,14 @@ impl PersistedOrder {
 /// Serialised form of `OmsManagedPosition` stored in Redis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedManagedPosition {
-    pub account_id:       i64,
-    pub instrument_code:  String,
-    pub symbol_exch:      Option<String>,
-    pub instrument_type:  i32,
-    pub is_short:         bool,
-    pub total_qty:        f64,
-    pub frozen_qty:       f64,
-    pub avail_qty:        f64,
+    pub account_id: i64,
+    pub instrument_code: String,
+    pub symbol_exch: Option<String>,
+    pub instrument_type: i32,
+    pub is_short: bool,
+    pub total_qty: f64,
+    pub frozen_qty: f64,
+    pub avail_qty: f64,
 }
 
 impl PersistedManagedPosition {
@@ -362,14 +368,14 @@ impl PersistedManagedPosition {
 impl From<&OmsManagedPosition> for PersistedManagedPosition {
     fn from(p: &OmsManagedPosition) -> Self {
         Self {
-            account_id:      p.account_id,
+            account_id: p.account_id,
             instrument_code: p.instrument_code.clone(),
-            symbol_exch:     p.symbol_exch.clone(),
+            symbol_exch: p.symbol_exch.clone(),
             instrument_type: p.instrument_type,
-            is_short:        p.is_short,
-            total_qty:       p.qty_total,
-            frozen_qty:      p.qty_frozen,
-            avail_qty:       p.qty_available,
+            is_short: p.is_short,
+            total_qty: p.qty_total,
+            frozen_qty: p.qty_frozen,
+            avail_qty: p.qty_available,
         }
     }
 }
@@ -377,11 +383,11 @@ impl From<&OmsManagedPosition> for PersistedManagedPosition {
 /// Serialised form of `ExchBalanceSnapshot` stored in Redis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedBalance {
-    pub account_id:    i64,
-    pub asset:         String,
-    pub total_qty:     f64,
-    pub frozen_qty:    f64,
-    pub avail_qty:     f64,
+    pub account_id: i64,
+    pub asset: String,
+    pub total_qty: f64,
+    pub frozen_qty: f64,
+    pub avail_qty: f64,
 }
 
 impl PersistedBalance {
@@ -408,10 +414,10 @@ impl From<&ExchBalanceSnapshot> for PersistedBalance {
     fn from(b: &ExchBalanceSnapshot) -> Self {
         Self {
             account_id: b.account_id,
-            asset:      b.asset.clone(),
-            total_qty:  b.balance_state.total_qty,
+            asset: b.asset.clone(),
+            total_qty: b.balance_state.total_qty,
             frozen_qty: b.balance_state.frozen_qty,
-            avail_qty:  b.balance_state.avail_qty,
+            avail_qty: b.balance_state.avail_qty,
         }
     }
 }

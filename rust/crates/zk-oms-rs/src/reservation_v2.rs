@@ -53,11 +53,13 @@ impl ReservationStoreV2 {
     /// Fully release a reservation (on cancel or terminal state).
     pub fn release(&mut self, order_id: i64) {
         if let Some(res) = self.reservations.remove(&order_id) {
-            if let Some(total) = self.account_totals.get_mut(&(res.account_id, res.target_id)) {
+            if let Some(total) = self
+                .account_totals
+                .get_mut(&(res.account_id, res.target_id))
+            {
                 *total -= res.reserved_qty;
                 if *total <= 0.0 {
-                    self.account_totals
-                        .remove(&(res.account_id, res.target_id));
+                    self.account_totals.remove(&(res.account_id, res.target_id));
                 }
             }
         }

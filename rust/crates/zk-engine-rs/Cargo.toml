@@ -11,6 +11,7 @@ zk-oms-rs          = { path = "../zk-oms-rs" }
 zk-strategy-sdk-rs = { path = "../zk-strategy-sdk-rs" }
 tokio              = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
 tracing            = { workspace = true }
+arc-swap           = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }

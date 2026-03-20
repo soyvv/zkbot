@@ -21,9 +21,20 @@ const MARKET_STATUS_UPDATED_TOPIC: &str = "zk.control.market_status.updated";
 /// Dependency-injectable gRPC trait for testing without a real server.
 #[async_trait::async_trait]
 pub trait RefdataGrpc: Send + Sync + 'static {
-    async fn query_instrument_by_id(&self, instrument_id: &str) -> Result<InstrumentRefdataResponse, SdkError>;
-    async fn query_instrument_by_venue_symbol(&self, venue: &str, instrument_exch: &str) -> Result<InstrumentRefdataResponse, SdkError>;
-    async fn query_market_status(&self, venue: &str, market: &str) -> Result<MarketStatusResponse, SdkError>;
+    async fn query_instrument_by_id(
+        &self,
+        instrument_id: &str,
+    ) -> Result<InstrumentRefdataResponse, SdkError>;
+    async fn query_instrument_by_venue_symbol(
+        &self,
+        venue: &str,
+        instrument_exch: &str,
+    ) -> Result<InstrumentRefdataResponse, SdkError>;
+    async fn query_market_status(
+        &self,
+        venue: &str,
+        market: &str,
+    ) -> Result<MarketStatusResponse, SdkError>;
 }
 
 /// A cached entry that can be marked invalid after an invalidation event.
@@ -53,10 +64,16 @@ pub struct RefdataSdkInner<G: RefdataGrpc> {
 
 impl<G: RefdataGrpc> RefdataSdkInner<G> {
     pub fn new_with_mock(grpc: G) -> Self {
-        Self { grpc, cache: Arc::new(RwLock::new(RefdataCache::default())) }
+        Self {
+            grpc,
+            cache: Arc::new(RwLock::new(RefdataCache::default())),
+        }
     }
 
-    pub async fn query_instrument(&self, instrument_id: &str) -> Result<InstrumentRefdataResponse, SdkError> {
+    pub async fn query_instrument(
+        &self,
+        instrument_id: &str,
+    ) -> Result<InstrumentRefdataResponse, SdkError> {
         {
             let cache = self.cache.read().await;
             if let Some(entry) = cache.instruments.get(instrument_id) {
@@ -113,10 +130,17 @@ impl<G: RefdataGrpc> RefdataSdkInner<G> {
         Ok(data)
     }
 
-    pub async fn query_market_status(&self, venue: &str, market: &str) -> Result<MarketStatusResponse, SdkError> {
+    pub async fn query_market_status(
+        &self,
+        venue: &str,
+        market: &str,
+    ) -> Result<MarketStatusResponse, SdkError> {
         {
             let cache = self.cache.read().await;
-            if let Some(entry) = cache.market_status.get(&(venue.to_string(), market.to_string())) {
+            if let Some(entry) = cache
+                .market_status
+                .get(&(venue.to_string(), market.to_string()))
+            {
                 if entry.valid {
                     return Ok(entry.data.clone());
                 }
@@ -185,19 +209,25 @@ pub struct LiveRefdataGrpc {
 
 impl LiveRefdataGrpc {
     pub async fn connect(grpc_endpoint: String) -> Result<Self, SdkError> {
-        let endpoint = if grpc_endpoint.starts_with("http://") || grpc_endpoint.starts_with("https://") {
-            grpc_endpoint
-        } else {
-            format!("http://{grpc_endpoint}")
-        };
+        let endpoint =
+            if grpc_endpoint.starts_with("http://") || grpc_endpoint.starts_with("https://") {
+                grpc_endpoint
+            } else {
+                format!("http://{grpc_endpoint}")
+            };
         let client = RefdataServiceClient::connect(endpoint).await?;
-        Ok(Self { client: Mutex::new(client) })
+        Ok(Self {
+            client: Mutex::new(client),
+        })
     }
 }
 
 #[async_trait::async_trait]
 impl RefdataGrpc for LiveRefdataGrpc {
-    async fn query_instrument_by_id(&self, instrument_id: &str) -> Result<InstrumentRefdataResponse, SdkError> {
+    async fn query_instrument_by_id(
+        &self,
+        instrument_id: &str,
+    ) -> Result<InstrumentRefdataResponse, SdkError> {
         let response = self
             .client
             .lock()
@@ -228,7 +258,11 @@ impl RefdataGrpc for LiveRefdataGrpc {
         Ok(response.into_inner())
     }
 
-    async fn query_market_status(&self, venue: &str, market: &str) -> Result<MarketStatusResponse, SdkError> {
+    async fn query_market_status(
+        &self,
+        venue: &str,
+        market: &str,
+    ) -> Result<MarketStatusResponse, SdkError> {
         let response = self
             .client
             .lock()
@@ -264,7 +298,10 @@ impl RefdataSdk {
         })
     }
 
-    pub async fn query_instrument(&self, instrument_id: &str) -> Result<InstrumentRefdataResponse, SdkError> {
+    pub async fn query_instrument(
+        &self,
+        instrument_id: &str,
+    ) -> Result<InstrumentRefdataResponse, SdkError> {
         self.inner.query_instrument(instrument_id).await
     }
 
@@ -273,10 +310,16 @@ impl RefdataSdk {
         venue: &str,
         instrument_exch: &str,
     ) -> Result<InstrumentRefdataResponse, SdkError> {
-        self.inner.query_by_venue_symbol(venue, instrument_exch).await
+        self.inner
+            .query_by_venue_symbol(venue, instrument_exch)
+            .await
     }
 
-    pub async fn query_market_status(&self, venue: &str, market: &str) -> Result<MarketStatusResponse, SdkError> {
+    pub async fn query_market_status(
+        &self,
+        venue: &str,
+        market: &str,
+    ) -> Result<MarketStatusResponse, SdkError> {
         self.inner.query_market_status(venue, market).await
     }
 }

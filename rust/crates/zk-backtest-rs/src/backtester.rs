@@ -59,10 +59,12 @@ struct ProgressTracker {
 impl ProgressTracker {
     fn new(start_ms: i64, end_ms: i64, callback: Box<dyn Fn(u8) + Send + 'static>) -> Self {
         let total = end_ms.saturating_sub(start_ms);
-        let checkpoints = (0i64..=100)
-            .map(|i| start_ms + total * i / 100)
-            .collect();
-        Self { checkpoints, next: 0, callback }
+        let checkpoints = (0i64..=100).map(|i| start_ms + total * i / 100).collect();
+        Self {
+            checkpoints,
+            next: 0,
+            callback,
+        }
     }
 
     /// Advance progress to cover all checkpoints ≤ `now_ms`.
@@ -160,10 +162,8 @@ impl Backtester {
         if let (Some(first), Some(last)) = (events.first(), events.last()) {
             let first_ts = first.0;
             let last_ts = last.0;
-            self.data_start_ms =
-                Some(self.data_start_ms.map_or(first_ts, |s| s.min(first_ts)));
-            self.data_end_ms =
-                Some(self.data_end_ms.map_or(last_ts, |e| e.max(last_ts)));
+            self.data_start_ms = Some(self.data_start_ms.map_or(first_ts, |s| s.min(first_ts)));
+            self.data_end_ms = Some(self.data_end_ms.map_or(last_ts, |e| e.max(last_ts)));
         }
         self.queue.add_stream(events);
     }
@@ -172,14 +172,14 @@ impl Backtester {
     /// Returns a reference to the collected result.
     pub fn run<S: Strategy>(&mut self, strategy: &mut S) -> &BacktestResult {
         // Build progress tracker if callback + time range are available.
-        let mut progress: Option<ProgressTracker> =
-            if let Some(cb) = self.progress_callback.take() {
-                let start = self.data_start_ms.unwrap_or(0);
-                let end = self.data_end_ms.unwrap_or(start);
-                Some(ProgressTracker::new(start, end, cb))
-            } else {
-                None
-            };
+        let mut progress: Option<ProgressTracker> = if let Some(cb) = self.progress_callback.take()
+        {
+            let start = self.data_start_ms.unwrap_or(0);
+            let end = self.data_end_ms.unwrap_or(start);
+            Some(ProgressTracker::new(start, end, cb))
+        } else {
+            None
+        };
 
         // 1. on_create
         let create_actions = self.runner.on_create(strategy);
@@ -211,7 +211,9 @@ impl Backtester {
             // but do NOT update ctx.current_ts_ms, preserving the originating bar
             // time so that strategy calls to tq.get_current_ts() match Python behaviour.
             let actions = match &event.kind {
-                BtEventKind::OrderUpdate(_) | BtEventKind::BalanceUpdate(_) | BtEventKind::PositionUpdate(_) => {
+                BtEventKind::OrderUpdate(_)
+                | BtEventKind::BalanceUpdate(_)
+                | BtEventKind::PositionUpdate(_) => {
                     let timer_actions = self.runner.drain_timers_at(strategy, ts);
                     self.dispatch_actions(timer_actions, ts);
                     // Use _preserve_ts variants: ctx.on_order_update / ctx.on_position_update
@@ -297,9 +299,15 @@ impl Backtester {
                     TimerSchedule::OnceAt(fire_ts) => {
                         self.runner.timer.subscribe_once_at(&sub.timer_key, fire_ts);
                     }
-                    TimerSchedule::Cron { expr, start_ms, end_ms } => {
+                    TimerSchedule::Cron {
+                        expr,
+                        start_ms,
+                        end_ms,
+                    } => {
                         let start = start_ms.unwrap_or(0);
-                        self.runner.timer.subscribe_cron(&sub.timer_key, &expr, start, end_ms);
+                        self.runner
+                            .timer
+                            .subscribe_cron(&sub.timer_key, &expr, start, end_ms);
                     }
                 },
             }

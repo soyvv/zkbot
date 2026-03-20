@@ -72,7 +72,10 @@ impl PublishExecutorPool {
         }) {
             DispatchResult::Ok => {}
             DispatchResult::QueueFull(_) => {
-                warn!(shard_key, "publish queue full — action dropped (best-effort)");
+                warn!(
+                    shard_key,
+                    "publish queue full — action dropped (best-effort)"
+                );
             }
         }
     }

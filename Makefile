@@ -1,7 +1,7 @@
 .PHONY: gen lint test build publish \
         dev-up dev-up-full dev-down dev-reset dev-logs dev-ps \
         test-unit test-integration test-parity \
-        oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-redis-clear \
+        oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-run-release oms-redis-clear \
         gw-check gw-build gw-test gw-run
 
 gen:
@@ -83,7 +83,7 @@ oms-bench:
 oms-e2e-bench: ## E2E latency bench (dev stack must be up: make dev-up && make oms-run)
 	cd rust && cargo run --example e2e_latency -p zk-oms-svc --release
 
-oms-run: ## Run OMS locally (requires dev stack up: make dev-up)
+oms-run: ## Run OMS locally (debug build; requires dev stack up: make dev-up)
 	cd rust && ZK_OMS_ID=oms_dev_1 \
 	           ZK_NATS_URL=nats://localhost:4222 \
 	           ZK_REDIS_URL=redis://localhost:6379 \
@@ -93,6 +93,17 @@ oms-run: ## Run OMS locally (requires dev stack up: make dev-up)
 	           ZK_RISK_CHECK_ENABLED=false \
 	           RUST_LOG=zk_oms_svc=debug,info \
 	           cargo run -p zk-oms-svc
+
+oms-run-release: ## Run OMS locally (release build; requires dev stack up: make dev-up)
+	cd rust && ZK_OMS_ID=oms_dev_1 \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_REDIS_URL=redis://localhost:6379 \
+	           ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
+	           ZK_GRPC_PORT=50051 \
+	           ZK_GATEWAY_KV_PREFIX=svc.gw \
+	           ZK_RISK_CHECK_ENABLED=false \
+	           RUST_LOG=zk_oms_svc=debug,info \
+	           cargo run --release -p zk-oms-svc
 
 oms-redis-clear: ## Delete all oms:{OMS_ID}:* keys from dev Redis (OMS_ID default: oms_dev_1)
 	./scripts/clear_oms_redis.sh

@@ -96,7 +96,10 @@ impl MockGwState {
         for entry in s.split(',') {
             let mut parts = entry.splitn(2, ':');
             let symbol = parts.next().unwrap_or("").trim().to_uppercase();
-            let qty: f64 = parts.next().and_then(|v| v.trim().parse().ok()).unwrap_or(0.0);
+            let qty: f64 = parts
+                .next()
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0.0);
             if !symbol.is_empty() {
                 map.insert(symbol, qty);
             }

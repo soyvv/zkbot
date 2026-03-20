@@ -14,6 +14,12 @@ members = [
     "crates/zk-gw-svc",
     "crates/zk-trading-sdk-rs",
     "crates/zk-trade-tools",
+    "crates/zk-engine-svc",
+    "crates/zk-strategy-host-rs",
+    "strategies/noop",
+    "strategies/strategy-smoke-test",
+    "strategies/mm",
+    "strategies/arbi",
 ]
 resolver = "2"
 

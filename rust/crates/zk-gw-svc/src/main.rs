@@ -6,6 +6,7 @@ use tracing::info;
 
 use zk_gw_svc::config::GwSvcConfig;
 use zk_gw_svc::grpc_handler::GrpcHandler;
+use zk_gw_svc::gw_executor::GwExecPool;
 use zk_gw_svc::nats_publisher::NatsPublisher;
 use zk_gw_svc::proto::zk_gw_v1::gateway_service_server::GatewayServiceServer;
 use zk_gw_svc::proto::zk_gw_v1::gateway_simulator_admin_service_server::GatewaySimulatorAdminServiceServer;
@@ -43,8 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── NATS KV self-registration ──────────────────────────────────────────
     if let Some(ref nats) = nats_client {
-        let kv_prefix = std::env::var("ZK_GATEWAY_KV_PREFIX")
-            .unwrap_or_else(|_| "svc.gw".to_string());
+        let kv_prefix =
+            std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".to_string());
         let kv_key = format!("{kv_prefix}.{}", cfg.gw_id);
         let kv_val_str = format!(
             r#"{{"service_type":"GW","gw_id":"{}","grpc_port":{},"venue":"{}"}}"#,
@@ -154,8 +155,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(gw_id = cfg.gw_id, "gateway LIVE");
 
+    // ── Internal execution pool ─────────────────────────────────────────
+    let exec_pool = if let Some(ref pub_arc) = publisher {
+        Arc::new(GwExecPool::new(
+            cfg.exec_shard_count,
+            cfg.exec_queue_capacity,
+            Arc::clone(&adapter),
+            Arc::clone(pub_arc),
+            cfg.gw_id.clone(),
+            cfg.account_id,
+        ))
+    } else {
+        // Even without NATS, we need the exec pool for gRPC to work.
+        // Create a dummy NatsPublisher — rejection reports will fail to publish
+        // but the pool itself will function. In practice NATS is always present.
+        panic!("ZK_NATS_URL is required for gateway operation");
+    };
+
     // ── gRPC servers ───────────────────────────────────────────────────────
     let gw_handler = GrpcHandler {
+        exec_pool: Arc::clone(&exec_pool),
         adapter: Arc::clone(&adapter),
         gw_state: Arc::clone(&gw_state),
         account_id: cfg.account_id,
@@ -164,9 +183,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gw_addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;
 
     if cfg.venue == "simulator" && cfg.enable_admin_controls {
-        let handles = built.simulator_handles.expect(
-            "simulator_handles must be present when venue=simulator",
-        );
+        let handles = built
+            .simulator_handles
+            .expect("simulator_handles must be present when venue=simulator");
 
         let admin_handler = SimAdminHandler {
             sim_state: Arc::clone(&handles.sim_state),

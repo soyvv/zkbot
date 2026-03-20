@@ -3,124 +3,123 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Strategy {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub strategy_key: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub strategy_desc: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub strategy_script_file_name: ::prost::alloc::string::String,
-    #[prost(int64, repeated, tag="4")]
+    #[prost(int64, repeated, tag = "4")]
     pub account_ids: ::prost::alloc::vec::Vec<i64>,
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag = "5")]
     pub symbols: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub config: ::prost::alloc::string::String,
     /// OMS config json string
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub oms_config: ::prost::alloc::string::String,
     /// None if not running
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub current_execution_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StrategyExecution {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub start_ts: i64,
     /// None if not ended
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub end_ts: i64,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub strategy_key: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub execution_id: ::prost::alloc::string::String,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub config: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StrategyCommand {
-    #[prost(enumeration="StrategyCommandType", tag="1")]
+    #[prost(enumeration = "StrategyCommandType", tag = "1")]
     pub cmd_type: i32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub source_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub strategy_key: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub execution_id: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub cmd_data: ::prost::alloc::string::String,
 }
 /// TBA
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
-pub struct StrategyConfig {
-}
+pub struct StrategyConfig {}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StrategyLifecycleNotifyEvent {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub timestamp: i64,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub strategy_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub execution_id: ::prost::alloc::string::String,
-    #[prost(enumeration="StrategyStatusType", tag="4")]
+    #[prost(enumeration = "StrategyStatusType", tag = "4")]
     pub status: i32,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub payload_json: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StrategyOrderEvent {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub timestamp: i64,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub strategy_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub execution_id: ::prost::alloc::string::String,
     /// tqrpc_oms.OMSPlaceOrderRequest order_request = 4;
     /// string order_request_json = 4
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub order_id: i64,
-    #[prost(double, tag="6")]
+    #[prost(double, tag = "6")]
     pub price: f64,
-    #[prost(double, tag="7")]
+    #[prost(double, tag = "7")]
     pub qty: f64,
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub symbol: ::prost::alloc::string::String,
-    #[prost(int64, tag="9")]
+    #[prost(int64, tag = "9")]
     pub account_id: i64,
-    #[prost(enumeration="super::common::BuySellType", tag="10")]
+    #[prost(enumeration = "super::common::BuySellType", tag = "10")]
     pub buy_sell: i32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StrategyCancelEvent {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub timestamp: i64,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub strategy_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub execution_id: ::prost::alloc::string::String,
-    #[prost(int64, tag="4")]
+    #[prost(int64, tag = "4")]
     pub order_id: i64,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub exch_order_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StrategyLogEvent {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub timestamp: i64,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub strategy_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub execution_id: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub log: ::prost::alloc::string::String,
     /// INFO/DEBUG/ERROR etc
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub log_type: ::prost::alloc::string::String,
 }
 // message StrategyAction {
@@ -141,16 +140,17 @@ pub struct StrategyLogEvent {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StrategyNotification {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub timestamp: i64,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub strategy_key: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub execution_id: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub message: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="5")]
-    pub message_meta_info: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "5")]
+    pub message_meta_info:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

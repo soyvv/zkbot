@@ -3,7 +3,13 @@ use std::collections::HashMap;
 use zk_proto_rs::zk::discovery::v1::{ServiceRegistration, TransportEndpoint};
 use zk_trading_sdk_rs::discovery::{build_account_map, resolve_refdata_endpoint};
 
-fn make_reg(key: &str, service_type: &str, service_id: &str, account_ids: Vec<i64>, grpc_addr: &str) -> (String, ServiceRegistration) {
+fn make_reg(
+    key: &str,
+    service_type: &str,
+    service_id: &str,
+    account_ids: Vec<i64>,
+    grpc_addr: &str,
+) -> (String, ServiceRegistration) {
     let reg = ServiceRegistration {
         service_type: service_type.to_string(),
         service_id: service_id.to_string(),
@@ -25,47 +31,112 @@ fn make_reg(key: &str, service_type: &str, service_id: &str, account_ids: Vec<i6
 fn test_discovery_resolve_by_account() {
     let mut snapshot = HashMap::new();
     snapshot.extend([
-        make_reg("svc.oms.oms_dev_1", "oms", "oms_dev_1", vec![9001, 9002], "localhost:50051"),
-        make_reg("svc.oms.oms_dev_2", "oms", "oms_dev_2", vec![9003], "localhost:50052"),
+        make_reg(
+            "svc.oms.oms_dev_1",
+            "oms",
+            "oms_dev_1",
+            vec![9001, 9002],
+            "localhost:50051",
+        ),
+        make_reg(
+            "svc.oms.oms_dev_2",
+            "oms",
+            "oms_dev_2",
+            vec![9003],
+            "localhost:50052",
+        ),
     ]);
 
     let map = build_account_map(&snapshot).expect("must succeed");
 
-    assert_eq!(map.get(&9001).expect("9001 must resolve").grpc_address, "localhost:50051");
-    assert_eq!(map.get(&9002).expect("9002 must resolve").grpc_address, "localhost:50051");
-    assert_eq!(map.get(&9003).expect("9003 must resolve").grpc_address, "localhost:50052");
+    assert_eq!(
+        map.get(&9001).expect("9001 must resolve").grpc_address,
+        "localhost:50051"
+    );
+    assert_eq!(
+        map.get(&9002).expect("9002 must resolve").grpc_address,
+        "localhost:50051"
+    );
+    assert_eq!(
+        map.get(&9003).expect("9003 must resolve").grpc_address,
+        "localhost:50052"
+    );
 }
 
 #[test]
 fn test_discovery_ignores_non_oms_entries() {
     let mut snapshot = HashMap::new();
     snapshot.extend([
-        make_reg("svc.oms.oms_dev_1", "oms", "oms_dev_1", vec![9001], "localhost:50051"),
-        make_reg("svc.gw.gw_dev_1", "gw", "gw_dev_1", vec![9001], "localhost:50060"),
-        make_reg("svc.refdata.refdata_dev_1", "refdata", "refdata_dev_1", vec![], "localhost:50070"),
-        make_reg("svc.engine.eng_dev_1", "engine", "eng_dev_1", vec![], "localhost:50080"),
+        make_reg(
+            "svc.oms.oms_dev_1",
+            "oms",
+            "oms_dev_1",
+            vec![9001],
+            "localhost:50051",
+        ),
+        make_reg(
+            "svc.gw.gw_dev_1",
+            "gw",
+            "gw_dev_1",
+            vec![9001],
+            "localhost:50060",
+        ),
+        make_reg(
+            "svc.refdata.refdata_dev_1",
+            "refdata",
+            "refdata_dev_1",
+            vec![],
+            "localhost:50070",
+        ),
+        make_reg(
+            "svc.engine.eng_dev_1",
+            "engine",
+            "eng_dev_1",
+            vec![],
+            "localhost:50080",
+        ),
     ]);
 
     let map = build_account_map(&snapshot).expect("must succeed");
 
     // Only OMS entry should be in the account map
     assert_eq!(map.len(), 1);
-    assert_eq!(map.get(&9001).expect("9001 must resolve").grpc_address, "localhost:50051");
+    assert_eq!(
+        map.get(&9001).expect("9001 must resolve").grpc_address,
+        "localhost:50051"
+    );
 }
 
 #[test]
 fn test_discovery_conflict_on_duplicate_account_owner() {
     let mut snapshot = HashMap::new();
     snapshot.extend([
-        make_reg("svc.oms.oms_a", "oms", "oms_a", vec![9001], "localhost:50051"),
-        make_reg("svc.oms.oms_b", "oms", "oms_b", vec![9001], "localhost:50052"), // same account!
+        make_reg(
+            "svc.oms.oms_a",
+            "oms",
+            "oms_a",
+            vec![9001],
+            "localhost:50051",
+        ),
+        make_reg(
+            "svc.oms.oms_b",
+            "oms",
+            "oms_b",
+            vec![9001],
+            "localhost:50052",
+        ), // same account!
     ]);
 
     let result = build_account_map(&snapshot);
-    assert!(result.is_err(), "duplicate account ownership must return error");
+    assert!(
+        result.is_err(),
+        "duplicate account ownership must return error"
+    );
     let err = result.unwrap_err();
-    assert!(err.to_string().contains("9001") || err.to_string().to_lowercase().contains("conflict"),
-        "error should mention account or conflict: {err}");
+    assert!(
+        err.to_string().contains("9001") || err.to_string().to_lowercase().contains("conflict"),
+        "error should mention account or conflict: {err}"
+    );
 }
 
 #[test]
@@ -86,7 +157,10 @@ fn test_discovery_oms_without_endpoint_is_skipped() {
     // Expect: no panic; either Ok(empty) or Err is acceptable but not Ok(map_with_no_ep_entry)
     let result = build_account_map(&snapshot);
     if let Ok(map) = result {
-        assert!(map.get(&9001).is_none(), "entry without endpoint must not be in the account map");
+        assert!(
+            map.get(&9001).is_none(),
+            "entry without endpoint must not be in the account map"
+        );
     }
     // If Err, that's also acceptable
 }
@@ -95,15 +169,22 @@ fn test_discovery_oms_without_endpoint_is_skipped() {
 fn test_discovery_oms_id_from_service_id() {
     let mut snapshot = HashMap::new();
     // Key is full KV path, service_id is the stable logical ID
-    snapshot.extend([
-        make_reg("svc.oms.oms_a", "oms", "oms_a", vec![9001], "localhost:50051"),
-    ]);
+    snapshot.extend([make_reg(
+        "svc.oms.oms_a",
+        "oms",
+        "oms_a",
+        vec![9001],
+        "localhost:50051",
+    )]);
 
     let map = build_account_map(&snapshot).expect("must succeed");
     let ep = map.get(&9001).expect("9001 must resolve");
 
     // oms_id must come from service_id ("oms_a"), NOT the full key ("svc.oms.oms_a")
-    assert_eq!(ep.oms_id, "oms_a", "oms_id must be service_id, not full KV key");
+    assert_eq!(
+        ep.oms_id, "oms_a",
+        "oms_id must be service_id, not full KV key"
+    );
 }
 
 #[test]
@@ -128,7 +209,10 @@ fn test_discovery_oms_id_falls_back_to_key_suffix() {
     let ep = map.get(&9001).expect("9001 must resolve");
 
     // Falls back to last segment of key: "svc.oms.oms_a" → "oms_a"
-    assert_eq!(ep.oms_id, "oms_a", "oms_id must fall back to last key segment");
+    assert_eq!(
+        ep.oms_id, "oms_a",
+        "oms_id must fall back to last key segment"
+    );
 }
 
 /// Entries with a past `lease_expiry_ms` must be treated as expired and skipped.
@@ -153,7 +237,10 @@ fn test_discovery_skips_expired_oms_lease() {
     snapshot.insert("svc.oms.oms_a".to_string(), expired_reg);
 
     let map = build_account_map(&snapshot).expect("must succeed");
-    assert!(map.get(&9001).is_none(), "expired OMS lease must not appear in account map");
+    assert!(
+        map.get(&9001).is_none(),
+        "expired OMS lease must not appear in account map"
+    );
 }
 
 /// Entries with `lease_expiry_ms == 0` are treated as having no expiry (permanent / no TTL).
@@ -161,12 +248,21 @@ fn test_discovery_skips_expired_oms_lease() {
 fn test_discovery_zero_lease_expiry_is_not_expired() {
     let mut snapshot = HashMap::new();
     snapshot.extend([
-        make_reg("svc.oms.oms_a", "oms", "oms_a", vec![9001], "localhost:50051"),
+        make_reg(
+            "svc.oms.oms_a",
+            "oms",
+            "oms_a",
+            vec![9001],
+            "localhost:50051",
+        ),
         // make_reg sets lease_expiry_ms = 0 via Default
     ]);
 
     let map = build_account_map(&snapshot).expect("must succeed");
-    assert!(map.get(&9001).is_some(), "zero lease_expiry_ms means no expiry — must be included");
+    assert!(
+        map.get(&9001).is_some(),
+        "zero lease_expiry_ms means no expiry — must be included"
+    );
 }
 
 /// `is_service_type` uses case-insensitive comparison so that the SDK tolerates
@@ -191,8 +287,10 @@ fn test_discovery_accepts_uppercase_service_type_for_legacy_oms() {
     snapshot.insert("svc.oms.oms_dev_1".to_string(), legacy_reg);
 
     let map = build_account_map(&snapshot).expect("must succeed");
-    assert!(map.get(&9001).is_some(),
-        "case-insensitive match must accept uppercase 'OMS' from legacy services");
+    assert!(
+        map.get(&9001).is_some(),
+        "case-insensitive match must accept uppercase 'OMS' from legacy services"
+    );
 }
 
 /// An entry whose KV key does NOT start with `svc.oms.` is excluded even if
@@ -216,7 +314,10 @@ fn test_discovery_ignores_oms_entry_with_wrong_key_prefix() {
     snapshot.insert("oms.dev.1".to_string(), miskeyed); // wrong prefix
 
     let map = build_account_map(&snapshot).expect("must succeed");
-    assert!(map.get(&9001).is_none(), "entry with wrong key prefix must be ignored");
+    assert!(
+        map.get(&9001).is_none(),
+        "entry with wrong key prefix must be ignored"
+    );
 }
 
 /// Expired refdata lease must not be returned by resolve_refdata_endpoint.
@@ -239,7 +340,10 @@ fn test_refdata_discovery_skips_expired_lease() {
     snapshot.insert("svc.refdata.refdata_dev_1".to_string(), expired);
 
     let endpoint = resolve_refdata_endpoint(&snapshot);
-    assert!(endpoint.is_none(), "expired refdata lease must not be returned");
+    assert!(
+        endpoint.is_none(),
+        "expired refdata lease must not be returned"
+    );
 }
 
 // ── resolve_refdata_endpoint tests ───────────────────────────────────────────
@@ -248,8 +352,20 @@ fn test_refdata_discovery_skips_expired_lease() {
 fn test_refdata_discovery_scans_svc_refdata_prefix() {
     let mut snapshot = HashMap::new();
     snapshot.extend([
-        make_reg("svc.oms.oms_dev_1", "oms", "oms_dev_1", vec![9001], "localhost:50051"),
-        make_reg("svc.refdata.refdata_dev_1", "refdata", "refdata_dev_1", vec![], "localhost:50070"),
+        make_reg(
+            "svc.oms.oms_dev_1",
+            "oms",
+            "oms_dev_1",
+            vec![9001],
+            "localhost:50051",
+        ),
+        make_reg(
+            "svc.refdata.refdata_dev_1",
+            "refdata",
+            "refdata_dev_1",
+            vec![],
+            "localhost:50070",
+        ),
     ]);
 
     let endpoint = resolve_refdata_endpoint(&snapshot);
@@ -259,9 +375,13 @@ fn test_refdata_discovery_scans_svc_refdata_prefix() {
 #[test]
 fn test_refdata_discovery_returns_none_when_not_present() {
     let mut snapshot = HashMap::new();
-    snapshot.extend([
-        make_reg("svc.oms.oms_dev_1", "oms", "oms_dev_1", vec![9001], "localhost:50051"),
-    ]);
+    snapshot.extend([make_reg(
+        "svc.oms.oms_dev_1",
+        "oms",
+        "oms_dev_1",
+        vec![9001],
+        "localhost:50051",
+    )]);
 
     let endpoint = resolve_refdata_endpoint(&snapshot);
     assert!(endpoint.is_none());

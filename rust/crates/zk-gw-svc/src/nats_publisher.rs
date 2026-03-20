@@ -16,10 +16,7 @@ impl NatsPublisher {
     ///
     /// Stamps `report.exchange` with `gw_id` so the OMS can identify the
     /// originating gateway (OMS uses `exchange` as `gw_key`).
-    pub async fn publish_order_report(
-        &self,
-        report: &zk_proto_rs::zk::exch_gw::v1::OrderReport,
-    ) {
+    pub async fn publish_order_report(&self, report: &zk_proto_rs::zk::exch_gw::v1::OrderReport) {
         let subject = format!("zk.gw.{}.report", self.gw_id);
         let mut stamped = report.clone();
         stamped.exchange = self.gw_id.clone();

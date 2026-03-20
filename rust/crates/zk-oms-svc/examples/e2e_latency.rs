@@ -80,9 +80,9 @@ use zk_proto_rs::zk::{
     },
 };
 
-use zk_oms_svc::proto::oms_svc::oms_service_client::OmsServiceClient;
 use zk_oms_svc::proto::gw_svc::gateway_simulator_admin_service_client::GatewaySimulatorAdminServiceClient;
-use zk_proto_rs::zk::gateway::v1::{ForceMatchRequest, FillMode};
+use zk_oms_svc::proto::oms_svc::oms_service_client::OmsServiceClient;
+use zk_proto_rs::zk::gateway::v1::{FillMode, ForceMatchRequest};
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -113,8 +113,8 @@ fn metrics_wait_secs() -> u64 {
         .unwrap_or(15)
 }
 
-const OMS_ID:     &str = "oms_dev_1";
-const ACCOUNT_ID: i64  = 9001;
+const OMS_ID: &str = "oms_dev_1";
+const ACCOUNT_ID: i64 = 9001;
 const INSTRUMENT: &str = "BTCUSDT_SIM";
 
 // ── Order ID counter ──────────────────────────────────────────────────────────
@@ -188,19 +188,19 @@ fn make_place_req(order_id: i64) -> PlaceOrderRequest {
     PlaceOrderRequest {
         order_request: Some(OrderRequest {
             order_id,
-            account_id:      ACCOUNT_ID,
+            account_id: ACCOUNT_ID,
             instrument_code: INSTRUMENT.into(),
-            buy_sell_type:   BuySellType::BsBuy as i32,
+            buy_sell_type: BuySellType::BsBuy as i32,
             open_close_type: OpenCloseType::OcOpen as i32,
-            order_type:      BasicOrderType::OrdertypeLimit as i32,
-            price:           50_000.0,
-            qty:             0.001,
-            source_id:       "e2e_bench".into(),
-            timestamp:       zk_oms_rs::utils::gen_timestamp_ms(),
+            order_type: BasicOrderType::OrdertypeLimit as i32,
+            price: 50_000.0,
+            qty: 0.001,
+            source_id: "e2e_bench".into(),
+            timestamp: zk_oms_rs::utils::gen_timestamp_ms(),
             ..Default::default()
         }),
-        audit_meta:       None,
-        idempotency_key:  String::new(),
+        audit_meta: None,
+        idempotency_key: String::new(),
     }
 }
 
@@ -209,10 +209,10 @@ fn make_cancel_req(order_id: i64) -> CancelOrderRequest {
         order_cancel_request: Some(OrderCancelRequest {
             order_id,
             exch_order_ref: String::new(), // OMS looks up exch_order_ref from snapshot
-            timestamp:      zk_oms_rs::utils::gen_timestamp_ms(),
+            timestamp: zk_oms_rs::utils::gen_timestamp_ms(),
             ..Default::default()
         }),
-        audit_meta:      None,
+        audit_meta: None,
         idempotency_key: String::new(),
     }
 }
@@ -227,7 +227,7 @@ async fn subscribe_order_updates(nats: &async_nats::Client) -> async_nats::Subsc
 /// Timestamps extracted from a matched `OrderUpdateEvent`.
 struct EventTimestamps {
     /// event.gw_report_timestamp_ns  (t5: GW publishes BOOKED)
-    gw_report_ns:   i64,
+    gw_report_ns: i64,
     /// event.gw_received_at_ns       (t4: GW handler entry)
     gw_received_ns: i64,
     /// event.timestamp × 1e6         (t7: OMS publishes event)
@@ -239,8 +239,8 @@ struct EventTimestamps {
 /// Wait for an `OrderUpdateEvent` with the given `order_id` and `target_status`.
 /// Returns `EventTimestamps` on success.
 async fn wait_for_status(
-    sub:           &mut async_nats::Subscriber,
-    order_id:      i64,
+    sub: &mut async_nats::Subscriber,
+    order_id: i64,
     target_status: OrderStatus,
 ) -> Result<EventTimestamps, String> {
     let deadline = Duration::from_secs(5);
@@ -261,7 +261,7 @@ async fn wait_for_status(
                             if status == target_status {
                                 let t8 = system_time_ns();
                                 return Ok(EventTimestamps {
-                                    gw_report_ns:   event.gw_report_timestamp_ns,
+                                    gw_report_ns: event.gw_report_timestamp_ns,
                                     gw_received_ns: event.gw_received_at_ns,
                                     oms_publish_ns: event.timestamp * 1_000_000,
                                     client_recv_ns: t8,
@@ -272,7 +272,7 @@ async fn wait_for_status(
                 }
             }
             Ok(None) => return Err("subscription closed".into()),
-            Err(_)   => {} // timeout — loop again
+            Err(_) => {} // timeout — loop again
         }
     }
 }
@@ -283,11 +283,11 @@ async fn wait_for_status(
 #[derive(Default)]
 struct BenchSamples {
     /// (t5 - t4) / 1e6: GW receive → BOOKED publish (bench-computed from event fields)
-    gw_ms:              Vec<f64>,
+    gw_ms: Vec<f64>,
     /// (t8 - t7) / 1e6: OMS publish → client receive
     nats_oms_client_ms: Vec<f64>,
     /// (t8 - t0) / 1e6: full end-to-end
-    total_ms:           Vec<f64>,
+    total_ms: Vec<f64>,
 }
 
 impl BenchSamples {
@@ -296,15 +296,21 @@ impl BenchSamples {
 
         if ts.gw_report_ns > 0 && ts.gw_received_ns > 0 {
             let gw = ts.gw_report_ns - ts.gw_received_ns;
-            if gw >= 0 { self.gw_ms.push(ns_to_ms(gw)); }
+            if gw >= 0 {
+                self.gw_ms.push(ns_to_ms(gw));
+            }
         }
         if ts.oms_publish_ns > 0 {
             let nats_c = ts.client_recv_ns - ts.oms_publish_ns;
-            if nats_c >= 0 { self.nats_oms_client_ms.push(ns_to_ms(nats_c)); }
+            if nats_c >= 0 {
+                self.nats_oms_client_ms.push(ns_to_ms(nats_c));
+            }
         }
         if order_created_ns > 0 {
             let total = ts.client_recv_ns - order_created_ns;
-            if total >= 0 { self.total_ms.push(ns_to_ms(total)); }
+            if total >= 0 {
+                self.total_ms.push(ns_to_ms(total));
+            }
         }
     }
 }
@@ -315,7 +321,10 @@ type MetricsBuf = Arc<Mutex<Vec<LatencyMetricBatch>>>;
 
 async fn start_metrics_subscriber(nats: &async_nats::Client) -> MetricsBuf {
     let subj = format!("zk.oms.{OMS_ID}.metrics.latency");
-    let mut sub = nats.subscribe(subj.clone()).await.expect("metrics subscribe failed");
+    let mut sub = nats
+        .subscribe(subj.clone())
+        .await
+        .expect("metrics subscribe failed");
     let buf: MetricsBuf = Arc::new(Mutex::new(Vec::new()));
     let buf2 = buf.clone();
 
@@ -338,7 +347,7 @@ async fn start_metrics_subscriber(nats: &async_nats::Client) -> MetricsBuf {
 /// Returns `(order_id, elapsed_us, event_timestamps, order_created_ns)`.
 async fn flow_place_booked(
     client: &mut OmsServiceClient<Channel>,
-    nats:   &async_nats::Client,
+    nats: &async_nats::Client,
 ) -> Result<(i64, f64, EventTimestamps, i64), String> {
     let order_id = next_id();
     let req = make_place_req(order_id);
@@ -358,14 +367,17 @@ async fn flow_place_booked(
 /// Flow 2: Place → Booked → Cancel → Cancelled.
 async fn flow_place_cancel(
     client: &mut OmsServiceClient<Channel>,
-    nats:   &async_nats::Client,
+    nats: &async_nats::Client,
 ) -> Result<(f64, EventTimestamps, i64), String> {
     let (order_id, _, _, _) = flow_place_booked(client, nats).await?;
 
     let mut sub = subscribe_order_updates(nats).await;
     let t_cancel = Instant::now();
 
-    client.cancel_order(make_cancel_req(order_id)).await.map_err(|e| e.to_string())?;
+    client
+        .cancel_order(make_cancel_req(order_id))
+        .await
+        .map_err(|e| e.to_string())?;
 
     let ts = wait_for_status(&mut sub, order_id, OrderStatus::Cancelled).await?;
     let cancel_us = t_cancel.elapsed().as_secs_f64() * 1_000_000.0;
@@ -380,8 +392,8 @@ async fn flow_place_cancel(
 /// trigger a fill deterministically via the admin `ForceMatch` RPC.
 async fn flow_place_filled(
     client: &mut OmsServiceClient<Channel>,
-    admin:  &mut GatewaySimulatorAdminServiceClient<Channel>,
-    nats:   &async_nats::Client,
+    admin: &mut GatewaySimulatorAdminServiceClient<Channel>,
+    nats: &async_nats::Client,
 ) -> Result<(f64, EventTimestamps, i64), String> {
     let order_id = next_id();
     let req = make_place_req(order_id);
@@ -396,12 +408,15 @@ async fn flow_place_filled(
     wait_for_status(&mut sub, order_id, OrderStatus::Booked).await?;
 
     // Trigger fill via admin ForceMatch.
-    admin.force_match(tonic::Request::new(ForceMatchRequest {
-        order_id,
-        fill_mode: FillMode::Full as i32,
-        publish_balance_update: true,
-        ..Default::default()
-    })).await.map_err(|e| format!("ForceMatch failed: {e}"))?;
+    admin
+        .force_match(tonic::Request::new(ForceMatchRequest {
+            order_id,
+            fill_mode: FillMode::Full as i32,
+            publish_balance_update: true,
+            ..Default::default()
+        }))
+        .await
+        .map_err(|e| format!("ForceMatch failed: {e}"))?;
 
     let ts = wait_for_status(&mut sub, order_id, OrderStatus::Filled).await?;
     let elapsed_us = t0.elapsed().as_secs_f64() * 1_000_000.0;
@@ -418,49 +433,103 @@ fn compute_oms_breakdown(batches: &[LatencyMetricBatch]) -> HashMap<String, Vec<
     for batch in batches {
         for metric in &batch.metrics {
             let get = |tag: &str| metric.tagged_timestamps.get(tag).copied().unwrap_or(0);
-            let t0  = get("t0");
-            let t1  = get("t1");
-            let t3  = get("t3");
+            let t0 = get("t0");
+            let t1 = get("t1");
+            let t3 = get("t3");
             let t3r = get("t3r");
-            let t4  = get("t4");
-            let t5  = get("t5");
-            let t6  = get("t6");
-            let t7  = get("t7");
+            let t4 = get("t4");
+            let t5 = get("t5");
+            let t6 = get("t6");
+            let t7 = get("t7");
 
-            if t3 > 0 && t0 > 0 { segments.entry("oms_order".into()).or_default().push(ns_to_ms(t3 - t0)); }
-            if t1 > 0 && t3 > 0 && t3 >= t1 { segments.entry("oms_through".into()).or_default().push(ns_to_ms(t3 - t1)); }
-            if t3r > 0 && t3 > 0 { segments.entry("rpc".into()).or_default().push(ns_to_ms(t3r - t3)); }
-            if t5 > 0 && t4 > 0 { segments.entry("gw_proc".into()).or_default().push(ns_to_ms(t5 - t4)); }
-            if t6 > 0 && t5 > 0 { segments.entry("nats_gw_oms".into()).or_default().push(ns_to_ms(t6 - t5)); }
-            if t7 > 0 && t6 > 0 { segments.entry("oms_report".into()).or_default().push(ns_to_ms(t7 - t6)); }
+            if t3 > 0 && t0 > 0 {
+                segments
+                    .entry("oms_order".into())
+                    .or_default()
+                    .push(ns_to_ms(t3 - t0));
+            }
+            if t1 > 0 && t3 > 0 && t3 >= t1 {
+                segments
+                    .entry("oms_through".into())
+                    .or_default()
+                    .push(ns_to_ms(t3 - t1));
+            }
+            if t3r > 0 && t3 > 0 {
+                segments
+                    .entry("rpc".into())
+                    .or_default()
+                    .push(ns_to_ms(t3r - t3));
+            }
+            if t5 > 0 && t4 > 0 {
+                segments
+                    .entry("gw_proc".into())
+                    .or_default()
+                    .push(ns_to_ms(t5 - t4));
+            }
+            if t6 > 0 && t5 > 0 {
+                segments
+                    .entry("nats_gw_oms".into())
+                    .or_default()
+                    .push(ns_to_ms(t6 - t5));
+            }
+            if t7 > 0 && t6 > 0 {
+                segments
+                    .entry("oms_report".into())
+                    .or_default()
+                    .push(ns_to_ms(t7 - t6));
+            }
         }
     }
     segments
 }
 
-fn print_breakdown(
-    bench: &BenchSamples,
-    oms_segs: &HashMap<String, Vec<f64>>,
-) {
+fn print_breakdown(bench: &BenchSamples, oms_segs: &HashMap<String, Vec<f64>>) {
     println!("\n=== Latency Breakdown ===");
-    println!("  {:<28} {:<8}  {:>14}  {:>14}  {:>14}  {:>14}  {:>6}", "Segment", "Tags", "p50", "p95", "p99", "max", "n");
+    println!(
+        "  {:<28} {:<8}  {:>14}  {:>14}  {:>14}  {:>14}  {:>6}",
+        "Segment", "Tags", "p50", "p95", "p99", "max", "n"
+    );
     println!("  {}", "-".repeat(100));
 
     // OMS-published segments
     let empty = vec![];
-    print_row("oms_order  client→gw_send",    "t3-t0",   oms_segs.get("oms_order").unwrap_or(&empty));
-    print_row("oms_through queue+core proc",  "t3-t1",   oms_segs.get("oms_through").unwrap_or(&empty));
-    print_row("rpc        gRPC round-trip",   "t3r-t3",  oms_segs.get("rpc").unwrap_or(&empty));
-    print_row("gw_proc    recv→BOOKED",       "t5-t4",   oms_segs.get("gw_proc").unwrap_or(&empty));
-    print_row("nats_gw→oms GW→OMS delivery", "t6-t5",   oms_segs.get("nats_gw_oms").unwrap_or(&empty));
-    print_row("oms_report OMS proc→publish",  "t7-t6",   oms_segs.get("oms_report").unwrap_or(&empty));
+    print_row(
+        "oms_order  client→gw_send",
+        "t3-t0",
+        oms_segs.get("oms_order").unwrap_or(&empty),
+    );
+    print_row(
+        "oms_through queue+core proc",
+        "t3-t1",
+        oms_segs.get("oms_through").unwrap_or(&empty),
+    );
+    print_row(
+        "rpc        gRPC round-trip",
+        "t3r-t3",
+        oms_segs.get("rpc").unwrap_or(&empty),
+    );
+    print_row(
+        "gw_proc    recv→BOOKED",
+        "t5-t4",
+        oms_segs.get("gw_proc").unwrap_or(&empty),
+    );
+    print_row(
+        "nats_gw→oms GW→OMS delivery",
+        "t6-t5",
+        oms_segs.get("nats_gw_oms").unwrap_or(&empty),
+    );
+    print_row(
+        "oms_report OMS proc→publish",
+        "t7-t6",
+        oms_segs.get("oms_report").unwrap_or(&empty),
+    );
 
     println!("  {}", "·".repeat(100));
 
     // Bench-measured segments
-    print_row("gw_ms      GW through (event)", "t5-t4",  &bench.gw_ms);
-    print_row("nats→client OMS→client",        "t8-t7",  &bench.nats_oms_client_ms);
-    print_row("total      end-to-end",          "t8-t0",  &bench.total_ms);
+    print_row("gw_ms      GW through (event)", "t5-t4", &bench.gw_ms);
+    print_row("nats→client OMS→client", "t8-t7", &bench.nats_oms_client_ms);
+    print_row("total      end-to-end", "t8-t0", &bench.total_ms);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -517,13 +586,17 @@ async fn main() {
             }
             Err(e) => {
                 f1_errors += 1;
-                if f1_errors <= 3 { eprintln!("  iter {i} error: {e}"); }
+                if f1_errors <= 3 {
+                    eprintln!("  iter {i} error: {e}");
+                }
             }
         }
     }
     let f1_secs = f1_start.elapsed().as_secs_f64();
     print_stats("Place→Booked", f1_samples, f1_secs);
-    if f1_errors > 0 { println!("  ERRORS: {f1_errors}/{n}"); }
+    if f1_errors > 0 {
+        println!("  ERRORS: {f1_errors}/{n}");
+    }
     println!();
 
     // ── Flow 2: Place → Booked → Cancel → Cancelled ───────────────────────────
@@ -539,13 +612,17 @@ async fn main() {
             }
             Err(e) => {
                 f2_errors += 1;
-                if f2_errors <= 3 { eprintln!("  iter {i} error: {e}"); }
+                if f2_errors <= 3 {
+                    eprintln!("  iter {i} error: {e}");
+                }
             }
         }
     }
     let f2_secs = f2_start.elapsed().as_secs_f64();
     print_stats("Cancel→Cancelled (from Booked)", f2_samples, f2_secs);
-    if f2_errors > 0 { println!("  ERRORS: {f2_errors}/{n}"); }
+    if f2_errors > 0 {
+        println!("  ERRORS: {f2_errors}/{n}");
+    }
     println!();
 
     // ── Flow 3: Place → Booked → ForceMatch → Filled ──────────────────────────
@@ -562,13 +639,17 @@ async fn main() {
             }
             Err(e) => {
                 f3_errors += 1;
-                if f3_errors <= 3 { eprintln!("  iter {i} error: {e}"); }
+                if f3_errors <= 3 {
+                    eprintln!("  iter {i} error: {e}");
+                }
             }
         }
     }
     let f3_secs = f3_start.elapsed().as_secs_f64();
     print_stats("Place→Filled (end-to-end)", f3_samples, f3_secs);
-    if f3_errors > 0 { println!("  ERRORS: {f3_errors}/{n3}"); }
+    if f3_errors > 0 {
+        println!("  ERRORS: {f3_errors}/{n3}");
+    }
 
     // ── Latency breakdown ─────────────────────────────────────────────────────
     // Wait for OMS to flush its latency metrics batch.
@@ -579,7 +660,11 @@ async fn main() {
     let batches = metrics_buf.lock().unwrap().drain(..).collect::<Vec<_>>();
     let oms_segs = compute_oms_breakdown(&batches);
     let total_oms_samples: usize = oms_segs.values().map(|v| v.len()).max().unwrap_or(0);
-    println!("OMS metrics batches received: {}  (≈{} order samples)", batches.len(), total_oms_samples);
+    println!(
+        "OMS metrics batches received: {}  (≈{} order samples)",
+        batches.len(),
+        total_oms_samples
+    );
 
     print_breakdown(&bench_samples, &oms_segs);
 }

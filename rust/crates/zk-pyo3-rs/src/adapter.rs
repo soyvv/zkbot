@@ -217,18 +217,15 @@ impl ZkQuantAdapter {
 
     /// Schedule a one-shot timer to fire at `date_time` (Python `datetime`).
     /// Mirrors `TokkaQuant.set_timer_clock(timer_name, date_time)`.
-    fn set_timer_clock(
-        &mut self,
-        timer_name: &str,
-        date_time: Bound<'_, PyAny>,
-    ) -> PyResult<()> {
+    fn set_timer_clock(&mut self, timer_name: &str, date_time: Bound<'_, PyAny>) -> PyResult<()> {
         // `.timestamp()` returns float unix seconds (handles timezone-aware or naive)
         let secs: f64 = date_time.call_method0("timestamp")?.extract()?;
         let fire_ts_ms = (secs * 1_000.0) as i64;
-        self.actions.push(SAction::SubscribeTimer(TimerSubscription {
-            timer_key: timer_name.to_string(),
-            schedule: TimerSchedule::OnceAt(fire_ts_ms),
-        }));
+        self.actions
+            .push(SAction::SubscribeTimer(TimerSubscription {
+                timer_key: timer_name.to_string(),
+                schedule: TimerSchedule::OnceAt(fire_ts_ms),
+            }));
         Ok(())
     }
 
@@ -246,11 +243,7 @@ impl ZkQuantAdapter {
 
     /// No-op in backtest. Mirrors `TokkaQuant.send_notification(...)`.
     #[pyo3(signature = (*_args, **_kwargs))]
-    fn send_notification(
-        &self,
-        _args: Bound<'_, PyTuple>,
-        _kwargs: Option<Bound<'_, PyDict>>,
-    ) {
+    fn send_notification(&self, _args: Bound<'_, PyTuple>, _kwargs: Option<Bound<'_, PyDict>>) {
         // intentionally ignored in backtest
     }
 }

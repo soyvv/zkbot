@@ -43,7 +43,10 @@ impl OmsChannelPool {
         new_endpoint: &OmsEndpoint,
     ) -> Result<(), SdkError> {
         let channel = connect_channel(new_endpoint).await?;
-        self.channels.write().await.insert(oms_id.to_string(), channel);
+        self.channels
+            .write()
+            .await
+            .insert(oms_id.to_string(), channel);
         Ok(())
     }
 }
@@ -52,9 +55,10 @@ async fn connect_channel(endpoint: &OmsEndpoint) -> Result<Channel, SdkError> {
     let uri = grpc_uri(&endpoint.grpc_address);
     let mut ep = Endpoint::from_shared(uri)?;
     if let Some(authority) = &endpoint.grpc_authority {
-        ep = ep.origin(format!("http://{authority}").parse().map_err(|e| {
-            SdkError::Config(format!("invalid gRPC authority '{authority}': {e}"))
-        })?);
+        ep =
+            ep.origin(format!("http://{authority}").parse().map_err(|e| {
+                SdkError::Config(format!("invalid gRPC authority '{authority}': {e}"))
+            })?);
     }
     Ok(ep.connect().await?)
 }

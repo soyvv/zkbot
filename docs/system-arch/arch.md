@@ -10,6 +10,7 @@ Topic-specific design notes live alongside it:
 - [Error Handling](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/error_handling.md)
 - [Venue Integration Modules](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/venue_integration.md)
 - [Service Discovery](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/service_discovery.md)
+- [Clock And Timer Design](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/clock_and_timer.md)
 - [RTMD Subscription Protocol](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/rtmd_subscription_protocol.md)
 - [API Contracts](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/api_contracts.md)
 - [Proto](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/proto.md)
@@ -106,11 +107,13 @@ Topic-specific design notes live alongside it:
 - Exposes gRPC command/query APIs for engines and control plane.
 - Publishes normalized order/trade/balance/position events to NATS.
 - Registers its gRPC endpoint in NATS KV keyed by `oms_id`.
+- Command success means accepted for asynchronous processing by OMS; execution outcome is asynchronous.
 
 ### 5.3 Trading Gateway
 
 - External venue connectivity boundary.
 - One gateway instance per account.
+- Command success means accepted for asynchronous processing by the gateway; venue outcome is asynchronous.
 - On startup, declares:
   - transport metadata (protocol/endpoint/capabilities)
   - account metadata (account id, venue, permissions)

@@ -89,11 +89,11 @@ pub struct RegistrationGrant {
 /// Services must also monitor fencing via [`wait_fenced`] and terminate if
 /// the CAS heartbeat detects a conflicting writer.
 pub struct ServiceRegistration {
-    kv:     Arc<KvRegistryClient>,
-    grant:  RegistrationGrant,
-    _hb:    JoinHandle<()>,
+    kv: Arc<KvRegistryClient>,
+    grant: RegistrationGrant,
+    _hb: JoinHandle<()>,
     /// NATS client kept for deregister notification in Pilot mode.
-    nats:   Option<async_nats::Client>,
+    nats: Option<async_nats::Client>,
     /// Receives `true` when the CAS heartbeat detects a conflicting writer.
     fenced: watch::Receiver<bool>,
 }
@@ -129,24 +129,25 @@ impl ServiceRegistration {
             .to_string();
 
         let grant = RegistrationGrant {
-            owner_session_id:  session_id,
-            lock_key:          kv_key.clone(),
-            lease_ttl_ms:      ttl.as_millis() as u64,
+            owner_session_id: session_id,
+            lock_key: kv_key.clone(),
+            lease_ttl_ms: ttl.as_millis() as u64,
             scoped_credential: None,
-            instance_id:       None,
-            kv_key:            kv_key.clone(),
+            instance_id: None,
+            kv_key: kv_key.clone(),
         };
 
         let (fenced_tx, fenced_rx) = watch::channel(false);
-        let hb = Arc::clone(&kv).heartbeat_loop(
-            kv_key,
-            value,
-            heartbeat_interval,
-            revision,
-            fenced_tx,
-        );
+        let hb =
+            Arc::clone(&kv).heartbeat_loop(kv_key, value, heartbeat_interval, revision, fenced_tx);
 
-        Ok(Self { kv, grant, _hb: hb, nats: None, fenced: fenced_rx })
+        Ok(Self {
+            kv,
+            grant,
+            _hb: hb,
+            nats: None,
+            fenced: fenced_rx,
+        })
     }
 
     // ── Pilot-bootstrap mode ─────────────────────────────────────────────────
@@ -173,10 +174,10 @@ impl ServiceRegistration {
         heartbeat_interval: Duration,
     ) -> Result<Self, RegistrationError> {
         let req = BootstrapRegisterRequest {
-            token:         token.to_string(),
-            logical_id:    logical_id.to_string(),
+            token: token.to_string(),
+            logical_id: logical_id.to_string(),
             instance_type: instance_type.to_string(),
-            env:           env.to_string(),
+            env: env.to_string(),
             runtime_info,
         };
 
@@ -191,7 +192,7 @@ impl ServiceRegistration {
 
         if resp.status != "OK" {
             return Err(RegistrationError::Pilot {
-                status:  resp.status,
+                status: resp.status,
                 message: resp.error_message,
             });
         }
@@ -207,16 +208,20 @@ impl ServiceRegistration {
         );
 
         let grant = RegistrationGrant {
-            owner_session_id:  resp.owner_session_id,
-            kv_key:            resp.kv_key.clone(),
-            lock_key:          resp.lock_key,
-            lease_ttl_ms:      resp.lease_ttl_ms as u64,
+            owner_session_id: resp.owner_session_id,
+            kv_key: resp.kv_key.clone(),
+            lock_key: resp.lock_key,
+            lease_ttl_ms: resp.lease_ttl_ms as u64,
             scoped_credential: if resp.scoped_credential.is_empty() {
                 None
             } else {
                 Some(resp.scoped_credential)
             },
-            instance_id: if resp.instance_id != 0 { Some(resp.instance_id) } else { None },
+            instance_id: if resp.instance_id != 0 {
+                Some(resp.instance_id)
+            } else {
+                None
+            },
         };
 
         let (fenced_tx, fenced_rx) = watch::channel(false);
@@ -228,7 +233,13 @@ impl ServiceRegistration {
             fenced_tx,
         );
 
-        Ok(Self { kv, grant, _hb: hb, nats: Some(nats.clone()), fenced: fenced_rx })
+        Ok(Self {
+            kv,
+            grant,
+            _hb: hb,
+            nats: Some(nats.clone()),
+            fenced: fenced_rx,
+        })
     }
 
     // ── Accessors ────────────────────────────────────────────────────────────
@@ -267,9 +278,9 @@ impl ServiceRegistration {
         if let Some(ref nats) = self.nats {
             let req = BootstrapDeregisterRequest {
                 owner_session_id: self.grant.owner_session_id.clone(),
-                logical_id:       String::new(),
-                instance_type:    String::new(),
-                env:              String::new(),
+                logical_id: String::new(),
+                instance_type: String::new(),
+                env: String::new(),
             };
             let payload = Bytes::from(req.encode_to_vec());
             let _ = nats.request("zk.bootstrap.deregister", payload).await;

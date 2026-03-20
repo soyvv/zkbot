@@ -3,11 +3,10 @@ use std::collections::{HashMap, VecDeque};
 use tracing::{error, warn};
 use zk_proto_rs::zk::{
     common::v1::{InstrumentRefData, Rejection},
-    exch_gw::v1::{ExchangeOrderStatus, ExchExecType, OrderReport, OrderReportType},
+    exch_gw::v1::{ExchExecType, ExchangeOrderStatus, OrderReport, OrderReportType},
     gateway::v1::SendOrderRequest as ExchSendOrderRequest,
     oms::v1::{
-        ExecMessage, ExecType, Fee, Order, OrderRequest, OrderStatus,
-        OrderUpdateEvent, Trade,
+        ExecMessage, ExecType, Fee, Order, OrderRequest, OrderStatus, OrderUpdateEvent, Trade,
     },
 };
 
@@ -156,13 +155,17 @@ impl OrderManager {
             cancel_attempts: 0,
         };
 
-        self.order_dict.insert(oms_order.order_id, oms_order.clone());
+        self.order_dict
+            .insert(oms_order.order_id, oms_order.clone());
         self.open_order_ids.insert(oms_order.order_id);
         oms_order
     }
 
     fn build_gw_order_req(&self, req: &OrderRequest, ctx: &OrderContext) -> ExchSendOrderRequest {
-        let ref_data = ctx.symbol_ref.as_ref().expect("symbol_ref required for gw req");
+        let ref_data = ctx
+            .symbol_ref
+            .as_ref()
+            .expect("symbol_ref required for gw req");
         let route = ctx.route.as_ref().expect("route required for gw req");
 
         let scaled_qty = if ref_data.qty_precision > 0 {
@@ -211,7 +214,12 @@ impl OrderManager {
         self.order_dict.get_mut(&order_id)
     }
 
-    pub fn get_order(&self, order_id: i64, gw_key: &str, exch_order_ref: &str) -> Option<&OmsOrder> {
+    pub fn get_order(
+        &self,
+        order_id: i64,
+        gw_key: &str,
+        exch_order_ref: &str,
+    ) -> Option<&OmsOrder> {
         if order_id != 0 {
             return self.order_dict.get(&order_id);
         }
@@ -278,7 +286,11 @@ impl OrderManager {
         self.order_dict.get(&oid)
     }
 
-    pub fn get_external_order_mut(&mut self, gw_key: &str, exch_order_ref: &str) -> Option<&mut OmsOrder> {
+    pub fn get_external_order_mut(
+        &mut self,
+        gw_key: &str,
+        exch_order_ref: &str,
+    ) -> Option<&mut OmsOrder> {
         let oid = self
             .external_order_dict
             .get(gw_key)
@@ -376,7 +388,11 @@ impl OrderManager {
 
     /// Process a gateway `OrderReport` and return 0 or 1 `OrderUpdateEvent`.
     pub fn update_with_report(&mut self, report: &OrderReport) -> Vec<OrderUpdateEvent> {
-        let order_id = if report.order_id != 0 { report.order_id } else { 0 };
+        let order_id = if report.order_id != 0 {
+            report.order_id
+        } else {
+            0
+        };
         let exch_order_ref = &report.exch_order_ref;
         let gw_key = &report.exchange;
         let ts = report.update_timestamp;
@@ -528,12 +544,12 @@ impl OrderManager {
                 }
 
                 OrderReportType::OrderRepTypeTrade => {
-                    if let Some(trade_report) =
-                        entry.report.as_ref().and_then(|r| match r {
-                            zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::TradeReport(t) => Some(t),
-                            _ => None,
-                        })
-                    {
+                    if let Some(trade_report) = entry.report.as_ref().and_then(|r| match r {
+                        zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::TradeReport(
+                            t,
+                        ) => Some(t),
+                        _ => None,
+                    }) {
                         let trade = Trade {
                             order_id: order.order_state.order_id,
                             ext_order_ref: order.order_state.exch_order_ref.clone(),
@@ -557,15 +573,14 @@ impl OrderManager {
                 }
 
                 OrderReportType::OrderRepTypeExec => {
-                    if let Some(exec_report) =
-                        entry.report.as_ref().and_then(|r| match r {
-                            zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::ExecReport(e) => Some(e),
-                            _ => None,
-                        })
-                    {
-                        let exec_type =
-                            ExchExecType::try_from(exec_report.exec_type)
-                                .unwrap_or(ExchExecType::Unspecified);
+                    if let Some(exec_report) = entry.report.as_ref().and_then(|r| match r {
+                        zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::ExecReport(e) => {
+                            Some(e)
+                        }
+                        _ => None,
+                    }) {
+                        let exec_type = ExchExecType::try_from(exec_report.exec_type)
+                            .unwrap_or(ExchExecType::Unspecified);
                         let oms_exec_type = match exec_type {
                             ExchExecType::Rejected => ExecType::PlacingOrder,
                             ExchExecType::CancelReject => ExecType::Cancel,
@@ -592,12 +607,12 @@ impl OrderManager {
                 }
 
                 OrderReportType::OrderRepTypeFee => {
-                    if let Some(fee_report) =
-                        entry.report.as_ref().and_then(|r| match r {
-                            zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::FeeReport(f) => Some(f),
-                            _ => None,
-                        })
-                    {
+                    if let Some(fee_report) = entry.report.as_ref().and_then(|r| match r {
+                        zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::FeeReport(f) => {
+                            Some(f)
+                        }
+                        _ => None,
+                    }) {
                         let fee = Fee {
                             order_id: order.order_state.order_id,
                             fee_amount: fee_report.fee_qty,
@@ -621,7 +636,11 @@ impl OrderManager {
             finalize_avg_price(order);
             order.order_state.snapshot_version += 1;
 
-            let ts_event = if self.use_time_emulation { ts } else { gen_timestamp_ms() };
+            let ts_event = if self.use_time_emulation {
+                ts
+            } else {
+                gen_timestamp_ms()
+            };
             let mut event = OrderUpdateEvent::default();
             event.order_id = resolved_order_id;
             event.account_id = order.order_state.account_id;
@@ -658,7 +677,10 @@ impl OrderManager {
     // External (non-OMS) order handling
     // ------------------------------------------------------------------
 
-    pub fn handle_external_order_report(&mut self, report: &mut OrderReport) -> Option<OrderUpdateEvent> {
+    pub fn handle_external_order_report(
+        &mut self,
+        report: &mut OrderReport,
+    ) -> Option<OrderUpdateEvent> {
         let gw_key = report.exchange.clone();
         let exch_order_ref = report.exch_order_ref.clone();
 
@@ -732,7 +754,13 @@ impl OrderManager {
 // Pure functions (no &mut self) used by OrderManager
 // ---------------------------------------------------------------------------
 
-fn apply_order_error(order: &mut OmsOrder, error_msg: &str, ts: i64, exec_type: i32, rejection: Rejection) {
+fn apply_order_error(
+    order: &mut OmsOrder,
+    error_msg: &str,
+    ts: i64,
+    exec_type: i32,
+    rejection: Rejection,
+) {
     let mut exec_msg = ExecMessage::default();
     exec_msg.order_id = order.order_id;
     exec_msg.exec_type = exec_type;
@@ -774,16 +802,10 @@ fn map_order_status(gw_status: ExchangeOrderStatus) -> OrderStatus {
 }
 
 fn can_update_status(old: OrderStatus, new: OrderStatus) -> bool {
-    !matches!(old, OrderStatus::Cancelled | OrderStatus::Filled)
-        && new != OrderStatus::Unspecified
+    !matches!(old, OrderStatus::Cancelled | OrderStatus::Filled) && new != OrderStatus::Unspecified
 }
 
-fn infer_trade_price(
-    orig_qty: f64,
-    orig_avg: f64,
-    new_qty: f64,
-    new_avg: f64,
-) -> Option<f64> {
+fn infer_trade_price(orig_qty: f64, orig_avg: f64, new_qty: f64, new_avg: f64) -> Option<f64> {
     if new_qty == 0.0 {
         return None;
     }
@@ -841,7 +863,11 @@ fn infer_state_entry(
 
     let total_qty = new_qty + order.acc_trades_filled_qty;
     if total_qty > order.order_state.qty {
-        warn!(total_qty, order_qty = order.order_state.qty, "trades exceed order qty");
+        warn!(
+            total_qty,
+            order_qty = order.order_state.qty,
+            "trades exceed order qty"
+        );
         return None;
     }
     let avg_price = if total_qty != 0.0 {
@@ -856,7 +882,9 @@ fn infer_state_entry(
         ExchangeOrderStatus::ExchOrderStatusPartialFilled
     };
 
-    use zk_proto_rs::zk::exch_gw::v1::{order_report_entry::Report, OrderReportEntry, OrderStateReport};
+    use zk_proto_rs::zk::exch_gw::v1::{
+        order_report_entry::Report, OrderReportEntry, OrderStateReport,
+    };
     Some(OrderReportEntry {
         report_type: OrderReportType::OrderRepTypeState as i32,
         report: Some(Report::OrderStateReport(OrderStateReport {
@@ -877,8 +905,7 @@ fn finalize_avg_price(order: &mut OmsOrder) {
         && order.order_state.filled_avg_price == 0.0
         && order.acc_trades_filled_qty != 0.0
     {
-        order.order_state.filled_avg_price =
-            order.acc_trades_value / order.acc_trades_filled_qty;
+        order.order_state.filled_avg_price = order.acc_trades_value / order.acc_trades_filled_qty;
     }
 }
 

@@ -82,8 +82,17 @@ fn make_oms() -> OmsCore {
         ..InstrumentTradingConfig::default_for(INSTRUMENT)
     }];
 
-    let confdata = ConfdataManager::new(oms_config, account_routes, gw_configs, refdata, trading_configs);
-    OmsCore::new(confdata, /*use_time_emulation=*/ true, /*risk_check=*/ false, /*external=*/ false, 50_000)
+    let confdata = ConfdataManager::new(
+        oms_config,
+        account_routes,
+        gw_configs,
+        refdata,
+        trading_configs,
+    );
+    OmsCore::new(
+        confdata, /*use_time_emulation=*/ true, /*risk_check=*/ false,
+        /*external=*/ false, 50_000,
+    )
 }
 
 // ---------------------------------------------------------------------------

@@ -3,13 +3,13 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsResponse {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub timestamp: i64,
-    #[prost(enumeration="oms_response::Status", tag="2")]
+    #[prost(enumeration = "oms_response::Status", tag = "2")]
     pub status: i32,
-    #[prost(enumeration="OmsErrorType", tag="3")]
+    #[prost(enumeration = "OmsErrorType", tag = "3")]
     pub error_type: i32,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub message: ::prost::alloc::string::String,
 }
 /// Nested message and enum types in `OMSResponse`.
@@ -47,164 +47,163 @@ pub mod oms_response {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsPlaceOrderRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub order_request: ::core::option::Option<super::oms::OrderRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsCancelOrderRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub order_cancel_request: ::core::option::Option<super::oms::OrderCancelRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsBatchPlaceOrdersRequest {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub order_requests: ::prost::alloc::vec::Vec<super::oms::OrderRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsBatchCancelOrdersRequest {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub order_cancel_requests: ::prost::alloc::vec::Vec<super::oms::OrderCancelRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsAlgoOrderRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub algo_order_id: i64,
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub order_requests: ::prost::alloc::vec::Vec<super::oms::OrderRequest>,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub algo_type: ::prost::alloc::string::String,
     /// TBA
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub algo_config: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct OmsCancelAlgoOrderRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub algo_order_id: i64,
 }
 /// todo: TBA
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
-pub struct OmsReloadConfRequest {
-}
+pub struct OmsReloadConfRequest {}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct OmsQueryAccountRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
     /// query gw for most up-to-date data
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsAccountBalanceEntry {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub symbol: ::prost::alloc::string::String,
-    #[prost(double, tag="2")]
+    #[prost(double, tag = "2")]
     pub avail: f64,
-    #[prost(double, tag="3")]
+    #[prost(double, tag = "3")]
     pub frozen: f64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsAccountResponse {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub account_balance_entries: ::prost::alloc::vec::Vec<super::oms::Position>,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub timestamp: i64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct OmsQueryPositionRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
     /// query gw for most up-to-date data
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsPositionResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub positions: ::prost::alloc::vec::Vec<super::oms::Position>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct OmsQueryOpenOrderRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
     /// query gw for most up-to-date data
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryOrderDetailRequest {
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub order_refs: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// query gw for most up-to-date data
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsOrderDetailResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub orders: ::prost::alloc::vec::Vec<super::oms::Order>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQeuryTradeDetailRequest {
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub order_refs: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// todo: other criteria?
     ///
     /// query gw for most up-to-date data
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsTradeDetailResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub trades: ::prost::alloc::vec::Vec<super::oms::Trade>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PanicRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub panic_account_id: i64,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub panic_message: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub panic_source: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct DontPanicRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub panic_account_id: i64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryInstrumentRefdataRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub instruments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryInstrumentRefdataResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub instrument_refdata: ::prost::alloc::vec::Vec<super::common::InstrumentRefData>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

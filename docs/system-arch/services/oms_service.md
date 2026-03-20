@@ -26,7 +26,8 @@ Intent:
 
 - one writer task owns `OmsCore` mutations
 - queries read lock-free snapshots
-- gateway dispatch, Redis writes, and NATS publication happen on the mutation path
+- gateway, Redis, and NATS side effects are emitted by the writer but executed through bounded async workers
+- snapshot mutation remains writer-owned
 
 Logical shape:
 
@@ -36,9 +37,10 @@ gRPC mutations / GW reports
         v
   OmsCore writer task
         |
-        +-- gateway actions
-        +-- NATS publish
-        +-- Redis sync
+        +-- snapshot update
+        +-- gateway action enqueue
+        +-- publish enqueue
+        +-- persist enqueue
         |
         v
    snapshot swap
@@ -48,6 +50,17 @@ gRPC mutations / GW reports
 ```
 
 This keeps mutation order deterministic while making read APIs cheap.
+
+Gateway action execution should be parallelized after the writer, not inside it.
+
+Recommended executor shape:
+
+- gateway executor sharded by `order_id` hash within each `gw_id`
+- persistence executor sharded by `account_id`
+- publish executor sharded by `order_id` for order updates and `account_id` for account-level updates
+
+The gateway shard count should be configurable. Routing by `order_id` keeps send/cancel ordered
+for one order while avoiding a single FIFO bottleneck per gateway.
 
 ## Performance Design Best Practices
 
@@ -61,6 +74,13 @@ OMS should explicitly follow the system performance rules for latency-sensitive 
   contending on mutexes/RwLocks with the writer
 - keep mutation sequencing deterministic so gateway actions, event publication, Redis sync, and
   snapshot publication all reflect the same ordered state transition stream
+
+OMS command ACK semantics should be explicit:
+
+- success means the request was validated and accepted for asynchronous processing by OMS
+- success does not mean the order was already enqueued, sent to the gateway, or accepted by the venue
+- downstream send/reject/fill state arrives asynchronously through gateway reports or synthetic
+  failure events
 
 The practical rule is: single writer for mutation, lock-free readers for queries, and no per-read
 cloning of the full OMS state.
@@ -94,6 +114,13 @@ Mutation outputs:
 - NATS `OrderUpdateEvent`, balance, position, and system events
 - Redis order/open-order/balance/position state updates
 - a fresh immutable `OmsSnapshot`
+
+For place/cancel commands:
+
+- OMS should reply after the request is validated and accepted for asynchronous processing
+- OMS should not wait for the actual gateway RPC round trip on the writer path
+- internal dispatch drops, queue issues, or gateway/send failures after ACK must re-enter OMS as explicit asynchronous failure
+  events or timeout/recheck outcomes
 
 On gateway restart or reconnect, OMS should trigger a bounded resync for affected accounts.
 

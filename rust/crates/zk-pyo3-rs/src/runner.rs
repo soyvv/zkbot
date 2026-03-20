@@ -27,6 +27,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 use zk_backtest_rs::{
     backtester::{BacktestConfig, Backtester, InitDataFetcher},
     event_queue::BtEventKind,
@@ -36,8 +38,6 @@ use zk_proto_rs::zk::{
     common::v1::{BuySellType, InstrumentRefData},
     rtmd::v1::{kline::KlineType, Kline},
 };
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::py_strategy::PyStrategyAdapter;
 
@@ -81,9 +81,7 @@ impl RustBacktester {
             .map(|d| parse_refdata(d))
             .collect::<PyResult<_>>()?;
 
-        let init_bals = init_balances
-            .map(|d| parse_init_balances(&d))
-            .transpose()?;
+        let init_bals = init_balances.map(|d| parse_init_balances(&d)).transpose()?;
 
         let init_pos = init_positions
             .map(|d| parse_init_balances(&d))
@@ -143,7 +141,8 @@ impl RustBacktester {
         self.pending_bars.push((ts_ms, BtEventKind::Bar(kline)));
 
         if self.include_klines {
-            self.pending_klines.push((ts_ms, symbol.to_string(), open, high, low, close, volume));
+            self.pending_klines
+                .push((ts_ms, symbol.to_string(), open, high, low, close, volume));
         }
     }
 
@@ -225,7 +224,11 @@ impl RustBacktester {
                 d.set_item("price", o.price)?;
                 d.set_item(
                     "side",
-                    if o.side == BuySellType::BsBuy as i32 { "BUY" } else { "SELL" },
+                    if o.side == BuySellType::BsBuy as i32 {
+                        "BUY"
+                    } else {
+                        "SELL"
+                    },
                 )?;
                 Ok::<_, PyErr>(d.into_py(py))
             })
@@ -255,7 +258,11 @@ impl RustBacktester {
                 d.set_item("symbol", t.instrument.as_str())?;
                 d.set_item(
                     "side",
-                    if t.buy_sell_type == BuySellType::BsBuy as i32 { "BUY" } else { "SELL" },
+                    if t.buy_sell_type == BuySellType::BsBuy as i32 {
+                        "BUY"
+                    } else {
+                        "SELL"
+                    },
                 )?;
                 d.set_item("price", t.filled_price)?;
                 d.set_item("qty", t.filled_qty)?;
@@ -350,9 +357,7 @@ fn parse_refdata(d: &Bound<'_, PyDict>) -> PyResult<InstrumentRefData> {
     })
 }
 
-fn parse_init_balances(
-    d: &Bound<'_, PyDict>,
-) -> PyResult<HashMap<i64, HashMap<String, f64>>> {
+fn parse_init_balances(d: &Bound<'_, PyDict>) -> PyResult<HashMap<i64, HashMap<String, f64>>> {
     let mut out: HashMap<i64, HashMap<String, f64>> = HashMap::new();
     for (k, v) in d.iter() {
         let acc_id: i64 = k.extract()?;

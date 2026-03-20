@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use zk_proto_rs::{
+    ods::{GwConfigEntry, OmsRouteEntry},
     zk::{
         exch_gw::v1::PositionReport,
         oms::v1::{Balance, BalanceUpdateEvent},
     },
-    ods::{GwConfigEntry, OmsRouteEntry},
 };
 
 use crate::models::ExchBalanceSnapshot;
@@ -25,10 +25,7 @@ pub struct BalanceManager {
 }
 
 impl BalanceManager {
-    pub fn new(
-        account_routes: &[OmsRouteEntry],
-        gw_configs: &[GwConfigEntry],
-    ) -> Self {
+    pub fn new(account_routes: &[OmsRouteEntry], gw_configs: &[GwConfigEntry]) -> Self {
         let mut mgr = Self {
             exch_balances: HashMap::new(),
             account_reverse_map: HashMap::new(),
@@ -77,18 +74,11 @@ impl BalanceManager {
     // Read
     // ------------------------------------------------------------------
 
-    pub fn get_balance(
-        &self,
-        account_id: i64,
-        asset: &str,
-    ) -> Option<&ExchBalanceSnapshot> {
+    pub fn get_balance(&self, account_id: i64, asset: &str) -> Option<&ExchBalanceSnapshot> {
         self.exch_balances.get(&account_id)?.get(asset)
     }
 
-    pub fn get_balances_for_account(
-        &self,
-        account_id: i64,
-    ) -> Vec<&ExchBalanceSnapshot> {
+    pub fn get_balances_for_account(&self, account_id: i64) -> Vec<&ExchBalanceSnapshot> {
         self.exch_balances
             .get(&account_id)
             .map(|m| m.values().collect())
@@ -155,11 +145,7 @@ impl BalanceManager {
     // ------------------------------------------------------------------
 
     /// Build a `BalanceUpdateEvent` from exchange-owned balance state.
-    pub fn build_balance_snapshot(
-        &self,
-        account_id: i64,
-        ts: i64,
-    ) -> BalanceUpdateEvent {
+    pub fn build_balance_snapshot(&self, account_id: i64, ts: i64) -> BalanceUpdateEvent {
         let balances = self.get_balances_for_account(account_id);
         BalanceUpdateEvent {
             account_id,
@@ -175,9 +161,7 @@ impl BalanceManager {
     // Snapshot helpers (for read replica)
     // ------------------------------------------------------------------
 
-    pub fn snapshot_exch_balances(
-        &self,
-    ) -> HashMap<i64, HashMap<String, ExchBalanceSnapshot>> {
+    pub fn snapshot_exch_balances(&self) -> HashMap<i64, HashMap<String, ExchBalanceSnapshot>> {
         self.exch_balances.clone()
     }
 }

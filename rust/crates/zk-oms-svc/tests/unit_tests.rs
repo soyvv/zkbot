@@ -19,16 +19,12 @@ use arc_swap::ArcSwap;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use zk_oms_rs::{
-    config::ConfdataManager,
-    models::OmsOrder,
-    oms_core_v2::OmsCoreV2,
-};
+use zk_oms_rs::{config::ConfdataManager, models::OmsOrder, oms_core_v2::OmsCoreV2};
 use zk_proto_rs::{
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     zk::{
         common::v1::InstrumentRefData,
-        oms::v1::{oms_response, OmsResponse, OrderRequest, OmsErrorType},
+        oms::v1::{oms_response, OmsErrorType, OmsResponse, OrderRequest},
     },
 };
 
@@ -39,28 +35,28 @@ use zk_oms_svc::oms_actor::{self, OmsCommand, ReadReplica};
 /// Build a minimal `ConfdataManager` suitable for unit tests.
 fn test_confdata(oms_id: &str) -> ConfdataManager {
     let oms_cfg = OmsConfigEntry {
-        oms_id:              oms_id.to_string(),
+        oms_id: oms_id.to_string(),
         managed_account_ids: vec![9001],
         ..Default::default()
     };
     let route = OmsRouteEntry {
-        account_id:       9001,
-        gw_key:           "gw_mock_1".into(),
+        account_id: 9001,
+        gw_key: "gw_mock_1".into(),
         exch_account_id: "TEST_ACCT".into(),
         ..Default::default()
     };
     let gw_cfg = GwConfigEntry {
-        gw_key:        "gw_mock_1".into(),
-        exch_name:     "MOCK_EXCH".into(),
-        rpc_endpoint:  "localhost:50061".into(),
+        gw_key: "gw_mock_1".into(),
+        exch_name: "MOCK_EXCH".into(),
+        rpc_endpoint: "localhost:50061".into(),
         ..Default::default()
     };
     let refdata = InstrumentRefData {
-        instrument_id:          "BTC-USDT".into(),
+        instrument_id: "BTC-USDT".into(),
         instrument_id_exchange: "BTC-USDT".into(),
-        exchange_name:          "MOCK_EXCH".into(),
-        instrument_type:        1, // SPOT
-        disabled:               false,
+        exchange_name: "MOCK_EXCH".into(),
+        instrument_type: 1, // SPOT
+        disabled: false,
         ..Default::default()
     };
     ConfdataManager::new(oms_cfg, vec![route], vec![gw_cfg], vec![refdata], vec![])
@@ -73,13 +69,13 @@ fn test_order_req(order_id: i64, account_id: i64) -> OrderRequest {
         order_id,
         account_id,
         instrument_code: "BTC-USDT".into(),
-        buy_sell_type:   BuySellType::BsBuy as i32,
+        buy_sell_type: BuySellType::BsBuy as i32,
         open_close_type: OpenCloseType::OcOpen as i32,
-        order_type:      BasicOrderType::OrdertypeLimit as i32,
-        price:           50_000.0,
-        qty:             0.01,
-        source_id:       "test_strategy".into(),
-        timestamp:       zk_oms_rs::utils::gen_timestamp_ms(),
+        order_type: BasicOrderType::OrdertypeLimit as i32,
+        price: 50_000.0,
+        qty: 0.01,
+        source_id: "test_strategy".into(),
+        timestamp: zk_oms_rs::utils::gen_timestamp_ms(),
         ..Default::default()
     }
 }
@@ -96,7 +92,9 @@ async fn spawn_test_actor(
 
     // Build initial snapshot from empty core.
     use zk_oms_rs::snapshot_v2::OmsSnapshotWriterV2;
-    use zk_oms_svc::oms_actor::{build_managed_positions, build_exch_positions, build_exch_balances};
+    use zk_oms_svc::oms_actor::{
+        build_exch_balances, build_exch_positions, build_managed_positions,
+    };
 
     let snap_meta = Arc::new(core.build_snapshot_metadata());
     let mut snap_writer = OmsSnapshotWriterV2::new(snap_meta);
@@ -113,23 +111,29 @@ async fn spawn_test_actor(
     let replica: ReadReplica = Arc::new(ArcSwap::new(Arc::new(initial_snap)));
 
     let replica2 = replica.clone();
-    tokio::spawn(simple_test_writer_loop(core, snap_writer, cmd_rx, replica2, shutdown));
+    tokio::spawn(simple_test_writer_loop(
+        core,
+        snap_writer,
+        cmd_rx,
+        replica2,
+        shutdown,
+    ));
 
     (cmd_tx, replica)
 }
 
 /// Simplified writer loop for unit tests — no NATS/Redis/GW.
 async fn simple_test_writer_loop(
-    mut core:    OmsCoreV2,
-    mut writer:  zk_oms_rs::snapshot_v2::OmsSnapshotWriterV2,
-    mut rx:      mpsc::Receiver<OmsCommand>,
-    replica:     ReadReplica,
-    shutdown:    CancellationToken,
+    mut core: OmsCoreV2,
+    mut writer: zk_oms_rs::snapshot_v2::OmsSnapshotWriterV2,
+    mut rx: mpsc::Receiver<OmsCommand>,
+    replica: ReadReplica,
+    shutdown: CancellationToken,
 ) {
     use zk_oms_rs::{models_v2::OmsActionV2, utils::gen_timestamp_ms};
     use zk_oms_svc::oms_actor::{
-        build_managed_positions, build_exch_positions, build_exch_balances,
-        build_snapshot_order_from_live, build_snapshot_detail_from_core,
+        build_exch_balances, build_exch_positions, build_managed_positions,
+        build_snapshot_detail_from_core, build_snapshot_order_from_live,
     };
 
     loop {
@@ -259,9 +263,10 @@ async fn test_place_order_updates_snapshot() {
     let order_id = 1001;
     let _resp = send_cmd(&cmd_tx, |reply| OmsCommand::PlaceOrder {
         oms_received_ns: 0,
-        req:   test_order_req(order_id, 9001),
+        req: test_order_req(order_id, 9001),
         reply,
-    }).await;
+    })
+    .await;
 
     // Allow snapshot to propagate.
     tokio::time::sleep(Duration::from_millis(10)).await;
@@ -272,7 +277,10 @@ async fn test_place_order_updates_snapshot() {
         "order {order_id} should appear in snapshot"
     );
     assert!(
-        snap.open_order_ids_by_account.get(&9001).map(|s| s.contains(&order_id)).unwrap_or(false),
+        snap.open_order_ids_by_account
+            .get(&9001)
+            .map(|s| s.contains(&order_id))
+            .unwrap_or(false),
         "order {order_id} should be in open set"
     );
     shutdown.cancel();
@@ -290,14 +298,18 @@ async fn test_duplicate_order_id_rejected_by_core() {
     let order_id = 2001;
     let _first = send_cmd(&cmd_tx, |reply| OmsCommand::PlaceOrder {
         oms_received_ns: 0,
-        req:   test_order_req(order_id, 9001),
+        req: test_order_req(order_id, 9001),
         reply,
-    }).await;
+    })
+    .await;
 
     // After first placement the order should exist.
     tokio::time::sleep(Duration::from_millis(10)).await;
     let snap = replica.load();
-    assert!(snap.orders.contains_key(&order_id), "first order must be accepted");
+    assert!(
+        snap.orders.contains_key(&order_id),
+        "first order must be accepted"
+    );
 
     shutdown.cancel();
 }
@@ -313,7 +325,8 @@ async fn test_panic_sets_snapshot() {
     let _resp = send_cmd(&cmd_tx, |reply| OmsCommand::Panic {
         account_id: 9001,
         reply,
-    }).await;
+    })
+    .await;
 
     tokio::time::sleep(Duration::from_millis(10)).await;
     let snap = replica.load();
@@ -334,12 +347,20 @@ async fn test_clear_panic() {
     tokio::time::sleep(Duration::from_millis(10)).await;
 
     // Set panic
-    send_cmd(&cmd_tx, |reply| OmsCommand::Panic { account_id: 9001, reply }).await;
+    send_cmd(&cmd_tx, |reply| OmsCommand::Panic {
+        account_id: 9001,
+        reply,
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(10)).await;
     assert!(replica.load().panic_accounts.contains(&9001));
 
     // Clear panic
-    send_cmd(&cmd_tx, |reply| OmsCommand::DontPanic { account_id: 9001, reply }).await;
+    send_cmd(&cmd_tx, |reply| OmsCommand::DontPanic {
+        account_id: 9001,
+        reply,
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(10)).await;
     assert!(
         !replica.load().panic_accounts.contains(&9001),
@@ -361,13 +382,17 @@ async fn test_snapshot_seq_increments() {
 
     send_cmd(&cmd_tx, |reply| OmsCommand::PlaceOrder {
         oms_received_ns: 0,
-        req:   test_order_req(3001, 9001),
+        req: test_order_req(3001, 9001),
         reply,
-    }).await;
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(10)).await;
 
     let seq_after = replica.load().seq;
-    assert!(seq_after > seq_before, "seq should increment after mutation");
+    assert!(
+        seq_after > seq_before,
+        "seq should increment after mutation"
+    );
 
     shutdown.cancel();
 }
@@ -384,7 +409,8 @@ async fn test_reload_config() {
     let resp = send_cmd(&cmd_tx, |reply| OmsCommand::ReloadConfig {
         new_config: new_confdata,
         reply,
-    }).await;
+    })
+    .await;
 
     assert_eq!(
         resp.status,
@@ -405,13 +431,19 @@ fn test_redis_key_order() {
 #[test]
 fn test_redis_key_open_orders() {
     use zk_infra_rs::redis::key;
-    assert_eq!(key::open_orders("oms_dev_1", 9001), "oms:oms_dev_1:open_orders:9001");
+    assert_eq!(
+        key::open_orders("oms_dev_1", 9001),
+        "oms:oms_dev_1:open_orders:9001"
+    );
 }
 
 #[test]
 fn test_redis_key_balance() {
     use zk_infra_rs::redis::key;
-    assert_eq!(key::balance("oms_dev_1", 9001, "USDT"), "oms:oms_dev_1:balance:9001:USDT");
+    assert_eq!(
+        key::balance("oms_dev_1", 9001, "USDT"),
+        "oms:oms_dev_1:balance:9001:USDT"
+    );
 }
 
 // ── PersistedOrder round-trip ─────────────────────────────────────────────────
@@ -422,30 +454,30 @@ fn test_persisted_order_roundtrip() {
     use zk_proto_rs::zk::oms::v1::Order;
 
     let mut order_state = Order::default();
-    order_state.order_id        = 9999;
-    order_state.account_id      = 1;
-    order_state.instrument      = "ETH-USDT".into();
-    order_state.price           = 3000.0;
-    order_state.qty             = 1.0;
-    order_state.order_status    = 1; // PENDING
-    order_state.gw_key          = "gw_mock_1".into();
+    order_state.order_id = 9999;
+    order_state.account_id = 1;
+    order_state.instrument = "ETH-USDT".into();
+    order_state.price = 3000.0;
+    order_state.qty = 1.0;
+    order_state.order_status = 1; // PENDING
+    order_state.gw_key = "gw_mock_1".into();
 
     let oms_order = OmsOrder {
-        is_from_external:      false,
-        order_id:              9999,
-        account_id:            1,
-        exch_order_ref:        Some("EX_REF_123".into()),
-        oms_req:               None,
-        gw_req:                None,
-        cancel_req:            None,
+        is_from_external: false,
+        order_id: 9999,
+        account_id: 1,
+        exch_order_ref: Some("EX_REF_123".into()),
+        oms_req: None,
+        gw_req: None,
+        cancel_req: None,
         order_state,
-        trades:                vec![],
+        trades: vec![],
         acc_trades_filled_qty: 0.0,
-        acc_trades_value:      0.0,
+        acc_trades_value: 0.0,
         order_inferred_trades: vec![],
-        exec_msgs:             vec![],
-        fees:                  vec![],
-        cancel_attempts:       0,
+        exec_msgs: vec![],
+        fees: vec![],
+        cancel_attempts: 0,
     };
 
     let persisted = PersistedOrder::from_oms_order(&oms_order);
@@ -492,7 +524,9 @@ fn test_config_defaults() {
 fn snapshot_with_positions() -> zk_oms_rs::snapshot_v2::OmsSnapshotV2 {
     use std::collections::HashMap;
     use zk_oms_rs::models::{ExchBalanceSnapshot, ExchPositionSnapshot, ReconcileStatus};
-    use zk_oms_rs::snapshot_v2::{OmsSnapshotV2, OmsSnapshotWriterV2, SnapshotMetadata, SnapshotManagedPosition};
+    use zk_oms_rs::snapshot_v2::{
+        OmsSnapshotV2, OmsSnapshotWriterV2, SnapshotManagedPosition, SnapshotMetadata,
+    };
     use zk_proto_rs::zk::oms::v1::{Balance, Position};
 
     let meta = Arc::new(SnapshotMetadata {
@@ -559,7 +593,14 @@ fn snapshot_with_positions() -> zk_oms_rs::snapshot_v2::OmsSnapshotV2 {
     );
 
     let mut writer = OmsSnapshotWriterV2::new(meta);
-    writer.publish(managed_positions, exch_positions, exch_balances, vec![], vec![], 0)
+    writer.publish(
+        managed_positions,
+        exch_positions,
+        exch_balances,
+        vec![],
+        vec![],
+        0,
+    )
 }
 
 /// query_position(query_gw=false) returns OMS-managed positions via metadata.
@@ -579,7 +620,10 @@ fn test_query_position_managed() {
         .unwrap_or_default();
 
     assert_eq!(positions.len(), 1);
-    let btc = positions.iter().find(|p| p.instrument_code == "BTC-PERP").unwrap();
+    let btc = positions
+        .iter()
+        .find(|p| p.instrument_code == "BTC-PERP")
+        .unwrap();
     assert!((btc.total_qty - 1.5).abs() < f64::EPSILON);
 }
 
@@ -600,7 +644,10 @@ fn test_query_position_from_exch() {
         .unwrap_or_default();
 
     assert_eq!(positions.len(), 1);
-    let btc = positions.iter().find(|p| p.instrument_code == "BTC-PERP").unwrap();
+    let btc = positions
+        .iter()
+        .find(|p| p.instrument_code == "BTC-PERP")
+        .unwrap();
     assert!((btc.total_qty - 1.4).abs() < f64::EPSILON);
 }
 
@@ -688,26 +735,28 @@ fn test_unknown_exch_overflow_buckets() {
         },
     ];
 
-    let unknown_bal = vec![
-        ExchBalanceSnapshot {
+    let unknown_bal = vec![ExchBalanceSnapshot {
+        account_id: 100,
+        asset: "MYSTERY_COIN".to_string(),
+        symbol_exch: None,
+        balance_state: Balance {
             account_id: 100,
             asset: "MYSTERY_COIN".to_string(),
-            symbol_exch: None,
-            balance_state: Balance {
-                account_id: 100,
-                asset: "MYSTERY_COIN".to_string(),
-                total_qty: 999.0,
-                ..Default::default()
-            },
-            exch_data_raw: String::new(),
-            sync_ts: 0,
+            total_qty: 999.0,
+            ..Default::default()
         },
-    ];
+        exch_data_raw: String::new(),
+        sync_ts: 0,
+    }];
 
     let mut writer = OmsSnapshotWriterV2::new(meta);
     let snap = writer.publish(
-        HashMap::new(), exch_positions, HashMap::new(),
-        unknown_pos, unknown_bal, 0,
+        HashMap::new(),
+        exch_positions,
+        HashMap::new(),
+        unknown_pos,
+        unknown_bal,
+        0,
     );
 
     // Resolved position accessible via index.
@@ -715,7 +764,9 @@ fn test_unknown_exch_overflow_buckets() {
 
     // Unknown positions preserved in overflow.
     assert_eq!(snap.unknown_exch_positions.len(), 2);
-    let codes: Vec<&str> = snap.unknown_exch_positions.iter()
+    let codes: Vec<&str> = snap
+        .unknown_exch_positions
+        .iter()
         .map(|p| p.instrument_code.as_str())
         .collect();
     assert!(codes.contains(&"UNKNOWN-A"));
@@ -726,15 +777,19 @@ fn test_unknown_exch_overflow_buckets() {
     assert_eq!(snap.unknown_exch_balances[0].asset, "MYSTERY_COIN");
 
     // Simulate query_position (query_gw=true): resolved + unknown.
-    let mut positions: Vec<Position> = snap.exch_position_ids_by_account
+    let mut positions: Vec<Position> = snap
+        .exch_position_ids_by_account
         .get(&100)
-        .map(|ids| ids.iter()
-            .filter_map(|iid| snap.exch_positions.get(&(100, *iid)))
-            .map(|p| p.position_state.clone())
-            .collect())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|iid| snap.exch_positions.get(&(100, *iid)))
+                .map(|p| p.position_state.clone())
+                .collect()
+        })
         .unwrap_or_default();
     positions.extend(
-        snap.unknown_exch_positions.iter()
+        snap.unknown_exch_positions
+            .iter()
             .filter(|p| p.account_id == 100)
             .map(|p| p.position_state.clone()),
     );
@@ -803,7 +858,9 @@ fn test_query_order_details_dedup() {
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
-        vec![], vec![], 0,
+        vec![],
+        vec![],
+        0,
     );
 
     // Simulate query_order_details with duplicate refs ["EX1", "EX1"].
@@ -821,7 +878,11 @@ fn test_query_order_details_dedup() {
         })
         .collect();
 
-    assert_eq!(orders.len(), 1, "duplicate refs must not produce duplicate orders");
+    assert_eq!(
+        orders.len(),
+        1,
+        "duplicate refs must not produce duplicate orders"
+    );
     assert_eq!(orders[0].order_id, 1001);
 
     // Simulate query_trade_details with duplicate refs.
@@ -835,7 +896,11 @@ fn test_query_order_details_dedup() {
         .flat_map(|d| d.trades.clone())
         .collect();
 
-    assert_eq!(trades.len(), 1, "duplicate refs must not produce duplicate trades");
+    assert_eq!(
+        trades.len(),
+        1,
+        "duplicate refs must not produce duplicate trades"
+    );
 }
 
 // ── Integration tests (require dev docker-compose stack) ──────────────────────

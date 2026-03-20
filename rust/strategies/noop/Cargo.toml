@@ -1,0 +1,9 @@
+[package]
+name = "zk-strategy-noop-rs"
+version = "0.1.0"
+edition = "2021"
+description = "No-op placeholder strategy for zk-engine-svc wiring"
+
+[dependencies]
+zk-strategy-sdk-rs = { path = "../../crates/zk-strategy-sdk-rs" }
+

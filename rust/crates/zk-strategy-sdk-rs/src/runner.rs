@@ -52,7 +52,11 @@ impl StrategyRunner {
         strategy.on_bar(bar, &self.ctx)
     }
 
-    pub fn on_signal<S: Strategy>(&mut self, strategy: &mut S, sig: &RealtimeSignal) -> Vec<SAction> {
+    pub fn on_signal<S: Strategy>(
+        &mut self,
+        strategy: &mut S,
+        sig: &RealtimeSignal,
+    ) -> Vec<SAction> {
         strategy.on_signal(sig, &self.ctx)
     }
 

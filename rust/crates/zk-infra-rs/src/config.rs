@@ -39,11 +39,21 @@ pub struct InfraConfig {
     pub zk_env: String,
 }
 
-fn default_nats_url()  -> String { "nats://localhost:4222".to_string() }
-fn default_pg_url()    -> String { "postgresql://zk:zk@localhost:5432/zkbot".to_string() }
-fn default_redis_url() -> String { "redis://localhost:6379".to_string() }
-fn default_mongo_url() -> String { "mongodb://localhost:27017".to_string() }
-fn default_env()       -> String { "dev".to_string() }
+fn default_nats_url() -> String {
+    "nats://localhost:4222".to_string()
+}
+fn default_pg_url() -> String {
+    "postgresql://zk:zk@localhost:5432/zkbot".to_string()
+}
+fn default_redis_url() -> String {
+    "redis://localhost:6379".to_string()
+}
+fn default_mongo_url() -> String {
+    "mongodb://localhost:27017".to_string()
+}
+fn default_env() -> String {
+    "dev".to_string()
+}
 
 /// Deserialise environment variables into `T` via `envy`.
 ///

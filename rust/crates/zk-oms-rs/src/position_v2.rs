@@ -38,11 +38,7 @@ impl PositionStoreV2 {
     // Read
     // ------------------------------------------------------------------
 
-    pub fn get_position(
-        &self,
-        account_id: i64,
-        instrument_id: u32,
-    ) -> Option<&ManagedPositionV2> {
+    pub fn get_position(&self, account_id: i64, instrument_id: u32) -> Option<&ManagedPositionV2> {
         self.managed.get(&(account_id, instrument_id))
     }
 
@@ -115,9 +111,7 @@ impl PositionStoreV2 {
         let pos = self
             .managed
             .entry((account_id, instrument_id))
-            .or_insert_with(|| {
-                ManagedPositionV2::new(account_id, instrument_id, 0, is_short)
-            });
+            .or_insert_with(|| ManagedPositionV2::new(account_id, instrument_id, 0, is_short));
         pos.qty_available -= qty;
         pos.qty_frozen += qty;
         Ok(())
@@ -143,12 +137,7 @@ impl PositionStoreV2 {
             .managed
             .entry((delta.account_id, delta.instrument_id))
             .or_insert_with(|| {
-                ManagedPositionV2::new(
-                    delta.account_id,
-                    delta.instrument_id,
-                    0,
-                    delta.is_short,
-                )
+                ManagedPositionV2::new(delta.account_id, delta.instrument_id, 0, delta.is_short)
             });
 
         pos.qty_total += delta.total_change;
@@ -291,15 +280,24 @@ mod tests {
 
         // No exch data yet → diverge
         store.update_reconcile_status(1, 10, 1000);
-        assert_eq!(store.check_reconcile(1, 10), ReconcileStatus::DivergedTransient);
+        assert_eq!(
+            store.check_reconcile(1, 10),
+            ReconcileStatus::DivergedTransient
+        );
 
         // Second divergence
         store.update_reconcile_status(1, 10, 2000);
-        assert_eq!(store.check_reconcile(1, 10), ReconcileStatus::DivergedTransient);
+        assert_eq!(
+            store.check_reconcile(1, 10),
+            ReconcileStatus::DivergedTransient
+        );
 
         // Third divergence → persistent
         store.update_reconcile_status(1, 10, 3000);
-        assert_eq!(store.check_reconcile(1, 10), ReconcileStatus::DivergedPersistent);
+        assert_eq!(
+            store.check_reconcile(1, 10),
+            ReconcileStatus::DivergedPersistent
+        );
 
         // Insert matching exch snapshot → in sync
         store.exch.insert(

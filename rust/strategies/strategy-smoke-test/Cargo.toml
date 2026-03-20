@@ -1,0 +1,10 @@
+[package]
+name = "strategy-smoke-test"
+version = "0.1.0"
+edition = "2021"
+description = "Placeholder smoke-test strategy covering basic engine callbacks"
+
+[dependencies]
+zk-proto-rs = { path = "../../crates/zk-proto-rs" }
+zk-strategy-sdk-rs = { path = "../../crates/zk-strategy-sdk-rs" }
+

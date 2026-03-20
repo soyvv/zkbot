@@ -63,7 +63,10 @@ impl RtmdInterestManager {
         Ok(Self { kv })
     }
 
-    pub async fn register_interest(&self, spec: RtmdInterestSpec) -> Result<RtmdInterestLease, SdkError> {
+    pub async fn register_interest(
+        &self,
+        spec: RtmdInterestSpec,
+    ) -> Result<RtmdInterestLease, SdkError> {
         let key = self.key_for(&spec);
         self.kv
             .put(&key, Bytes::from(serde_json::to_vec(&spec)?))
@@ -88,7 +91,10 @@ impl RtmdInterestManager {
             Some(param) => format!("{}_{}", spec.instrument_id, param),
             None => spec.instrument_id.clone(),
         };
-        format!("sub.{}.{}.{}.{}", spec.scope, spec.subscriber_id, spec.channel_type, suffix)
+        format!(
+            "sub.{}.{}.{}.{}",
+            spec.scope, spec.subscriber_id, spec.channel_type, suffix
+        )
     }
 }
 
@@ -107,7 +113,13 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
 
-    fn make_spec(scope: &str, subscriber_id: &str, instrument_id: &str, channel_type: &str, channel_param: Option<&str>) -> RtmdInterestSpec {
+    fn make_spec(
+        scope: &str,
+        subscriber_id: &str,
+        instrument_id: &str,
+        channel_type: &str,
+        channel_param: Option<&str>,
+    ) -> RtmdInterestSpec {
         RtmdInterestSpec {
             subscriber_id: subscriber_id.to_string(),
             scope: scope.to_string(),
@@ -133,7 +145,10 @@ mod tests {
             Some(param) => format!("{}_{}", spec.instrument_id, param),
             None => spec.instrument_id.clone(),
         };
-        format!("sub.{}.{}.{}.{}", spec.scope, spec.subscriber_id, spec.channel_type, suffix)
+        format!(
+            "sub.{}.{}.{}.{}",
+            spec.scope, spec.subscriber_id, spec.channel_type, suffix
+        )
     }
 
     // ── Key format tests ─────────────────────────────────────────────────────
@@ -152,7 +167,13 @@ mod tests {
     /// Matches kline interest where param = interval.
     #[test]
     fn test_rtmd_key_with_channel_param() {
-        let spec = make_spec("logical", "engine_strat_1", "BTCUSDT_MOCK", "kline", Some("1m"));
+        let spec = make_spec(
+            "logical",
+            "engine_strat_1",
+            "BTCUSDT_MOCK",
+            "kline",
+            Some("1m"),
+        );
         assert_eq!(
             key_for_spec(&spec),
             "sub.logical.engine_strat_1.kline.BTCUSDT_MOCK_1m"
@@ -163,10 +184,7 @@ mod tests {
     #[test]
     fn test_rtmd_key_venue_scope() {
         let spec = make_spec("venue", "strategy_a", "BTCUSDT_OKX", "tick", None);
-        assert_eq!(
-            key_for_spec(&spec),
-            "sub.venue.strategy_a.tick.BTCUSDT_OKX"
-        );
+        assert_eq!(key_for_spec(&spec), "sub.venue.strategy_a.tick.BTCUSDT_OKX");
     }
 
     /// Different channel_types produce different keys for the same instrument.

@@ -49,22 +49,108 @@ pub trait Strategy: Send + 'static {
     }
 
     /// Order state update.
-    fn on_order_update(&mut self, _update: &OrderUpdateEvent, _ctx: &StrategyContext) -> Vec<SAction> {
+    fn on_order_update(
+        &mut self,
+        _update: &OrderUpdateEvent,
+        _ctx: &StrategyContext,
+    ) -> Vec<SAction> {
         vec![]
     }
 
     /// Balance update — asset inventory (cash/spot).
-    fn on_balance_update(&mut self, _update: &BalanceUpdateEvent, _ctx: &StrategyContext) -> Vec<SAction> {
+    fn on_balance_update(
+        &mut self,
+        _update: &BalanceUpdateEvent,
+        _ctx: &StrategyContext,
+    ) -> Vec<SAction> {
         vec![]
     }
 
     /// Position update — instrument exposure (derivatives only).
-    fn on_position_update(&mut self, _update: &PositionUpdateEvent, _ctx: &StrategyContext) -> Vec<SAction> {
+    fn on_position_update(
+        &mut self,
+        _update: &PositionUpdateEvent,
+        _ctx: &StrategyContext,
+    ) -> Vec<SAction> {
         vec![]
     }
 
     /// Timer fire.
     fn on_timer(&mut self, _event: &TimerEvent, _ctx: &StrategyContext) -> Vec<SAction> {
         vec![]
+    }
+
+    /// Called when the engine is paused (e.g. by gRPC command or supervision).
+    /// Return actions to execute before the engine enters paused state (e.g. cancel open orders).
+    fn on_pause(&mut self, _reason: &str, _ctx: &StrategyContext) -> Vec<SAction> {
+        vec![]
+    }
+
+    /// Called when the engine resumes from a paused state.
+    /// Return actions to execute after resuming (e.g. re-enter positions).
+    fn on_resume(&mut self, _reason: &str, _ctx: &StrategyContext) -> Vec<SAction> {
+        vec![]
+    }
+}
+
+impl<T: Strategy + ?Sized> Strategy for Box<T> {
+    fn on_create(&mut self, ctx: &StrategyContext) -> Vec<SAction> {
+        (**self).on_create(ctx)
+    }
+
+    fn on_init(&mut self, ctx: &StrategyContext) -> Vec<SAction> {
+        (**self).on_init(ctx)
+    }
+
+    fn on_reinit(&mut self, ctx: &StrategyContext) -> Vec<SAction> {
+        (**self).on_reinit(ctx)
+    }
+
+    fn on_tick(&mut self, tick: &TickData, ctx: &StrategyContext) -> Vec<SAction> {
+        (**self).on_tick(tick, ctx)
+    }
+
+    fn on_bar(&mut self, bar: &Kline, ctx: &StrategyContext) -> Vec<SAction> {
+        (**self).on_bar(bar, ctx)
+    }
+
+    fn on_signal(&mut self, signal: &RealtimeSignal, ctx: &StrategyContext) -> Vec<SAction> {
+        (**self).on_signal(signal, ctx)
+    }
+
+    fn on_order_update(
+        &mut self,
+        update: &OrderUpdateEvent,
+        ctx: &StrategyContext,
+    ) -> Vec<SAction> {
+        (**self).on_order_update(update, ctx)
+    }
+
+    fn on_balance_update(
+        &mut self,
+        update: &BalanceUpdateEvent,
+        ctx: &StrategyContext,
+    ) -> Vec<SAction> {
+        (**self).on_balance_update(update, ctx)
+    }
+
+    fn on_position_update(
+        &mut self,
+        update: &PositionUpdateEvent,
+        ctx: &StrategyContext,
+    ) -> Vec<SAction> {
+        (**self).on_position_update(update, ctx)
+    }
+
+    fn on_timer(&mut self, event: &TimerEvent, ctx: &StrategyContext) -> Vec<SAction> {
+        (**self).on_timer(event, ctx)
+    }
+
+    fn on_pause(&mut self, reason: &str, ctx: &StrategyContext) -> Vec<SAction> {
+        (**self).on_pause(reason, ctx)
+    }
+
+    fn on_resume(&mut self, reason: &str, ctx: &StrategyContext) -> Vec<SAction> {
+        (**self).on_resume(reason, ctx)
     }
 }

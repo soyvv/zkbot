@@ -4,8 +4,8 @@ use tracing::warn;
 use zk_proto_rs::zk::{
     common::v1::Rejection,
     exch_gw::v1::{
-        ExchangeOrderStatus, OrderReportEntry, OrderReportType,
-        order_report_entry::Report, OrderStateReport,
+        order_report_entry::Report, ExchangeOrderStatus, OrderReportEntry, OrderReportType,
+        OrderStateReport,
     },
     gateway::v1::SendOrderRequest,
     oms::v1::{ExecMessage, ExecType, Fee, OrderRequest, OrderStatus, Trade},
@@ -82,8 +82,7 @@ impl OrderStoreV2 {
                     .insert(oid);
             }
             if let Some(ref_id) = live.exch_order_ref_id {
-                self.order_id_by_exch_ref
-                    .insert((live.gw_id, ref_id), oid);
+                self.order_id_by_exch_ref.insert((live.gw_id, ref_id), oid);
             }
             self.live.insert(oid, live);
             self.detail.insert(oid, detail);
@@ -318,8 +317,8 @@ impl OrderStoreV2 {
     /// Process a linkage-only report: promote PENDING -> BOOKED.
     pub fn apply_linkage_promotion(&mut self, order_id: i64) {
         if let Some(live) = self.live.get_mut(&order_id) {
-            let status = OrderStatus::try_from(live.order_status)
-                .unwrap_or(OrderStatus::Unspecified);
+            let status =
+                OrderStatus::try_from(live.order_status).unwrap_or(OrderStatus::Unspecified);
             if matches!(status, OrderStatus::Pending | OrderStatus::Rejected) {
                 live.order_status = OrderStatus::Booked as i32;
             }
@@ -430,9 +429,9 @@ impl OrderStoreV2 {
             return None;
         }
 
-        let has_state = entries.iter().any(|e| {
-            matches!(&e.report, Some(Report::OrderStateReport(_)))
-        });
+        let has_state = entries
+            .iter()
+            .any(|e| matches!(&e.report, Some(Report::OrderStateReport(_))));
         if has_state {
             return None;
         }
@@ -453,11 +452,7 @@ impl OrderStoreV2 {
 
         let total_qty = new_qty + live.acc_trades_filled_qty;
         if total_qty > live.qty {
-            warn!(
-                total_qty,
-                order_qty = live.qty,
-                "trades exceed order qty"
-            );
+            warn!(total_qty, order_qty = live.qty, "trades exceed order qty");
             return None;
         }
         let avg_price = if total_qty != 0.0 {
@@ -537,16 +532,10 @@ fn map_order_status(gw_status: ExchangeOrderStatus) -> OrderStatus {
 }
 
 fn can_update_status(old: OrderStatus, new: OrderStatus) -> bool {
-    !matches!(old, OrderStatus::Cancelled | OrderStatus::Filled)
-        && new != OrderStatus::Unspecified
+    !matches!(old, OrderStatus::Cancelled | OrderStatus::Filled) && new != OrderStatus::Unspecified
 }
 
-fn infer_trade_price(
-    orig_qty: f64,
-    orig_avg: f64,
-    new_qty: f64,
-    new_avg: f64,
-) -> Option<f64> {
+fn infer_trade_price(orig_qty: f64, orig_avg: f64, new_qty: f64, new_avg: f64) -> Option<f64> {
     if new_qty == 0.0 {
         return None;
     }
@@ -730,17 +719,35 @@ mod tests {
     #[test]
     fn can_update_status_rules() {
         // Terminal states block updates
-        assert!(!can_update_status(OrderStatus::Filled, OrderStatus::Cancelled));
-        assert!(!can_update_status(OrderStatus::Cancelled, OrderStatus::Filled));
+        assert!(!can_update_status(
+            OrderStatus::Filled,
+            OrderStatus::Cancelled
+        ));
+        assert!(!can_update_status(
+            OrderStatus::Cancelled,
+            OrderStatus::Filled
+        ));
 
         // Unspecified target blocked
-        assert!(!can_update_status(OrderStatus::Pending, OrderStatus::Unspecified));
+        assert!(!can_update_status(
+            OrderStatus::Pending,
+            OrderStatus::Unspecified
+        ));
 
         // Normal transitions
         assert!(can_update_status(OrderStatus::Pending, OrderStatus::Booked));
-        assert!(can_update_status(OrderStatus::Booked, OrderStatus::PartiallyFilled));
-        assert!(can_update_status(OrderStatus::PartiallyFilled, OrderStatus::Filled));
-        assert!(can_update_status(OrderStatus::Booked, OrderStatus::Cancelled));
+        assert!(can_update_status(
+            OrderStatus::Booked,
+            OrderStatus::PartiallyFilled
+        ));
+        assert!(can_update_status(
+            OrderStatus::PartiallyFilled,
+            OrderStatus::Filled
+        ));
+        assert!(can_update_status(
+            OrderStatus::Booked,
+            OrderStatus::Cancelled
+        ));
     }
 
     #[test]
@@ -885,10 +892,10 @@ mod tests {
     fn dyn_string_table_lookup() {
         let mut table = DynStringTable::new();
 
-        assert!(table.lookup( "foo").is_none());
+        assert!(table.lookup("foo").is_none());
 
         let id = table.intern("foo");
-        assert_eq!(table.lookup( "foo"), Some(id));
-        assert!(table.lookup( "bar").is_none());
+        assert_eq!(table.lookup("foo"), Some(id));
+        assert!(table.lookup("bar").is_none());
     }
 }

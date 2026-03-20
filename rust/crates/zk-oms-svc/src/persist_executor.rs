@@ -90,12 +90,13 @@ impl PersistExecutorPool {
         }) {
             crate::executor::DispatchResult::Ok => {}
             crate::executor::DispatchResult::QueueFull(_) => {
-                error!(account_id, "persist queue full — action dropped (operational alert)");
+                error!(
+                    account_id,
+                    "persist queue full — action dropped (operational alert)"
+                );
             }
         }
     }
-
-    pub fn queue_depth(&self) -> usize { self.pool.total_queue_depth() }
 }
 
 // ── Worker loop ─────────────────────────────────────────────────────────────
@@ -103,18 +104,34 @@ impl PersistExecutorPool {
 async fn persist_worker(mut rx: mpsc::Receiver<PersistAction>, mut redis: RedisWriter) {
     while let Some(action) = rx.recv().await {
         match action {
-            PersistAction::Order { order, set_expire, set_closed } => {
+            PersistAction::Order {
+                order,
+                set_expire,
+                set_closed,
+            } => {
                 if let Err(e) = redis.write_order(&order, set_expire, set_closed).await {
                     warn!(order_id = order.order_id, error = %e, "persist: write_order failed");
                 }
             }
-            PersistAction::Balance { account_id, asset_name, snap } => {
+            PersistAction::Balance {
+                account_id,
+                asset_name,
+                snap,
+            } => {
                 if let Err(e) = redis.write_balance(account_id, &asset_name, &snap).await {
                     warn!(account_id, asset = %asset_name, error = %e, "persist: write_balance failed");
                 }
             }
-            PersistAction::Position { account_id, inst_code, side, pos } => {
-                if let Err(e) = redis.write_position(account_id, &inst_code, &side, &pos).await {
+            PersistAction::Position {
+                account_id,
+                inst_code,
+                side,
+                pos,
+            } => {
+                if let Err(e) = redis
+                    .write_position(account_id, &inst_code, &side, &pos)
+                    .await
+                {
                     warn!(account_id, instrument = %inst_code, error = %e, "persist: write_position failed");
                 }
             }

@@ -4,9 +4,7 @@ use tracing::{error, warn};
 
 use zk_proto_rs::zk::{
     common::v1::{BuySellType, LongShortType, Rejection, RejectionReason, RejectionSource},
-    exch_gw::v1::{
-        order_report_entry::Report, ExchangeOrderStatus, OrderReport, OrderReportType,
-    },
+    exch_gw::v1::{order_report_entry::Report, ExchangeOrderStatus, OrderReport, OrderReportType},
     gateway::v1::SendOrderRequest as ExchSendOrderRequest,
     oms::v1::{
         Balance, BalanceUpdateEvent, ExecType, Fee, Order, OrderCancelRequest, OrderRequest,
@@ -193,12 +191,16 @@ impl OmsCoreV2 {
             OmsMessage::ReloadConfig => vec![], // TODO
             OmsMessage::PositionRecheck => self.process_position_recheck(),
             OmsMessage::RecheckOrder(_) | OmsMessage::RecheckCancel(_) => vec![], // handled by service layer
-            OmsMessage::GatewaySendFailed { order_id, error_msg, .. } => {
-                self.process_gateway_send_failed(order_id, &error_msg)
-            }
-            OmsMessage::GatewayCancelSendFailed { order_id, error_msg, .. } => {
-                self.process_gateway_cancel_send_failed(order_id, &error_msg)
-            }
+            OmsMessage::GatewaySendFailed {
+                order_id,
+                error_msg,
+                ..
+            } => self.process_gateway_send_failed(order_id, &error_msg),
+            OmsMessage::GatewayCancelSendFailed {
+                order_id,
+                error_msg,
+                ..
+            } => self.process_gateway_cancel_send_failed(order_id, &error_msg),
         }
     }
 
@@ -278,10 +280,17 @@ impl OmsCoreV2 {
 
     /// Handle a gateway cancel-send failure. Marks the cancel as failed but
     /// does NOT terminal the order (it may still be live on the exchange).
-    fn process_gateway_cancel_send_failed(&mut self, order_id: i64, error_msg: &str) -> Vec<OmsActionV2> {
+    fn process_gateway_cancel_send_failed(
+        &mut self,
+        order_id: i64,
+        error_msg: &str,
+    ) -> Vec<OmsActionV2> {
         let mut actions = Vec::new();
         let Some(live) = self.orders.get_live(order_id) else {
-            warn!(order_id, "GatewayCancelSendFailed: order not found — ignoring");
+            warn!(
+                order_id,
+                "GatewayCancelSendFailed: order not found — ignoring"
+            );
             return actions;
         };
 
@@ -414,8 +423,7 @@ impl OmsCoreV2 {
                         ..Default::default()
                     };
                     let flags = OrderAccountingFlags::default();
-                    self.orders
-                        .create_order(order_id, &req, &meta, flags, None);
+                    self.orders.create_order(order_id, &req, &meta, flags, None);
                     let error_msg = format!("order qty {} exceeds max {}", req.qty, max_size);
                     {
                         let (live, detail) = self.orders.get_live_and_detail_mut(order_id).unwrap();
@@ -463,19 +471,19 @@ impl OmsCoreV2 {
                             .get_balance(account_id, fund_id)
                             .map(|b| b.balance_state.avail_qty)
                             .unwrap_or(0.0);
-                        if let Err(e) =
-                            self.reservations
-                                .check_available(account_id, fund_id, cost, avail)
+                        if let Err(e) = self
+                            .reservations
+                            .check_available(account_id, fund_id, cost, avail)
                         {
                             let rejection = Rejection {
                                 source: RejectionSource::OmsReject as i32,
                                 reason: RejectionReason::RejReasonOmsInvalidState as i32,
                                 ..Default::default()
                             };
-                            self.orders
-                                .create_order(order_id, &req, &meta, flags, None);
+                            self.orders.create_order(order_id, &req, &meta, flags, None);
                             {
-                                let (live, detail) = self.orders.get_live_and_detail_mut(order_id).unwrap();
+                                let (live, detail) =
+                                    self.orders.get_live_and_detail_mut(order_id).unwrap();
                                 OrderStoreV2::apply_oms_error(
                                     live,
                                     detail,
@@ -508,19 +516,19 @@ impl OmsCoreV2 {
                 // Check + freeze position for sell
                 if let Some(pos_id) = meta.pos_instrument_id {
                     let is_short = false; // sells from long positions by default
-                    if let Err(e) =
-                        self.positions
-                            .check_and_freeze(account_id, pos_id, req.qty, is_short)
+                    if let Err(e) = self
+                        .positions
+                        .check_and_freeze(account_id, pos_id, req.qty, is_short)
                     {
                         let rejection = Rejection {
                             source: RejectionSource::OmsReject as i32,
                             reason: RejectionReason::RejReasonOmsInvalidState as i32,
                             ..Default::default()
                         };
-                        self.orders
-                            .create_order(order_id, &req, &meta, flags, None);
+                        self.orders.create_order(order_id, &req, &meta, flags, None);
                         {
-                            let (live, detail) = self.orders.get_live_and_detail_mut(order_id).unwrap();
+                            let (live, detail) =
+                                self.orders.get_live_and_detail_mut(order_id).unwrap();
                             OrderStoreV2::apply_oms_error(
                                 live,
                                 detail,
@@ -613,18 +621,15 @@ impl OmsCoreV2 {
         // V1 spot: fund=quote_asset, pos=base_asset (inventory tracking).
         // V1 deriv: fund=settlement/quote, pos=instrument_code.
         // V2 uses intern syms as position keys to avoid table-index collisions.
-        let (fund_asset_id, pos_instrument_id) = if instrument.instrument_type
-            == SPOT_INSTRUMENT_TYPE
-        {
-            // Spot: fund=quote_asset, pos=base_asset (inventory)
-            (instrument.quote_asset_id, instrument.base_asset_sym)
-        } else {
-            // Derivatives: fund=settlement/quote, pos=instrument_code_sym
-            let fund = instrument
-                .settlement_asset_id
-                .or(instrument.quote_asset_id);
-            (fund, Some(instrument.instrument_code_sym))
-        };
+        let (fund_asset_id, pos_instrument_id) =
+            if instrument.instrument_type == SPOT_INSTRUMENT_TYPE {
+                // Spot: fund=quote_asset, pos=base_asset (inventory)
+                (instrument.quote_asset_id, instrument.base_asset_sym)
+            } else {
+                // Derivatives: fund=settlement/quote, pos=instrument_code_sym
+                let fund = instrument.settlement_asset_id.or(instrument.quote_asset_id);
+                (fund, Some(instrument.instrument_code_sym))
+            };
 
         Ok(ResolvedOrderMeta {
             account_id: req.account_id,
@@ -670,10 +675,7 @@ impl OmsCoreV2 {
         };
 
         let mut gw_req = ExchSendOrderRequest::default();
-        gw_req.exch_account_id = self
-            .metadata
-            .str_resolve(meta.exch_account_sym)
-            .to_string();
+        gw_req.exch_account_id = self.metadata.str_resolve(meta.exch_account_sym).to_string();
         gw_req.order_type = req.order_type;
         gw_req.buysell_type = req.buy_sell_type;
         gw_req.openclose_type = req.open_close_type;
@@ -810,7 +812,10 @@ impl OmsCoreV2 {
         if resolved_id.is_none() {
             if self.handle_external_orders && !exch_order_ref.is_empty() {
                 // Check if already registered as external
-                let existing = self.orders.dyn_strings.lookup(&exch_order_ref)
+                let existing = self
+                    .orders
+                    .dyn_strings
+                    .lookup(&exch_order_ref)
                     .and_then(|ref_id| {
                         if self
                             .orders
@@ -885,8 +890,16 @@ impl OmsCoreV2 {
         let mut new_exec_msg = false;
 
         // Track trade counts before entry processing for per-trade fill loop
-        let trades_before = self.orders.get_detail(order_id).map(|d| d.trades.len()).unwrap_or(0);
-        let inferred_before = self.orders.get_detail(order_id).map(|d| d.inferred_trades.len()).unwrap_or(0);
+        let trades_before = self
+            .orders
+            .get_detail(order_id)
+            .map(|d| d.trades.len())
+            .unwrap_or(0);
+        let inferred_before = self
+            .orders
+            .get_detail(order_id)
+            .map(|d| d.inferred_trades.len())
+            .unwrap_or(0);
 
         // Update timestamp
         if let Some(live) = self.orders.get_live_mut(order_id) {
@@ -941,9 +954,7 @@ impl OmsCoreV2 {
                             new_filled,
                             state_report.avg_price,
                             ExchangeOrderStatus::try_from(state_report.exch_order_status)
-                                .unwrap_or(
-                                    ExchangeOrderStatus::ExchOrderStatusUnspecified,
-                                ),
+                                .unwrap_or(ExchangeOrderStatus::ExchOrderStatusUnspecified),
                             ts,
                         );
                         if updated {
@@ -958,7 +969,13 @@ impl OmsCoreV2 {
                 OrderReportType::OrderRepTypeTrade => {
                     if let Some(Report::TradeReport(trade_report)) = &entry.report {
                         // Extract data from immutable borrow first
-                        let (live_order_id, ext_order_ref, live_account_id, live_buy_sell_type, instrument_code) = {
+                        let (
+                            live_order_id,
+                            ext_order_ref,
+                            live_account_id,
+                            live_buy_sell_type,
+                            instrument_code,
+                        ) = {
                             let live = self.orders.get_live(order_id).unwrap();
                             let ext_ref = live
                                 .exch_order_ref_id
@@ -968,9 +985,7 @@ impl OmsCoreV2 {
                                 .metadata
                                 .instrument(live.instrument_id)
                                 .map(|i| {
-                                    self.metadata
-                                        .str_resolve(i.instrument_code_sym)
-                                        .to_string()
+                                    self.metadata.str_resolve(i.instrument_code_sym).to_string()
                                 })
                                 .unwrap_or_default();
                             (
@@ -1019,17 +1034,15 @@ impl OmsCoreV2 {
                                     "err from gw: code={}, msg={}",
                                     err_info.error_code, err_info.error_message
                                 );
-                                let (live, detail) = self.orders.get_live_and_detail_mut(order_id).unwrap();
+                                let (live, detail) =
+                                    self.orders.get_live_and_detail_mut(order_id).unwrap();
                                 OrderStoreV2::apply_oms_error(
                                     live,
                                     detail,
                                     &msg,
                                     ts,
                                     oms_exec_type as i32,
-                                    exec_report
-                                        .rejection_info
-                                        .clone()
-                                        .unwrap_or_default(),
+                                    exec_report.rejection_info.clone().unwrap_or_default(),
                                 );
                                 new_exec_msg = true;
                                 original_order_updated = true;
@@ -1133,11 +1146,7 @@ impl OmsCoreV2 {
                         } else {
                             0.0
                         },
-                        frozen_change: if sell_was_frozen {
-                            -*fill_qty
-                        } else {
-                            0.0
-                        },
+                        frozen_change: if sell_was_frozen { -*fill_qty } else { 0.0 },
                         total_change: if is_buy { *fill_qty } else { -*fill_qty },
                     };
                     self.positions.apply_delta(&delta, ts);
@@ -1235,7 +1244,10 @@ impl OmsCoreV2 {
         let account_id = match account_id {
             Some(id) => id,
             None => {
-                warn!(exch_account_code, "unknown exchange account in balance update");
+                warn!(
+                    exch_account_code,
+                    "unknown exchange account in balance update"
+                );
                 return vec![];
             }
         };
@@ -1288,9 +1300,9 @@ impl OmsCoreV2 {
 
                 if let Some(route) = self.metadata.route(account_id) {
                     let gw_id = route.gw_id;
-                    if let Some(inst) =
-                        self.metadata
-                            .resolve_instrument_by_gw(gw_id, &entry.instrument_code)
+                    if let Some(inst) = self
+                        .metadata
+                        .resolve_instrument_by_gw(gw_id, &entry.instrument_code)
                     {
                         let instrument_id = inst.instrument_id;
                         let instrument_code_str = self
@@ -1493,7 +1505,11 @@ impl OmsCoreV2 {
 
     /// Build a `BalanceUpdateEvent` proto from current core state.
     pub fn build_balance_update_event(&self, account_id: i64) -> Option<BalanceUpdateEvent> {
-        let ts = if self.use_time_emulation { 0 } else { gen_timestamp_ms() };
+        let ts = if self.use_time_emulation {
+            0
+        } else {
+            gen_timestamp_ms()
+        };
         let balances: Vec<Balance> = self
             .balances
             .get_balances_for_account(account_id)
@@ -1509,7 +1525,11 @@ impl OmsCoreV2 {
 
     /// Build a `PositionUpdateEvent` proto from current core state.
     pub fn build_position_update_event(&self, account_id: i64) -> Option<PositionUpdateEvent> {
-        let ts = if self.use_time_emulation { 0 } else { gen_timestamp_ms() };
+        let ts = if self.use_time_emulation {
+            0
+        } else {
+            gen_timestamp_ms()
+        };
         let positions: Vec<Position> = self
             .positions
             .get_positions_for_account(account_id)
@@ -1688,8 +1708,7 @@ impl OmsCoreV2 {
                     position: managed_pos,
                 }
             }
-            OmsActionV2::BatchSendOrdersToGw { .. }
-            | OmsActionV2::BatchCancelToGw { .. } => {
+            OmsActionV2::BatchSendOrdersToGw { .. } | OmsActionV2::BatchCancelToGw { .. } => {
                 unimplemented!("batch materialize not yet implemented")
             }
         }

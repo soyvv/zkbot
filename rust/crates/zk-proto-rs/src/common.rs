@@ -8,160 +8,161 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct InstrumentRefData {
-    /// internal instrument id 
-    #[prost(string, tag="1")]
+    /// internal instrument id
+    #[prost(string, tag = "1")]
     pub instrument_id: ::prost::alloc::string::String,
-    /// instrument symbol name at the exchange 
-    #[prost(string, tag="2")]
+    /// instrument symbol name at the exchange
+    #[prost(string, tag = "2")]
     pub instrument_id_exchange: ::prost::alloc::string::String,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub update_ts: i64,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub exchange_name: ::prost::alloc::string::String,
     /// SPOT/PERP/FUTURE etc
-    #[prost(enumeration="InstrumentType", tag="6")]
+    #[prost(enumeration = "InstrumentType", tag = "6")]
     pub instrument_type: i32,
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub base_asset: ::prost::alloc::string::String,
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub quote_asset: ::prost::alloc::string::String,
     /// for perps
-    #[prost(string, tag="9")]
+    #[prost(string, tag = "9")]
     pub settlement_asset: ::prost::alloc::string::String,
     /// contract multiplier
-    #[prost(double, tag="10")]
+    #[prost(double, tag = "10")]
     pub contract_size: f64,
-    #[prost(int64, tag="11")]
+    #[prost(int64, tag = "11")]
     pub price_precision: i64,
-    #[prost(int64, tag="12")]
+    #[prost(int64, tag = "12")]
     pub qty_precision: i64,
     /// min price increment
-    #[prost(double, tag="13")]
+    #[prost(double, tag = "13")]
     pub price_tick_size: f64,
     /// min size increment
-    #[prost(double, tag="14")]
+    #[prost(double, tag = "14")]
     pub qty_lot_size: f64,
-    #[prost(double, tag="15")]
+    #[prost(double, tag = "15")]
     pub min_notional: f64,
-    #[prost(double, tag="16")]
+    #[prost(double, tag = "16")]
     pub max_notional: f64,
-    #[prost(double, tag="17")]
+    #[prost(double, tag = "17")]
     pub min_price: f64,
-    #[prost(double, tag="18")]
+    #[prost(double, tag = "18")]
     pub max_price: f64,
-    #[prost(double, tag="19")]
+    #[prost(double, tag = "19")]
     pub min_order_qty: f64,
-    #[prost(double, tag="20")]
+    #[prost(double, tag = "20")]
     pub max_order_qty: f64,
     /// max qty for market order
-    #[prost(double, tag="24")]
+    #[prost(double, tag = "24")]
     pub max_mkt_order_qty: f64,
-    #[prost(map="string, string", tag="21")]
-    pub extra_properties: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "21")]
+    pub extra_properties:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// original data from exchange api(if any)
-    #[prost(string, tag="22")]
+    #[prost(string, tag = "22")]
     pub original_info: ::prost::alloc::string::String,
-    #[prost(bool, tag="23")]
+    #[prost(bool, tag = "23")]
     pub disabled: bool,
     /// ISO-8601 date for futures/options (e.g., "2025-06-20")
-    #[prost(string, tag="25")]
+    #[prost(string, tag = "25")]
     pub expiry_date: ::prost::alloc::string::String,
     /// denomination currency (e.g., "USD", "EUR")
-    #[prost(string, tag="26")]
+    #[prost(string, tag = "26")]
     pub currency: ::prost::alloc::string::String,
     /// ISIN identifier for stocks/ETFs
-    #[prost(string, tag="27")]
+    #[prost(string, tag = "27")]
     pub isin: ::prost::alloc::string::String,
     /// primary listing venue (e.g., "NASDAQ", "NYSE")
-    #[prost(string, tag="28")]
+    #[prost(string, tag = "28")]
     pub listing_exchange: ::prost::alloc::string::String,
     /// initial margin requirement as fraction (e.g., 0.25 = 25%)
-    #[prost(double, tag="29")]
+    #[prost(double, tag = "29")]
     pub margin_requirement: f64,
     /// broad classification: "equity", "fx", "commodity", "fixed_income"
-    #[prost(string, tag="30")]
+    #[prost(string, tag = "30")]
     pub asset_class: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExtraData {
-    #[prost(map="string, string", tag="1")]
-    pub data_map: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "1")]
+    pub data_map:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
-pub struct DummyRequest {
-}
+pub struct DummyRequest {}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OrderEventMessage {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub timestamp: i64,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub source_id: ::prost::alloc::string::String,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub order_id: i64,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub exch_order_ref: ::prost::alloc::string::String,
-    #[prost(enumeration="EventLogLevelType", tag="5")]
+    #[prost(enumeration = "EventLogLevelType", tag = "5")]
     pub event_loglevel_type: i32,
-    #[prost(enumeration="EventSourceType", tag="6")]
+    #[prost(enumeration = "EventSourceType", tag = "6")]
     pub source_type: i32,
-    #[prost(enumeration="EventType", tag="7")]
+    #[prost(enumeration = "EventType", tag = "7")]
     pub event_type: i32,
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub message: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LatencyMetric {
     /// key: tag, value: timestamp in nanoseconds
-    #[prost(map="string, int64", tag="1")]
+    #[prost(map = "string, int64", tag = "1")]
     pub tagged_timestamps: ::std::collections::HashMap<::prost::alloc::string::String, i64>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Rejection {
-    #[prost(enumeration="RejectionSource", tag="1")]
+    #[prost(enumeration = "RejectionSource", tag = "1")]
     pub source: i32,
     /// == can retry; this field is what matters the most.
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub recoverable: bool,
-    #[prost(enumeration="RejectionReason", tag="3")]
+    #[prost(enumeration = "RejectionReason", tag = "3")]
     pub reason: i32,
     /// exchange-specific error code
-    #[prost(int64, tag="4")]
+    #[prost(int64, tag = "4")]
     pub error_code: i64,
     /// detailed error message for debug/logging purpose
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub error_message: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct MarginPositionInfo {
-    #[prost(double, tag="1")]
+    #[prost(double, tag = "1")]
     pub leverage: f64,
-    #[prost(double, tag="2")]
+    #[prost(double, tag = "2")]
     pub entry_price: f64,
-    #[prost(double, tag="3")]
+    #[prost(double, tag = "3")]
     pub mark_price: f64,
-    #[prost(double, tag="4")]
+    #[prost(double, tag = "4")]
     pub liquidation_price: f64,
-    #[prost(double, tag="5")]
+    #[prost(double, tag = "5")]
     pub margin: f64,
-    #[prost(double, tag="6")]
+    #[prost(double, tag = "6")]
     pub contracts: f64,
-    #[prost(double, tag="7")]
+    #[prost(double, tag = "7")]
     pub contract_size: f64,
-    #[prost(double, tag="8")]
+    #[prost(double, tag = "8")]
     pub contract_value: f64,
-    #[prost(double, tag="9")]
+    #[prost(double, tag = "9")]
     pub index_price: f64,
-    #[prost(double, tag="10")]
+    #[prost(double, tag = "10")]
     pub unsettled_pnl: f64,
-    #[prost(double, tag="11")]
+    #[prost(double, tag = "11")]
     pub last_trade_price: f64,
-    #[prost(int64, tag="12")]
+    #[prost(int64, tag = "12")]
     pub update_ts: i64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

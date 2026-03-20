@@ -3,85 +3,84 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct PriceLevel {
-    #[prost(double, tag="1")]
+    #[prost(double, tag = "1")]
     pub price: f64,
-    #[prost(double, tag="2")]
+    #[prost(double, tag = "2")]
     pub qty: f64,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub num_of_orders: i64,
-    #[prost(int64, tag="4")]
+    #[prost(int64, tag = "4")]
     pub num_of_pos: i64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Trade {
-    #[prost(double, tag="1")]
+    #[prost(double, tag = "1")]
     pub price: f64,
-    #[prost(double, tag="2")]
+    #[prost(double, tag = "2")]
     pub qty: f64,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub timestamp: i64,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub side: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub instrument_code: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TickData {
-    #[prost(enumeration="TickUpdateType", tag="1")]
+    #[prost(enumeration = "TickUpdateType", tag = "1")]
     pub tick_type: i32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub instrument_code: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub exchange: ::prost::alloc::string::String,
-    #[prost(int64, tag="4")]
+    #[prost(int64, tag = "4")]
     pub original_timestamp: i64,
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub received_timestamp: i64,
-    #[prost(double, tag="7")]
+    #[prost(double, tag = "7")]
     pub volume: f64,
     // other fields: TBA
-
     /// for trade
-    #[prost(double, tag="8")]
+    #[prost(double, tag = "8")]
     pub latest_trade_price: f64,
-    #[prost(double, tag="9")]
+    #[prost(double, tag = "9")]
     pub latest_trade_qty: f64,
-    #[prost(string, tag="10")]
+    #[prost(string, tag = "10")]
     pub latest_trade_side: ::prost::alloc::string::String,
     /// for orderbook
-    #[prost(message, repeated, tag="14")]
+    #[prost(message, repeated, tag = "14")]
     pub buy_price_levels: ::prost::alloc::vec::Vec<PriceLevel>,
-    #[prost(message, repeated, tag="15")]
+    #[prost(message, repeated, tag = "15")]
     pub sell_price_levels: ::prost::alloc::vec::Vec<PriceLevel>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Kline {
     /// kline trigger ts
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub timestamp: i64,
     /// kline end time
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub kline_end_timestamp: i64,
-    #[prost(double, tag="3")]
+    #[prost(double, tag = "3")]
     pub open: f64,
-    #[prost(double, tag="4")]
+    #[prost(double, tag = "4")]
     pub high: f64,
-    #[prost(double, tag="5")]
+    #[prost(double, tag = "5")]
     pub close: f64,
-    #[prost(double, tag="6")]
+    #[prost(double, tag = "6")]
     pub low: f64,
-    #[prost(double, tag="7")]
+    #[prost(double, tag = "7")]
     pub volume: f64,
-    #[prost(double, tag="8")]
+    #[prost(double, tag = "8")]
     pub amount: f64,
-    #[prost(enumeration="kline::KlineType", tag="9")]
+    #[prost(enumeration = "kline::KlineType", tag = "9")]
     pub kline_type: i32,
-    #[prost(string, tag="10")]
+    #[prost(string, tag = "10")]
     pub symbol: ::prost::alloc::string::String,
-    #[prost(string, tag="11")]
+    #[prost(string, tag = "11")]
     pub source: ::prost::alloc::string::String,
 }
 /// Nested message and enum types in `Kline`.
@@ -132,47 +131,48 @@ pub mod kline {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct FundingRate {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub instrument_code: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub exchange: ::prost::alloc::string::String,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub curr_funding_rate_timestamp: i64,
-    #[prost(int64, tag="12")]
+    #[prost(int64, tag = "12")]
     pub observe_timestamp: i64,
-    #[prost(int64, tag="15")]
+    #[prost(int64, tag = "15")]
     pub next_payment_timestamp: i64,
-    #[prost(double, tag="4")]
+    #[prost(double, tag = "4")]
     pub funding_rate: f64,
-    #[prost(double, tag="6")]
+    #[prost(double, tag = "6")]
     pub mark_price: f64,
-    #[prost(double, tag="7")]
+    #[prost(double, tag = "7")]
     pub index_price: f64,
-    #[prost(double, tag="10")]
+    #[prost(double, tag = "10")]
     pub next_funding_rate: f64,
-    #[prost(int64, tag="13")]
+    #[prost(int64, tag = "13")]
     pub next_funding_rate_timestamp: i64,
-    #[prost(string, tag="14")]
+    #[prost(string, tag = "14")]
     pub original_message: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RealtimeSignal {
     /// map to datastore table name
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub namespace: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub instrument: ::prost::alloc::string::String,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub timestamp: i64,
-    #[prost(map="string, double", tag="4")]
+    #[prost(map = "string, double", tag = "4")]
     pub data: ::std::collections::HashMap<::prost::alloc::string::String, f64>,
-    #[prost(map="string, int64", tag="6")]
+    #[prost(map = "string, int64", tag = "6")]
     pub data_int: ::std::collections::HashMap<::prost::alloc::string::String, i64>,
-    #[prost(map="string, string", tag="7")]
-    pub data_str: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// can hold json message 
-    #[prost(string, tag="5")]
+    #[prost(map = "string, string", tag = "7")]
+    pub data_str:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// can hold json message
+    #[prost(string, tag = "5")]
     pub message: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

@@ -318,3 +318,20 @@ message PostTradeEvent {
     int64  timestamp_ms = 5;
     map<string, string> meta = 6;
 }
+
+// Correlation metadata attached to orders by the engine for end-to-end
+// latency observability across engine → OMS → gateway.
+message TriggerContext {
+    string execution_id       = 1;
+    string strategy_key       = 2;
+    string trigger_event_type = 3;   // "tick", "bar", "signal", "timer", etc.
+    string instrument_code    = 4;
+    int64  source_ts_ns       = 5;   // RTMD/source timestamp if available
+    int64  recv_ts_ns         = 6;   // engine receive timestamp
+    int64  enqueue_ts_ns      = 7;   // engine queue admission timestamp
+    int64  dispatch_ts_ns     = 8;   // strategy dispatch start timestamp
+    int64  decision_ts_ns     = 9;   // strategy callback return timestamp
+    uint64 decision_seq       = 10;  // monotonic per-engine decision counter
+    int64  oms_submit_ts_ns   = 11;  // stamped by dispatcher before OMS send
+    string client_order_id    = 12;
+}

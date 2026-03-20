@@ -4,7 +4,10 @@ use zk_trading_sdk_rs::error::SdkError;
 static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK.get_or_init(|| std::sync::Mutex::new(())).lock().unwrap()
+    ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap()
 }
 
 #[test]
@@ -80,7 +83,10 @@ fn test_from_env_rejects_instance_id_out_of_range() {
     std::env::set_var("ZK_CLIENT_INSTANCE_ID", "1500"); // > 1023
 
     let result = TradingClientConfig::from_env();
-    assert!(result.is_err(), "must fail when ZK_CLIENT_INSTANCE_ID > 1023");
+    assert!(
+        result.is_err(),
+        "must fail when ZK_CLIENT_INSTANCE_ID > 1023"
+    );
     let err = result.unwrap_err();
     assert!(
         matches!(err, SdkError::InstanceIdOutOfRange(1500)),
@@ -100,7 +106,10 @@ fn test_from_env_fails_when_instance_id_missing() {
     std::env::remove_var("ZK_CLIENT_INSTANCE_ID");
 
     let result = TradingClientConfig::from_env();
-    assert!(result.is_err(), "must fail when ZK_CLIENT_INSTANCE_ID is missing");
+    assert!(
+        result.is_err(),
+        "must fail when ZK_CLIENT_INSTANCE_ID is missing"
+    );
 
     // restore
     std::env::set_var("ZK_CLIENT_INSTANCE_ID", "1");

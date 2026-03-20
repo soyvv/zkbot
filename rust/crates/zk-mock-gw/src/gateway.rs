@@ -1,18 +1,18 @@
 use std::sync::Arc;
-use tonic::{Request, Response, Status};
 use tokio::sync::Mutex;
+use tonic::{Request, Response, Status};
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::fill::{publish_booked_report, publish_cancel_report, simulate_fill};
 use crate::proto::exch_gw::{BalanceUpdate, PositionReport};
 use crate::proto::tqrpc_exch_gw::{
-    exchange_gateway_service_server::ExchangeGatewayService,
-    ExchAccountResponse, ExchBatchCancelOrdersRequest, ExchBatchSendOrdersRequest,
+    exchange_gateway_service_server::ExchangeGatewayService, ExchAccountResponse,
+    ExchBatchCancelOrdersRequest, ExchBatchSendOrdersRequest, ExchCancelOrderRequest,
     ExchFeeResponse, ExchGenericRequest, ExchGenericResponse, ExchOrderDetailResponse,
     ExchOrderTradesResponse, ExchPositionResponse, ExchQueryAccountRequest, ExchQueryFeeRequest,
-    ExchQueryOrderDetailRequest, ExchQueryOrderTradesRequest,
-    ExchQueryPositionRequest, ExchSendOrderRequest, ExchCancelOrderRequest, GatewayResponse,
+    ExchQueryOrderDetailRequest, ExchQueryOrderTradesRequest, ExchQueryPositionRequest,
+    ExchSendOrderRequest, GatewayResponse,
 };
 use crate::state::MockOrder;
 use crate::MockGwState;
@@ -93,7 +93,8 @@ impl ExchangeGatewayService for MockGatewayHandler {
 
         // Publish Linkage + BOOKED immediately — before the fill delay.
         if let Some(nats) = nats {
-            publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty, 0).await;
+            publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty, 0)
+                .await;
         }
 
         Ok(Response::new(ok_response()))
@@ -134,7 +135,8 @@ impl ExchangeGatewayService for MockGatewayHandler {
             };
 
             if let Some(nats) = nats {
-                publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty, 0).await;
+                publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty, 0)
+                    .await;
             }
         }
         Ok(Response::new(ok_response()))

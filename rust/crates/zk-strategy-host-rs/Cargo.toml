@@ -1,0 +1,20 @@
+[package]
+name = "zk-strategy-host-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Strategy registry and adapter host for zk-engine-svc"
+
+[features]
+default = []
+python = ["dep:pyo3", "dep:serde_json", "dep:zk_backtest"]
+
+[dependencies]
+anyhow = "1"
+zk-strategy-sdk-rs = { path = "../zk-strategy-sdk-rs" }
+zk-strategy-noop-rs = { path = "../../strategies/noop" }
+strategy_smoke_test = { package = "strategy-smoke-test", path = "../../strategies/strategy-smoke-test" }
+zk-strategy-mm-rs = { path = "../../strategies/mm" }
+zk-strategy-arbi-rs = { path = "../../strategies/arbi" }
+pyo3 = { version = "0.22", optional = true }
+serde_json = { version = "1", optional = true }
+zk_backtest = { package = "zk-pyo3-rs", path = "../zk-pyo3-rs", optional = true }

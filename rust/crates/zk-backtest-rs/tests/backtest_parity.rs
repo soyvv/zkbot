@@ -12,12 +12,14 @@ use zk_proto_rs::zk::{
 };
 use zk_strategy_sdk_rs::{
     context::StrategyContext,
-    models::{SAction, StrategyCancel, StrategyOrder, TimerEvent, TimerSchedule, TimerSubscription},
+    models::{
+        SAction, StrategyCancel, StrategyOrder, TimerEvent, TimerSchedule, TimerSubscription,
+    },
     strategy::Strategy,
 };
 
 use zk_backtest_rs::{
-    backtester::{Backtester, BacktestConfig},
+    backtester::{BacktestConfig, Backtester},
     event_queue::BtEventKind,
     match_policy::{FirstComeFirstServedMatchPolicy, ImmediateMatchPolicy},
 };
@@ -41,11 +43,19 @@ fn tick(sym: &str, ts: i64, bids: Vec<(f64, f64)>, asks: Vec<(f64, f64)>) -> Tic
         original_timestamp: ts,
         buy_price_levels: bids
             .into_iter()
-            .map(|(price, qty)| PriceLevel { price, qty, ..Default::default() })
+            .map(|(price, qty)| PriceLevel {
+                price,
+                qty,
+                ..Default::default()
+            })
             .collect(),
         sell_price_levels: asks
             .into_iter()
-            .map(|(price, qty)| PriceLevel { price, qty, ..Default::default() })
+            .map(|(price, qty)| PriceLevel {
+                price,
+                qty,
+                ..Default::default()
+            })
             .collect(),
         ..Default::default()
     }
@@ -63,7 +73,9 @@ fn order(id: i64, sym: &str, side: BuySellType, price: f64, qty: f64, acc: i64) 
 }
 
 fn snap_status(u: &OrderUpdateEvent) -> Option<OrderStatus> {
-    u.order_snapshot.as_ref().and_then(|s| OrderStatus::try_from(s.order_status).ok())
+    u.order_snapshot
+        .as_ref()
+        .and_then(|s| OrderStatus::try_from(s.order_status).ok())
 }
 
 fn has_status(updates: &[OrderUpdateEvent], status: OrderStatus) -> bool {
@@ -77,7 +89,14 @@ fn has_status(updates: &[OrderUpdateEvent], status: OrderStatus) -> bool {
 struct BuyImmediately;
 impl Strategy for BuyImmediately {
     fn on_reinit(&mut self, _ctx: &StrategyContext) -> Vec<SAction> {
-        vec![SAction::PlaceOrder(order(1, "BTC/USD@SIM1", BuySellType::BsBuy, 50_000.0, 1.0, 100))]
+        vec![SAction::PlaceOrder(order(
+            1,
+            "BTC/USD@SIM1",
+            BuySellType::BsBuy,
+            50_000.0,
+            1.0,
+            100,
+        ))]
     }
 }
 
@@ -99,7 +118,11 @@ fn test_immediate_fill_on_reinit() {
     assert!(
         has_status(&result.order_updates, OrderStatus::Filled),
         "expected Filled order update; got: {:?}",
-        result.order_updates.iter().map(snap_status).collect::<Vec<_>>()
+        result
+            .order_updates
+            .iter()
+            .map(snap_status)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -107,12 +130,21 @@ fn test_immediate_fill_on_reinit() {
 // Test 2: FCFS — buy fills when matching ask arrives in tick
 // ---------------------------------------------------------------------------
 
-struct BuyOnFirstTick { placed: bool }
+struct BuyOnFirstTick {
+    placed: bool,
+}
 impl Strategy for BuyOnFirstTick {
     fn on_tick(&mut self, _t: &TickData, _ctx: &StrategyContext) -> Vec<SAction> {
         if !self.placed {
             self.placed = true;
-            return vec![SAction::PlaceOrder(order(2, "ETH/USD@SIM1", BuySellType::BsBuy, 3_000.0, 2.0, 200))];
+            return vec![SAction::PlaceOrder(order(
+                2,
+                "ETH/USD@SIM1",
+                BuySellType::BsBuy,
+                3_000.0,
+                2.0,
+                200,
+            ))];
         }
         vec![]
     }
@@ -134,8 +166,14 @@ fn test_fcfs_buy_fills_on_matching_ask() {
     // Tick 1: places order; ask at 3001 (misses 3000 limit).
     // Tick 2: ask drops to 2990, which is <= 3000 → fill.
     bt.add_sorted_stream(vec![
-        (1_000, BtEventKind::Tick(tick(sym, 1_000, vec![(2_999.0, 5.0)], vec![(3_001.0, 5.0)]))),
-        (2_000, BtEventKind::Tick(tick(sym, 2_000, vec![(2_990.0, 5.0)], vec![(2_990.0, 5.0)]))),
+        (
+            1_000,
+            BtEventKind::Tick(tick(sym, 1_000, vec![(2_999.0, 5.0)], vec![(3_001.0, 5.0)])),
+        ),
+        (
+            2_000,
+            BtEventKind::Tick(tick(sym, 2_000, vec![(2_990.0, 5.0)], vec![(2_990.0, 5.0)])),
+        ),
     ]);
     let result = bt.run(&mut BuyOnFirstTick { placed: false });
 
@@ -143,7 +181,11 @@ fn test_fcfs_buy_fills_on_matching_ask() {
     assert!(
         has_status(&result.order_updates, OrderStatus::Filled),
         "expected Filled; statuses: {:?}",
-        result.order_updates.iter().map(snap_status).collect::<Vec<_>>()
+        result
+            .order_updates
+            .iter()
+            .map(snap_status)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -151,19 +193,32 @@ fn test_fcfs_buy_fills_on_matching_ask() {
 // Test 3: Cancel booked order before any fill
 // ---------------------------------------------------------------------------
 
-struct PlaceThenCancel { placed: bool, cancelled: bool }
+struct PlaceThenCancel {
+    placed: bool,
+    cancelled: bool,
+}
 impl Strategy for PlaceThenCancel {
     fn on_tick(&mut self, _t: &TickData, _ctx: &StrategyContext) -> Vec<SAction> {
         if !self.placed {
             self.placed = true;
-            return vec![SAction::PlaceOrder(order(3, "BNB/USD@SIM1", BuySellType::BsBuy, 500.0, 1.0, 300))];
+            return vec![SAction::PlaceOrder(order(
+                3,
+                "BNB/USD@SIM1",
+                BuySellType::BsBuy,
+                500.0,
+                1.0,
+                300,
+            ))];
         }
         vec![]
     }
     fn on_order_update(&mut self, u: &OrderUpdateEvent, _ctx: &StrategyContext) -> Vec<SAction> {
         if !self.cancelled && snap_status(u) == Some(OrderStatus::Booked) {
             self.cancelled = true;
-            return vec![SAction::Cancel(StrategyCancel { order_id: 3, account_id: 300 })];
+            return vec![SAction::Cancel(StrategyCancel {
+                order_id: 3,
+                account_id: 300,
+            })];
         }
         vec![]
     }
@@ -184,16 +239,29 @@ fn test_cancel_booked_order() {
     let mut bt = Backtester::new(config);
     // Ask at 600 — buy limit at 500 never fills, books instead → cancel fires
     bt.add_sorted_stream(vec![
-        (1_000, BtEventKind::Tick(tick(sym, 1_000, vec![(499.0, 10.0)], vec![(600.0, 10.0)]))),
-        (2_000, BtEventKind::Tick(tick(sym, 2_000, vec![(499.0, 10.0)], vec![(600.0, 10.0)]))),
+        (
+            1_000,
+            BtEventKind::Tick(tick(sym, 1_000, vec![(499.0, 10.0)], vec![(600.0, 10.0)])),
+        ),
+        (
+            2_000,
+            BtEventKind::Tick(tick(sym, 2_000, vec![(499.0, 10.0)], vec![(600.0, 10.0)])),
+        ),
     ]);
-    let result = bt.run(&mut PlaceThenCancel { placed: false, cancelled: false });
+    let result = bt.run(&mut PlaceThenCancel {
+        placed: false,
+        cancelled: false,
+    });
 
     assert_eq!(result.order_placements.len(), 1);
     assert!(
         has_status(&result.order_updates, OrderStatus::Cancelled),
         "expected Cancelled; statuses: {:?}",
-        result.order_updates.iter().map(snap_status).collect::<Vec<_>>()
+        result
+            .order_updates
+            .iter()
+            .map(snap_status)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -206,7 +274,7 @@ impl Strategy for TwoPriceMissOrders {
     fn on_reinit(&mut self, _ctx: &StrategyContext) -> Vec<SAction> {
         vec![
             SAction::PlaceOrder(order(4, "SOL/USD@SIM1", BuySellType::BsBuy, 10.0, 1.0, 400)),
-            SAction::PlaceOrder(order(5, "SOL/USD@SIM1", BuySellType::BsBuy,  9.0, 1.0, 400)),
+            SAction::PlaceOrder(order(5, "SOL/USD@SIM1", BuySellType::BsBuy, 9.0, 1.0, 400)),
         ]
     }
 }
@@ -225,13 +293,16 @@ fn test_price_miss_orders_do_not_fill() {
     };
     let mut bt = Backtester::new(config);
     // Ask is 50, both bids far below
-    bt.add_sorted_stream(vec![
-        (1_000, BtEventKind::Tick(tick(sym, 1_000, vec![(8.0, 100.0)], vec![(50.0, 100.0)]))),
-    ]);
+    bt.add_sorted_stream(vec![(
+        1_000,
+        BtEventKind::Tick(tick(sym, 1_000, vec![(8.0, 100.0)], vec![(50.0, 100.0)])),
+    )]);
     let result = bt.run(&mut TwoPriceMissOrders);
 
     assert_eq!(result.order_placements.len(), 2);
-    let filled_count = result.order_updates.iter()
+    let filled_count = result
+        .order_updates
+        .iter()
         .filter(|u| snap_status(u) == Some(OrderStatus::Filled))
         .count();
     assert_eq!(filled_count, 0, "orders with limit below ask must not fill");
@@ -241,12 +312,21 @@ fn test_price_miss_orders_do_not_fill() {
 // Test 5: Sell order fills against bid when bid >= limit
 // ---------------------------------------------------------------------------
 
-struct SellWhenBidRises { placed: bool }
+struct SellWhenBidRises {
+    placed: bool,
+}
 impl Strategy for SellWhenBidRises {
     fn on_tick(&mut self, _t: &TickData, _ctx: &StrategyContext) -> Vec<SAction> {
         if !self.placed {
             self.placed = true;
-            return vec![SAction::PlaceOrder(order(6, "BTC/USD@SIM1", BuySellType::BsSell, 49_000.0, 0.5, 500))];
+            return vec![SAction::PlaceOrder(order(
+                6,
+                "BTC/USD@SIM1",
+                BuySellType::BsSell,
+                49_000.0,
+                0.5,
+                500,
+            ))];
         }
         vec![]
     }
@@ -267,9 +347,25 @@ fn test_sell_fills_when_bid_meets_limit() {
     let mut bt = Backtester::new(config);
     bt.add_sorted_stream(vec![
         // Tick 1: bid 48k misses 49k limit; order books.
-        (1_000, BtEventKind::Tick(tick(sym, 1_000, vec![(48_000.0, 1.0)], vec![(50_000.0, 1.0)]))),
+        (
+            1_000,
+            BtEventKind::Tick(tick(
+                sym,
+                1_000,
+                vec![(48_000.0, 1.0)],
+                vec![(50_000.0, 1.0)],
+            )),
+        ),
         // Tick 2: bid 50k >= 49k limit → fill.
-        (2_000, BtEventKind::Tick(tick(sym, 2_000, vec![(50_000.0, 1.0)], vec![(51_000.0, 1.0)]))),
+        (
+            2_000,
+            BtEventKind::Tick(tick(
+                sym,
+                2_000,
+                vec![(50_000.0, 1.0)],
+                vec![(51_000.0, 1.0)],
+            )),
+        ),
     ]);
     let result = bt.run(&mut SellWhenBidRises { placed: false });
 
@@ -277,7 +373,11 @@ fn test_sell_fills_when_bid_meets_limit() {
     assert!(
         has_status(&result.order_updates, OrderStatus::Filled),
         "sell should fill when bid >= limit; statuses: {:?}",
-        result.order_updates.iter().map(snap_status).collect::<Vec<_>>()
+        result
+            .order_updates
+            .iter()
+            .map(snap_status)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -285,7 +385,9 @@ fn test_sell_fills_when_bid_meets_limit() {
 // Test 6: One-shot timer fires exactly once
 // ---------------------------------------------------------------------------
 
-struct OnceTimerStrategy { fires: usize }
+struct OnceTimerStrategy {
+    fires: usize,
+}
 impl Strategy for OnceTimerStrategy {
     fn on_reinit(&mut self, _ctx: &StrategyContext) -> Vec<SAction> {
         vec![SAction::SubscribeTimer(TimerSubscription {
@@ -314,10 +416,12 @@ fn test_once_timer_fires_exactly_once() {
     let mut bt = Backtester::new(config);
     // Ticks at 1s through 10s; timer fires at 5s.
     bt.add_sorted_stream(
-        (1..=10).map(|i| {
-            let ts = i * 1_000_i64;
-            (ts, BtEventKind::Tick(tick(sym, ts, vec![], vec![])))
-        }).collect(),
+        (1..=10)
+            .map(|i| {
+                let ts = i * 1_000_i64;
+                (ts, BtEventKind::Tick(tick(sym, ts, vec![], vec![])))
+            })
+            .collect(),
     );
 
     let mut strategy = OnceTimerStrategy { fires: 0 };
@@ -329,7 +433,9 @@ fn test_once_timer_fires_exactly_once() {
 // Test 7: Cron timer fires once per second for 5 seconds
 // ---------------------------------------------------------------------------
 
-struct CronTimerStrategy { fires: usize }
+struct CronTimerStrategy {
+    fires: usize,
+}
 impl Strategy for CronTimerStrategy {
     fn on_reinit(&mut self, _ctx: &StrategyContext) -> Vec<SAction> {
         vec![SAction::SubscribeTimer(TimerSubscription {
@@ -362,22 +468,29 @@ fn test_cron_timer_fires_at_expected_intervals() {
     let mut bt = Backtester::new(config);
     // Ticks at 1s, 2s, 3s, 4s, 5s.
     bt.add_sorted_stream(
-        (1..=5).map(|i| {
-            let ts = i * 1_000_i64;
-            (ts, BtEventKind::Tick(tick(sym, ts, vec![], vec![])))
-        }).collect(),
+        (1..=5)
+            .map(|i| {
+                let ts = i * 1_000_i64;
+                (ts, BtEventKind::Tick(tick(sym, ts, vec![], vec![])))
+            })
+            .collect(),
     );
 
     let mut strategy = CronTimerStrategy { fires: 0 };
     bt.run(&mut strategy);
-    assert_eq!(strategy.fires, 5, "cron timer (every second) must fire once per tick-second");
+    assert_eq!(
+        strategy.fires, 5,
+        "cron timer (every second) must fire once per tick-second"
+    );
 }
 
 // ---------------------------------------------------------------------------
 // Test 8: Strategy sees correct open orders count via ctx in on_order_update
 // ---------------------------------------------------------------------------
 
-struct TrackOpenOrdersStrategy { max_open_seen: usize }
+struct TrackOpenOrdersStrategy {
+    max_open_seen: usize,
+}
 impl Strategy for TrackOpenOrdersStrategy {
     fn on_reinit(&mut self, _ctx: &StrategyContext) -> Vec<SAction> {
         vec![
@@ -410,9 +523,10 @@ fn test_strategy_queries_open_orders_in_callback() {
     };
     let mut bt = Backtester::new(config);
     // High ask so orders book but never fill.
-    bt.add_sorted_stream(vec![
-        (1_000, BtEventKind::Tick(tick(sym, 1_000, vec![(0.5, 10.0)], vec![(999_999.0, 10.0)]))),
-    ]);
+    bt.add_sorted_stream(vec![(
+        1_000,
+        BtEventKind::Tick(tick(sym, 1_000, vec![(0.5, 10.0)], vec![(999_999.0, 10.0)])),
+    )]);
 
     let mut strategy = TrackOpenOrdersStrategy { max_open_seen: 0 };
     bt.run(&mut strategy);
@@ -427,9 +541,15 @@ fn test_strategy_queries_open_orders_in_callback() {
 // Test 9: Strategy sees position in ctx during on_position_update callback
 // ---------------------------------------------------------------------------
 
-struct ObservePositionStrategy { saw_position: bool }
+struct ObservePositionStrategy {
+    saw_position: bool,
+}
 impl Strategy for ObservePositionStrategy {
-    fn on_position_update(&mut self, _pue: &PositionUpdateEvent, ctx: &StrategyContext) -> Vec<SAction> {
+    fn on_position_update(
+        &mut self,
+        _pue: &PositionUpdateEvent,
+        ctx: &StrategyContext,
+    ) -> Vec<SAction> {
         if ctx.get_position(100, "BTC/USD@SIM1").is_some() {
             self.saw_position = true;
         }
@@ -463,9 +583,14 @@ fn test_strategy_queries_position_in_callback() {
     };
     bt.add_sorted_stream(vec![(1_000, BtEventKind::PositionUpdate(pos_event))]);
 
-    let mut strategy = ObservePositionStrategy { saw_position: false };
+    let mut strategy = ObservePositionStrategy {
+        saw_position: false,
+    };
     bt.run(&mut strategy);
-    assert!(strategy.saw_position, "position must be visible in ctx during on_position_update");
+    assert!(
+        strategy.saw_position,
+        "position must be visible in ctx during on_position_update"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -473,9 +598,14 @@ fn test_strategy_queries_position_in_callback() {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-struct WarmupData { threshold: f64, label: String }
+struct WarmupData {
+    threshold: f64,
+    label: String,
+}
 
-struct ReadsInitInOnInit { observed_threshold: Option<f64> }
+struct ReadsInitInOnInit {
+    observed_threshold: Option<f64>,
+}
 impl Strategy for ReadsInitInOnInit {
     fn on_init(&mut self, ctx: &StrategyContext) -> Vec<SAction> {
         if let Some(d) = ctx.get_init_data::<WarmupData>() {
@@ -495,12 +625,17 @@ fn test_init_data_readable_in_on_init() {
         init_positions: None,
         match_policy: Box::new(ImmediateMatchPolicy),
         init_data_fetcher: Some(Box::new(|_ctx| {
-            Box::new(WarmupData { threshold: 42.5, label: "test".to_string() })
+            Box::new(WarmupData {
+                threshold: 42.5,
+                label: "test".to_string(),
+            })
         })),
         progress_callback: None,
     };
     let mut bt = Backtester::new(config);
-    let mut strategy = ReadsInitInOnInit { observed_threshold: None };
+    let mut strategy = ReadsInitInOnInit {
+        observed_threshold: None,
+    };
     bt.run(&mut strategy);
     assert_eq!(
         strategy.observed_threshold,
@@ -513,7 +648,9 @@ fn test_init_data_readable_in_on_init() {
 // Test 11: init_data persists and is readable in on_reinit
 // ---------------------------------------------------------------------------
 
-struct ReadsInitInOnReinit { observed_label: Option<String> }
+struct ReadsInitInOnReinit {
+    observed_label: Option<String>,
+}
 impl Strategy for ReadsInitInOnReinit {
     fn on_reinit(&mut self, ctx: &StrategyContext) -> Vec<SAction> {
         if let Some(d) = ctx.get_init_data::<WarmupData>() {
@@ -533,12 +670,17 @@ fn test_init_data_readable_in_on_reinit() {
         init_positions: None,
         match_policy: Box::new(ImmediateMatchPolicy),
         init_data_fetcher: Some(Box::new(|_ctx| {
-            Box::new(WarmupData { threshold: 1.0, label: "warmup".to_string() })
+            Box::new(WarmupData {
+                threshold: 1.0,
+                label: "warmup".to_string(),
+            })
         })),
         progress_callback: None,
     };
     let mut bt = Backtester::new(config);
-    let mut strategy = ReadsInitInOnReinit { observed_label: None };
+    let mut strategy = ReadsInitInOnReinit {
+        observed_label: None,
+    };
     bt.run(&mut strategy);
     assert_eq!(
         strategy.observed_label.as_deref(),
@@ -574,10 +716,12 @@ fn test_progress_callback_fires_0_and_100() {
     let mut bt = Backtester::new(config);
     // 10 ticks spanning 1s–10s give a clear 0–100% range.
     bt.add_sorted_stream(
-        (1..=10).map(|i| {
-            let ts = i * 1_000_i64;
-            (ts, BtEventKind::Tick(tick(sym, ts, vec![], vec![])))
-        }).collect(),
+        (1..=10)
+            .map(|i| {
+                let ts = i * 1_000_i64;
+                (ts, BtEventKind::Tick(tick(sym, ts, vec![], vec![])))
+            })
+            .collect(),
     );
     bt.run(&mut NoopStrategy);
 
@@ -609,10 +753,12 @@ fn test_progress_fires_in_order() {
     };
     let mut bt = Backtester::new(config);
     bt.add_sorted_stream(
-        (1..=100).map(|i| {
-            let ts = i * 1_000_i64;
-            (ts, BtEventKind::Tick(tick(sym, ts, vec![], vec![])))
-        }).collect(),
+        (1..=100)
+            .map(|i| {
+                let ts = i * 1_000_i64;
+                (ts, BtEventKind::Tick(tick(sym, ts, vec![], vec![])))
+            })
+            .collect(),
     );
     bt.run(&mut NoopStrategy);
 

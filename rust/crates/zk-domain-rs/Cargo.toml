@@ -1,8 +1,0 @@
-[package]
-name = "zk-domain-rs"
-version = "0.1.0"
-edition = "2021"
-description = "Core domain enums, state models, and action/event traits for zkbot"
-
-[dependencies]
-zk-proto-rs = { path = "../zk-proto-rs" }

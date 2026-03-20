@@ -52,13 +52,7 @@ impl TimerManager {
     /// `expr` must be a 6-field cron expression `<sec> <min> <hour> <day> <month> <weekday>`.
     /// `start_ms` is the reference time for computing the first occurrence.
     /// `end_ms` is optional; no events are fired after this timestamp.
-    pub fn subscribe_cron(
-        &mut self,
-        key: &str,
-        expr: &str,
-        start_ms: i64,
-        end_ms: Option<i64>,
-    ) {
+    pub fn subscribe_cron(&mut self, key: &str, expr: &str, start_ms: i64, end_ms: Option<i64>) {
         let schedule = Schedule::from_str(expr)
             .unwrap_or_else(|e| panic!("invalid cron expression '{expr}': {e}"));
         let start_dt: DateTime<Utc> = Utc.timestamp_millis_opt(start_ms).unwrap();
@@ -69,7 +63,8 @@ impl TimerManager {
         if end_ms.map_or(false, |e| first > e) {
             return;
         }
-        self.crons.insert(key.to_string(), CronEntry { schedule, end_ms });
+        self.crons
+            .insert(key.to_string(), CronEntry { schedule, end_ms });
         self.heap.push(Reverse(HeapEntry {
             fire_ms: first,
             key: key.to_string(),
@@ -95,7 +90,10 @@ impl TimerManager {
                 break;
             }
             let Reverse(entry) = self.heap.pop().unwrap();
-            events.push(TimerEvent { timer_key: entry.key.clone(), ts_ms: entry.fire_ms });
+            events.push(TimerEvent {
+                timer_key: entry.key.clone(),
+                ts_ms: entry.fire_ms,
+            });
 
             if entry.kind == TimerKind::Cron {
                 if let Some(cron_entry) = self.crons.get(&entry.key) {

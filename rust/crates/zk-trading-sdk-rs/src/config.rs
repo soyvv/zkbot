@@ -29,23 +29,27 @@ impl TradingClientConfig {
         let nats_url = std::env::var("ZK_NATS_URL")
             .map_err(|_| SdkError::Config("ZK_NATS_URL is required".into()))?;
 
-        let env = std::env::var("ZK_ENV")
-            .map_err(|_| SdkError::Config("ZK_ENV is required".into()))?;
+        let env =
+            std::env::var("ZK_ENV").map_err(|_| SdkError::Config("ZK_ENV is required".into()))?;
 
         let account_ids_str = std::env::var("ZK_ACCOUNT_IDS")
             .map_err(|_| SdkError::Config("ZK_ACCOUNT_IDS is required".into()))?;
         let account_ids = account_ids_str
             .split(',')
-            .map(|s| s.trim().parse::<i64>().map_err(|_| SdkError::Config(
-                format!("ZK_ACCOUNT_IDS: invalid account_id '{s}'")
-            )))
+            .map(|s| {
+                s.trim().parse::<i64>().map_err(|_| {
+                    SdkError::Config(format!("ZK_ACCOUNT_IDS: invalid account_id '{s}'"))
+                })
+            })
             .collect::<Result<Vec<i64>, SdkError>>()?;
 
         let client_instance_id = std::env::var("ZK_CLIENT_INSTANCE_ID")
             .map_err(|_| SdkError::InstanceIdMissing)
-            .and_then(|s| s.parse::<u16>().map_err(|_| SdkError::Config(
-                "ZK_CLIENT_INSTANCE_ID must be a number 0–1023".into()
-            )))?;
+            .and_then(|s| {
+                s.parse::<u16>().map_err(|_| {
+                    SdkError::Config("ZK_CLIENT_INSTANCE_ID must be a number 0–1023".into())
+                })
+            })?;
         if client_instance_id > 1023 {
             return Err(SdkError::InstanceIdOutOfRange(client_instance_id));
         }
@@ -55,6 +59,13 @@ impl TradingClientConfig {
 
         let refdata_grpc = std::env::var("ZK_REFDATA_GRPC").ok();
 
-        Ok(Self { nats_url, env, account_ids, client_instance_id, discovery_bucket, refdata_grpc })
+        Ok(Self {
+            nats_url,
+            env,
+            account_ids,
+            client_instance_id,
+            discovery_bucket,
+            refdata_grpc,
+        })
     }
 }

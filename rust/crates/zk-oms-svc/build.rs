@@ -14,8 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // ── Reuse message types from zk-proto-rs (no duplication) ──────────
         // These extern_path entries tell tonic/prost NOT to regenerate message
         // types for these packages — all references will resolve to zk-proto-rs.
-        .extern_path(".zk.common.v1",  "::zk_proto_rs::zk::common::v1")
-        .extern_path(".zk.oms.v1",     "::zk_proto_rs::zk::oms::v1")
+        .extern_path(".zk.common.v1", "::zk_proto_rs::zk::common::v1")
+        .extern_path(".zk.oms.v1", "::zk_proto_rs::zk::oms::v1")
         .extern_path(".zk.exch_gw.v1", "::zk_proto_rs::zk::exch_gw::v1")
         .extern_path(".zk.gateway.v1", "::zk_proto_rs::zk::gateway::v1")
         // ── Generate server stubs for OMSService ────────────────────────────

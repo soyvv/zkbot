@@ -9,11 +9,11 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryAccountRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub instruments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 // @dataclass
@@ -23,7 +23,7 @@ pub struct OmsQueryAccountRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct OdsQueryAccountSummaryRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
 }
 /// @dataclass
@@ -34,11 +34,11 @@ pub struct OdsQueryAccountSummaryRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OdsAccountSummaryResponse {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub account_summary: ::core::option::Option<super::exch_gw::AccountSummaryEntry>,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub timestamp: i64,
 }
 /// @dataclass
@@ -48,9 +48,9 @@ pub struct OdsAccountSummaryResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OdsQueryAccountSettingRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub instrument_id: ::prost::alloc::string::String,
 }
 /// @dataclass
@@ -61,11 +61,11 @@ pub struct OdsQueryAccountSettingRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OdsAccountSettingResponse {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub account_setting_entry: ::core::option::Option<super::exch_gw::AccountSettingEntry>,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub timestamp: i64,
 }
 /// @dataclass
@@ -75,9 +75,9 @@ pub struct OdsAccountSettingResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OdsUpdateAccountSettingRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub account_setting_entry: ::core::option::Option<super::exch_gw::AccountSettingEntry>,
 }
 /// @dataclass
@@ -90,15 +90,15 @@ pub struct OdsUpdateAccountSettingRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OdsUpdateAccountSettingResponse {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub margin_mode_changed: bool,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub leverage_changed: bool,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub err_msg: ::prost::alloc::string::String,
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub timestamp: i64,
 }
 /// @dataclass
@@ -109,11 +109,11 @@ pub struct OdsUpdateAccountSettingResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryPositionRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub instruments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// @dataclass
@@ -122,7 +122,7 @@ pub struct OmsQueryPositionRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsPositionResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub positions: ::prost::alloc::vec::Vec<super::oms::Position>,
 }
 /// @dataclass
@@ -133,11 +133,11 @@ pub struct OmsPositionResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryOpenOrderRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub instruments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// @dataclass
@@ -147,9 +147,9 @@ pub struct OmsQueryOpenOrderRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryOrderDetailRequest {
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub order_refs: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
 }
 /// @dataclass
@@ -158,7 +158,7 @@ pub struct OmsQueryOrderDetailRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsOrderDetailResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub orders: ::prost::alloc::vec::Vec<super::oms::Order>,
 }
 /// @dataclass
@@ -169,9 +169,9 @@ pub struct OmsOrderDetailResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQeuryTradeDetailRequest {
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub order_refs: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub query_gw: bool,
 }
 /// @dataclass
@@ -180,7 +180,7 @@ pub struct OmsQeuryTradeDetailRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsTradeDetailResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub trades: ::prost::alloc::vec::Vec<super::oms::Trade>,
 }
 /// @dataclass
@@ -192,13 +192,13 @@ pub struct OmsTradeDetailResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryInstrumentRefdataRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub instruments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag = "3")]
     pub start: i32,
-    #[prost(int32, tag="4")]
+    #[prost(int32, tag = "4")]
     pub limit: i32,
 }
 /// @dataclass
@@ -210,13 +210,13 @@ pub struct OmsQueryInstrumentRefdataRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryInstrumentRefdataResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub instrument_refdata: ::prost::alloc::vec::Vec<super::common::InstrumentRefData>,
-    #[prost(int32, tag="2")]
+    #[prost(int32, tag = "2")]
     pub prev: i32,
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag = "3")]
     pub next: i32,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub prev_instrument_id: ::prost::alloc::string::String,
 }
 /// @dataclass
@@ -225,7 +225,7 @@ pub struct OmsQueryInstrumentRefdataResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct OmsQueryInstrumentRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub account_id: i64,
 }
 /// @dataclass
@@ -234,7 +234,7 @@ pub struct OmsQueryInstrumentRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryInstrumentResponse {
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub instrument_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// @dataclass
@@ -243,7 +243,7 @@ pub struct OmsQueryInstrumentResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryAccountTradingConfigRequest {
-    #[prost(int64, repeated, tag="1")]
+    #[prost(int64, repeated, tag = "1")]
     pub account_ids: ::prost::alloc::vec::Vec<i64>,
 }
 /// @dataclass
@@ -254,7 +254,7 @@ pub struct OmsQueryAccountTradingConfigRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryAccountTradingConfigResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub account_trading_configs: ::prost::alloc::vec::Vec<super::ods::AccountTradingConfig>,
 }
 /// @dataclass
@@ -263,7 +263,7 @@ pub struct OmsQueryAccountTradingConfigResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryOmsConfigRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub oms_id: ::prost::alloc::string::String,
 }
 /// @dataclass
@@ -272,7 +272,7 @@ pub struct OmsQueryOmsConfigRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryOmsConfigResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub oms_config: ::core::option::Option<super::ods::OmsConfigEntry>,
 }
 /// @dataclass
@@ -283,11 +283,11 @@ pub struct OmsQueryOmsConfigResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryClientConfigRequest {
-    #[prost(int64, repeated, tag="1")]
+    #[prost(int64, repeated, tag = "1")]
     pub trading_account_ids: ::prost::alloc::vec::Vec<i64>,
-    #[prost(int64, repeated, tag="2")]
+    #[prost(int64, repeated, tag = "2")]
     pub order_subscribed_account_ids: ::prost::alloc::vec::Vec<i64>,
-    #[prost(int64, repeated, tag="3")]
+    #[prost(int64, repeated, tag = "3")]
     pub position_subscribed_account_ids: ::prost::alloc::vec::Vec<i64>,
 }
 /// @dataclass
@@ -300,11 +300,11 @@ pub struct OmsQueryClientConfigRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OmsQueryClientConfigResponse {
-    #[prost(map="int64, string", tag="1")]
+    #[prost(map = "int64, string", tag = "1")]
     pub oms_service_endpoints: ::std::collections::HashMap<i64, ::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub oms_orderupdates_endpoints: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub oms_balanceupdates_endpoints: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// @dataclass
@@ -313,7 +313,7 @@ pub struct OmsQueryClientConfigResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OdsRtmdQueryRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub instrument_id: ::prost::alloc::string::String,
 }
 /// @dataclass
@@ -323,9 +323,9 @@ pub struct OdsRtmdQueryRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OdsRtmdChannelQueryResponse {
-    #[prost(bool, tag="1")]
+    #[prost(bool, tag = "1")]
     pub channel_present: bool,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub rtmd_channel: ::prost::alloc::string::String,
 }
 /// @dataclass
@@ -335,9 +335,9 @@ pub struct OdsRtmdChannelQueryResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OdsRtmdDataQueryResponse {
-    #[prost(bool, tag="1")]
+    #[prost(bool, tag = "1")]
     pub data_present: bool,
-    #[prost(bytes="vec", tag="3")]
+    #[prost(bytes = "vec", tag = "3")]
     pub rtmd_orderbook_bytes: ::prost::alloc::vec::Vec<u8>,
 }
 /// @dataclass
@@ -347,9 +347,9 @@ pub struct OdsRtmdDataQueryResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OdsRtmdSubQueryRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub exch_name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub rtmd_instance_id: ::prost::alloc::string::String,
 }
 // @@protoc_insertion_point(module)

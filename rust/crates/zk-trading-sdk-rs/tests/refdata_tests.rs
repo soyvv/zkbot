@@ -2,8 +2,8 @@
 //!
 //! Uses a mock `RefdataGrpc` to test without a real gRPC server.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
@@ -30,7 +30,10 @@ impl MockRefdataGrpc {
 
 #[async_trait::async_trait]
 impl RefdataGrpc for MockRefdataGrpc {
-    async fn query_instrument_by_id(&self, instrument_id: &str) -> Result<InstrumentRefdataResponse, SdkError> {
+    async fn query_instrument_by_id(
+        &self,
+        instrument_id: &str,
+    ) -> Result<InstrumentRefdataResponse, SdkError> {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         if self.fail_next.load(Ordering::SeqCst) {
             return Err(SdkError::Config("mock gRPC unavailable".into()));
@@ -118,7 +121,10 @@ fn cache_with_entry(instrument_id: &str, valid: bool, deprecated: bool) -> Refda
 fn test_refdata_cache_hit_skips_grpc() {
     // If a valid entry is in the cache, no gRPC call should be needed.
     let cache = cache_with_entry("BTCUSDT_MOCK", true, false);
-    let entry = cache.instruments.get("BTCUSDT_MOCK").expect("entry must exist");
+    let entry = cache
+        .instruments
+        .get("BTCUSDT_MOCK")
+        .expect("entry must exist");
     assert!(entry.valid);
     assert!(!entry.deprecated);
     assert_eq!(entry.data.price_tick_size, 0.01);
@@ -132,7 +138,10 @@ fn test_refdata_invalidation_marks_entry_stale() {
         entry.valid = false;
     }
     let entry = cache.instruments.get("BTCUSDT_MOCK").unwrap();
-    assert!(!entry.valid, "entry must be marked invalid after invalidation");
+    assert!(
+        !entry.valid,
+        "entry must be marked invalid after invalidation"
+    );
     assert!(!entry.deprecated, "invalidate != deprecate");
 }
 
@@ -165,19 +174,24 @@ fn test_refdata_secondary_index_populated_on_insert() {
         updated_at_ms: 1712000000000,
     };
     // Insert into primary cache
-    cache.instruments.insert("BTCUSDT_MOCK".to_string(), CachedEntry {
-        data: data.clone(),
-        valid: true,
-        deprecated: false,
-        loaded_at_ms: 1712000000000,
-    });
+    cache.instruments.insert(
+        "BTCUSDT_MOCK".to_string(),
+        CachedEntry {
+            data: data.clone(),
+            valid: true,
+            deprecated: false,
+            loaded_at_ms: 1712000000000,
+        },
+    );
     // Populate secondary index (as sdk would do after a gRPC fetch)
     cache.by_venue_symbol.insert(
         ("MOCK".to_string(), "BTC-USDT".to_string()),
         "BTCUSDT_MOCK".to_string(),
     );
 
-    let resolved = cache.by_venue_symbol.get(&("MOCK".to_string(), "BTC-USDT".to_string()));
+    let resolved = cache
+        .by_venue_symbol
+        .get(&("MOCK".to_string(), "BTC-USDT".to_string()));
     assert_eq!(resolved.map(String::as_str), Some("BTCUSDT_MOCK"));
 }
 
@@ -200,16 +214,28 @@ fn test_market_status_cache_inline_update() {
         },
     );
 
-    let entry = cache.market_status.get(&("MOCK".to_string(), "MOCK".to_string())).unwrap();
+    let entry = cache
+        .market_status
+        .get(&("MOCK".to_string(), "MOCK".to_string()))
+        .unwrap();
     assert_eq!(entry.data.session_state, "open");
 
     // Inline update from NATS event
-    if let Some(e) = cache.market_status.get_mut(&("MOCK".to_string(), "MOCK".to_string())) {
+    if let Some(e) = cache
+        .market_status
+        .get_mut(&("MOCK".to_string(), "MOCK".to_string()))
+    {
         e.data.session_state = "closed".to_string();
     }
 
-    let entry = cache.market_status.get(&("MOCK".to_string(), "MOCK".to_string())).unwrap();
-    assert_eq!(entry.data.session_state, "closed", "market status must update inline without gRPC");
+    let entry = cache
+        .market_status
+        .get(&("MOCK".to_string(), "MOCK".to_string()))
+        .unwrap();
+    assert_eq!(
+        entry.data.session_state, "closed",
+        "market status must update inline without gRPC"
+    );
 }
 
 // ── RefdataSdk query_instrument behavior ─────────────────────────────────────
@@ -222,13 +248,27 @@ async fn test_sdk_cache_miss_calls_grpc_and_populates_cache() {
     let call_count = Arc::clone(&mock.call_count);
     let sdk = RefdataSdkInner::new_with_mock(mock);
 
-    let result = sdk.query_instrument("BTCUSDT_MOCK").await.expect("must succeed");
+    let result = sdk
+        .query_instrument("BTCUSDT_MOCK")
+        .await
+        .expect("must succeed");
     assert_eq!(result.price_tick_size, 0.01);
-    assert_eq!(call_count.load(Ordering::SeqCst), 1, "gRPC called once on cache miss");
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        1,
+        "gRPC called once on cache miss"
+    );
 
     // Second call should hit cache — no extra gRPC call
-    let _ = sdk.query_instrument("BTCUSDT_MOCK").await.expect("must succeed");
-    assert_eq!(call_count.load(Ordering::SeqCst), 1, "gRPC not called again on cache hit");
+    let _ = sdk
+        .query_instrument("BTCUSDT_MOCK")
+        .await
+        .expect("must succeed");
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        1,
+        "gRPC not called again on cache hit"
+    );
 }
 
 #[tokio::test]
@@ -246,7 +286,11 @@ async fn test_sdk_invalid_entry_triggers_grpc_reload() {
 
     // Next query should trigger a reload
     let _ = sdk.query_instrument("BTCUSDT_MOCK").await.unwrap();
-    assert_eq!(call_count.load(Ordering::SeqCst), 2, "gRPC called again after invalidation");
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        2,
+        "gRPC called again after invalidation"
+    );
 }
 
 #[tokio::test]
@@ -264,8 +308,15 @@ async fn test_sdk_deprecated_entry_returns_error_not_grpc() {
     let result = sdk.query_instrument("BTCUSDT_MOCK").await;
     assert!(result.is_err(), "deprecated entry must return error");
     let err = result.unwrap_err();
-    assert!(err.to_string().contains("deprecated"), "error must say deprecated: {err}");
-    assert_eq!(call_count.load(Ordering::SeqCst), 1, "no gRPC call for deprecated entry");
+    assert!(
+        err.to_string().contains("deprecated"),
+        "error must say deprecated: {err}"
+    );
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        1,
+        "no gRPC call for deprecated entry"
+    );
 }
 
 #[tokio::test]
@@ -283,7 +334,10 @@ async fn test_sdk_stale_entry_returned_when_grpc_fails() {
 
     let result = sdk.query_instrument("BTCUSDT_MOCK").await;
     // Must return stale data (not hard failure) when entry exists but gRPC is down
-    assert!(result.is_ok(), "stale entry should be returned when gRPC unavailable: {result:?}");
+    assert!(
+        result.is_ok(),
+        "stale entry should be returned when gRPC unavailable: {result:?}"
+    );
 }
 
 // ── Async tests using mock gRPC ───────────────────────────────────────────────
@@ -295,17 +349,30 @@ async fn test_refdata_cache_miss_fetches_from_grpc() {
     let cache = Arc::new(RwLock::new(RefdataCache::default()));
 
     // Simulate cache miss: call gRPC directly and populate cache
-    let result = mock.query_instrument_by_id("BTCUSDT_MOCK").await.expect("must succeed");
-    cache.write().await.instruments.insert("BTCUSDT_MOCK".to_string(), CachedEntry {
-        data: result.clone(),
-        valid: true,
-        deprecated: false,
-        loaded_at_ms: 1712000000000,
-    });
+    let result = mock
+        .query_instrument_by_id("BTCUSDT_MOCK")
+        .await
+        .expect("must succeed");
+    cache.write().await.instruments.insert(
+        "BTCUSDT_MOCK".to_string(),
+        CachedEntry {
+            data: result.clone(),
+            valid: true,
+            deprecated: false,
+            loaded_at_ms: 1712000000000,
+        },
+    );
 
-    assert_eq!(call_count.load(Ordering::SeqCst), 1, "gRPC must be called on cache miss");
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        1,
+        "gRPC must be called on cache miss"
+    );
     assert_eq!(result.price_tick_size, 0.01);
-    assert!(cache.read().await.instruments.contains_key("BTCUSDT_MOCK"), "cache must be populated");
+    assert!(
+        cache.read().await.instruments.contains_key("BTCUSDT_MOCK"),
+        "cache must be populated"
+    );
 }
 
 /// After a NATS invalidation event is processed (modelled by calling `invalidate` directly),
@@ -324,9 +391,19 @@ async fn test_sdk_invalidation_triggers_active_reload() {
     sdk.invalidate("BTCUSDT_MOCK", false).await;
 
     // The next query must trigger a fresh gRPC fetch (call #2) — active-reload contract
-    let result = sdk.query_instrument("BTCUSDT_MOCK").await.expect("active reload must succeed");
-    assert_eq!(call_count.load(Ordering::SeqCst), 2, "gRPC must be called on active reload");
-    assert_eq!(result.price_tick_size, 0.01, "fresh data returned after reload");
+    let result = sdk
+        .query_instrument("BTCUSDT_MOCK")
+        .await
+        .expect("active reload must succeed");
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        2,
+        "gRPC must be called on active reload"
+    );
+    assert_eq!(
+        result.price_tick_size, 0.01,
+        "fresh data returned after reload"
+    );
 }
 
 #[tokio::test]
@@ -360,6 +437,8 @@ async fn test_refdata_stale_entry_returned_when_grpc_unavailable() {
     // Stale-entry policy: return stale data (not an error)
     assert!(!cache_entry.valid, "entry is stale");
     assert!(!cache_entry.deprecated, "stale != deprecated");
-    assert_eq!(cache_entry.data.instrument_id, "BTCUSDT_MOCK",
-        "stale data still has the instrument info");
+    assert_eq!(
+        cache_entry.data.instrument_id, "BTCUSDT_MOCK",
+        "stale data still has the instrument info"
+    );
 }

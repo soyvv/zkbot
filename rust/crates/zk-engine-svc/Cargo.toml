@@ -1,0 +1,57 @@
+[package]
+name = "zk-engine-svc"
+version = "0.1.0"
+edition = "2021"
+description = "Production engine service wrapping zk-engine-rs"
+
+[lib]
+name = "zk_engine_svc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zk-engine-svc"
+path = "src/main.rs"
+
+[dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+
+# NATS
+async-nats = "0.37"
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# lock-free read replica
+arc-swap = "1"
+
+# byte buffers
+bytes = "1"
+
+# tracing
+tracing = "0.1"
+
+# errors
+anyhow = "1"
+
+# config from env
+envy = "0.4"
+
+# infra + domain
+zk-infra-rs       = { path = "../zk-infra-rs" }
+zk-proto-rs        = { path = "../zk-proto-rs" }
+zk-engine-rs       = { path = "../zk-engine-rs" }
+zk-strategy-sdk-rs = { path = "../zk-strategy-sdk-rs" }
+zk-trading-sdk-rs  = { path = "../zk-trading-sdk-rs" }
+zk-strategy-host-rs = { path = "../zk-strategy-host-rs" }
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

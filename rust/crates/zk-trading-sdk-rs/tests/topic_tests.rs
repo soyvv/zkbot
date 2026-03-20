@@ -23,9 +23,11 @@ fn test_balance_update_topic_format() {
 
 #[test]
 fn test_position_update_topic_format() {
+    // Current OMS runtime publishes bare topic without instrument suffix.
+    // The instrument param is accepted but ignored until OMS migrates to per-instrument topics.
     assert_eq!(
         position_update_topic("oms_dev_1", "BTC-USDT-PERP"),
-        "zk.oms.oms_dev_1.position_update.BTC-USDT-PERP"
+        "zk.oms.oms_dev_1.position_update"
     );
 }
 
@@ -33,10 +35,7 @@ fn test_position_update_topic_format() {
 
 #[test]
 fn test_tick_topic_format() {
-    assert_eq!(
-        tick_topic("MOCK", "BTC-USDT"),
-        "zk.rtmd.tick.MOCK.BTC-USDT"
-    );
+    assert_eq!(tick_topic("MOCK", "BTC-USDT"), "zk.rtmd.tick.MOCK.BTC-USDT");
 }
 
 #[test]

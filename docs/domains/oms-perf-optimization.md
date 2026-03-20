@@ -1279,28 +1279,40 @@ because correctness still depends on per-key ordering.
 
 #### Gateway executor
 
-Suggested first shard key:
+Recommended key:
 
-- `gw_id`
+- `order_id` hashed into a configurable number of gateway-executor shards per gateway
 
-Alternative:
+Suggested shape:
 
-- `order_id`
-
-Tradeoff:
-
-- `gw_id` is simpler and keeps one gateway's outbound stream ordered
-- `order_id` allows more parallelism but may reorder requests at a gateway boundary if multiple orders share the same downstream dependency
-
-Recommended first implementation:
-
-- shard gateway execution by `gw_id`
+- `gateway_shard = hash(order_id) % gw_executor_shards_per_gateway`
+- routing key = `(gw_id, gateway_shard)`
 
 Rationale:
 
-- gateway client resources are already naturally partitioned by gateway
-- ordering requirements for send/cancel are most defensible at gateway scope
-- this keeps batching or future per-gateway flow control easier
+- current single-FIFO-per-`gw_id` execution becomes the dominant bottleneck once the core hot path is slimmed down
+- place and cancel for the same order naturally stay ordered when both route by `order_id`
+- the shard count can be tuned per deployment without changing the core ownership model
+
+Required constraint:
+
+- OMS may only use `order_id`-sharded gateway execution if the gateway service contract is also `accepted and queued internally`, not `already sent to venue`
+
+Why that constraint matters:
+
+- once ACK means internal queue acceptance, OMS does not need one globally ordered outbound stream per `gw_id`
+- the gateway remains responsible for any venue-specific internal ordering or rate limiting behind its own queue
+
+Tradeoff:
+
+- `gw_id` sharding is simpler and preserves one outbound FIFO per gateway
+- `order_id` sharding provides materially more concurrency and is the better long-term shape once ACK semantics are queue-based
+
+Recommended implementation:
+
+- make gateway-executor shard count configurable
+- default routing to `order_id` hashing
+- keep a fallback mode that routes only by `gw_id` if a venue requires strict single-stream semantics
 
 #### Persist executor
 
@@ -1349,8 +1361,10 @@ Required ordering is local:
   - balance updates must remain ordered
   - position updates must remain ordered
   - account-scoped persistence should not overtake itself
-- same gateway:
-  - outbound RPC stream should remain ordered within the selected gateway shard
+- same gateway shard:
+  - outbound RPC stream should remain ordered within the selected shard
+- same order:
+  - all send/cancel actions for that order must route to the same gateway shard
 
 Examples of invalid reordering:
 
@@ -1361,6 +1375,7 @@ Examples of invalid reordering:
 Examples of acceptable parallelism:
 
 - account A publish running while account B persist runs
+- gateway X shard 1 send running while gateway X shard 2 send runs
 - gateway X send running while gateway Y cancel runs
 - order 1 publish running while order 2 publish runs
 
@@ -1395,21 +1410,36 @@ Parallel action execution changes the point at which the service can safely repl
 
 This must be an explicit contract.
 
+Required contract change:
+
+- OMS place/cancel success means: request was validated and accepted for asynchronous processing by OMS
+- gateway place/cancel success means: request was validated and accepted for asynchronous processing by the gateway
+- neither ACK means the order was already enqueued, sent to the venue, or accepted by the venue
+
 Recommended ACK classes:
 
-- `AcceptedByOms`
+- `AcceptedForAsyncProcessing`
   - core validated the request
-  - state mutation completed
-  - required side effects were enqueued
-- `SentToGateway`
-  - gateway send/cancel action completed enqueue-to-client successfully
+  - service accepted the request for asynchronous processing
 - `Persisted`
   - persistence action completed
 
+Not recommended as the primary synchronous contract:
+
+- `SentToGateway`
+- `SentToVenue`
+- `VenueAccepted`
+
 Recommended first implementation:
 
-- place/cancel gRPC reply waits only for the gateway action if current behavior requires it
-- persistence and publish become asynchronous best-effort side effects with error tracking
+- place/cancel gRPC reply returns after OMS validates the request and accepts it for asynchronous processing
+- OMS to gateway gRPC returns after the gateway validates the request and accepts it for asynchronous processing
+- persistence and publish remain asynchronous side effects with explicit durability/error policy
+
+Implication:
+
+- validation failure is synchronous and fails the caller
+- internal queue overflow or send failure after ACK is asynchronous and must come back as a report or synthetic failure event
 
 Practical rule:
 
@@ -1425,9 +1455,9 @@ Suggested flow for a place order:
 2. writer mutates core state via `process_message`
 3. writer updates the snapshot locally
 4. writer enqueues side-effect envelopes
-5. writer waits only for the configured ACK-critical completion
-6. writer replies to caller
-7. gateway report later re-enters the writer via command channel
+5. writer replies to caller once the request is accepted for asynchronous processing
+6. gateway service later sends report or synthetic failure back into OMS
+7. report/failure re-enters the writer via command channel
 
 Suggested flow for a report:
 
@@ -1443,7 +1473,9 @@ Async executors need explicit failure policy.
 
 Gateway action failure:
 
-- return failure to waiting caller if the action is ACK-critical
+- if validation fails, return failure to the caller immediately
+- if internal dispatch/enqueue fails after ACK, emit an explicit synthetic failure event back into the writer
+- if downstream send fails after enqueue, emit an explicit synthetic failure event back into the writer
 - record structured error with `order_id`, `gw_id`, `global_seq`
 - do not let worker-local failure silently vanish
 
@@ -1543,11 +1575,12 @@ This step should not:
 The first implementation should be intentionally conservative:
 
 - one single-writer OMS core
-- one bounded gateway executor pool sharded by `gw_id`
+- one bounded gateway executor pool sharded by `(gw_id, order_id_hash)`
 - one bounded persistence executor pool sharded by `account_id`
 - one bounded publish executor pool sharded by `order_id` for order updates and `account_id` for account-level updates
 - snapshot remains updated synchronously in the writer
-- gRPC reply waits only on the currently-required gateway completion path
+- OMS gRPC reply means `accepted for asynchronous processing`
+- gateway gRPC reply means `accepted for asynchronous processing`
 
 This should provide most of the service-layer latency win without changing core correctness ownership.
 

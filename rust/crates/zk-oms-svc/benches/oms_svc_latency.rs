@@ -19,11 +19,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use zk_oms_rs::{
-    config::ConfdataManager,
-    models::OmsMessage,
-    oms_core::OmsCore,
-    utils::gen_timestamp_ms,
+    config::ConfdataManager, models::OmsMessage, oms_core::OmsCore, utils::gen_timestamp_ms,
 };
+use zk_oms_svc::oms_actor::{self, OmsCommand, ReadReplica};
 use zk_proto_rs::{
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     zk::{
@@ -31,7 +29,6 @@ use zk_proto_rs::{
         oms::v1::{OmsErrorType, OmsResponse, OrderCancelRequest, OrderRequest},
     },
 };
-use zk_oms_svc::oms_actor::{self, OmsCommand, ReadReplica};
 
 // ── Shared order counter ──────────────────────────────────────────────────────
 
@@ -49,27 +46,27 @@ const INSTRUMENT: &str = "BTC-USDT";
 
 fn bench_confdata() -> ConfdataManager {
     let oms_cfg = OmsConfigEntry {
-        oms_id:              "bench".into(),
+        oms_id: "bench".into(),
         managed_account_ids: vec![ACCOUNT_ID],
         ..Default::default()
     };
     let route = OmsRouteEntry {
-        account_id:      ACCOUNT_ID,
-        gw_key:          GW_KEY.into(),
+        account_id: ACCOUNT_ID,
+        gw_key: GW_KEY.into(),
         exch_account_id: "BENCH_ACCT".into(),
         ..Default::default()
     };
     let gw = GwConfigEntry {
-        gw_key:    GW_KEY.into(),
+        gw_key: GW_KEY.into(),
         exch_name: "BENCH_EXCH".into(),
         rpc_endpoint: "localhost:9999".into(),
         ..Default::default()
     };
     let refdata = InstrumentRefData {
-        instrument_id:          INSTRUMENT.into(),
+        instrument_id: INSTRUMENT.into(),
         instrument_id_exchange: INSTRUMENT.into(),
-        exchange_name:          "BENCH_EXCH".into(),
-        instrument_type:        1, // SPOT
+        exchange_name: "BENCH_EXCH".into(),
+        instrument_type: 1, // SPOT
         ..Default::default()
     };
     ConfdataManager::new(oms_cfg, vec![route], vec![gw], vec![refdata], vec![])
@@ -78,15 +75,15 @@ fn bench_confdata() -> ConfdataManager {
 fn make_order_req(order_id: i64) -> OrderRequest {
     OrderRequest {
         order_id,
-        account_id:      ACCOUNT_ID,
+        account_id: ACCOUNT_ID,
         instrument_code: INSTRUMENT.into(),
-        buy_sell_type:   BuySellType::BsBuy as i32,
+        buy_sell_type: BuySellType::BsBuy as i32,
         open_close_type: OpenCloseType::OcOpen as i32,
-        order_type:      BasicOrderType::OrdertypeLimit as i32,
-        price:           50_000.0,
-        qty:             0.01,
-        source_id:       "bench".into(),
-        timestamp:       1_000_000,
+        order_type: BasicOrderType::OrdertypeLimit as i32,
+        price: 50_000.0,
+        qty: 0.01,
+        source_id: "bench".into(),
+        timestamp: 1_000_000,
         ..Default::default()
     }
 }
@@ -95,7 +92,7 @@ fn make_cancel_req(order_id: i64, exch_order_ref: &str) -> OrderCancelRequest {
     OrderCancelRequest {
         order_id,
         exch_order_ref: exch_order_ref.into(),
-        timestamp:      1_000_001,
+        timestamp: 1_000_001,
         ..Default::default()
     }
 }
@@ -119,10 +116,10 @@ fn spawn_bench_actor(
 }
 
 async fn bench_writer_loop(
-    mut core:    OmsCore,
-    mut rx:      mpsc::Receiver<OmsCommand>,
-    replica:     ReadReplica,
-    shutdown:    CancellationToken,
+    mut core: OmsCore,
+    mut rx: mpsc::Receiver<OmsCommand>,
+    replica: ReadReplica,
+    shutdown: CancellationToken,
 ) {
     use zk_oms_rs::models::OmsAction;
     let (snap, mut writer) = core.take_snapshot();
@@ -286,5 +283,10 @@ fn bench_place_then_cancel(c: &mut Criterion) {
     shutdown.cancel();
 }
 
-criterion_group!(benches, bench_place_order, bench_batch_place_10, bench_place_then_cancel);
+criterion_group!(
+    benches,
+    bench_place_order,
+    bench_batch_place_10,
+    bench_place_then_cancel
+);
 criterion_main!(benches);

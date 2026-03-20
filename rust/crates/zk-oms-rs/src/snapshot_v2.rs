@@ -377,9 +377,23 @@ mod tests {
     fn writer_publish_increments_seq() {
         let meta = make_test_metadata();
         let mut writer = OmsSnapshotWriterV2::new(meta);
-        let snap1 = writer.publish(HashMap::new(), HashMap::new(), HashMap::new(), vec![], vec![], 1000);
+        let snap1 = writer.publish(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            1000,
+        );
         assert_eq!(snap1.seq, 1);
-        let snap2 = writer.publish(HashMap::new(), HashMap::new(), HashMap::new(), vec![], vec![], 2000);
+        let snap2 = writer.publish(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            2000,
+        );
         assert_eq!(snap2.seq, 2);
     }
 
@@ -392,7 +406,10 @@ mod tests {
         writer.apply_order_update(snap_order.clone(), false);
         assert!(writer.open_by_account[&42].contains(&1001));
         assert_eq!(writer.orders[&1001].instrument_id, 1);
-        assert_eq!(writer.orders[&1001].exch_order_ref.as_deref(), Some("EX123"));
+        assert_eq!(
+            writer.orders[&1001].exch_order_ref.as_deref(),
+            Some("EX123")
+        );
 
         let mut closed = snap_order;
         closed.order_status = 4;
@@ -407,9 +424,23 @@ mod tests {
         let snap_order = make_test_snapshot_order(1001, 42);
         writer.apply_order_update(snap_order, false);
 
-        let snap1 = writer.publish(HashMap::new(), HashMap::new(), HashMap::new(), vec![], vec![], 1000);
+        let snap1 = writer.publish(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            1000,
+        );
         writer.apply_panic(42);
-        let snap2 = writer.publish(HashMap::new(), HashMap::new(), HashMap::new(), vec![], vec![], 2000);
+        let snap2 = writer.publish(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            2000,
+        );
 
         assert!(!snap1.panic_accounts.contains(&42));
         assert!(snap2.panic_accounts.contains(&42));
@@ -473,7 +504,14 @@ mod tests {
             },
         );
 
-        let snap = writer.publish(managed, HashMap::new(), HashMap::new(), vec![], vec![], 1000);
+        let snap = writer.publish(
+            managed,
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            1000,
+        );
         assert_eq!(snap.managed_position_ids_by_account[&42], vec![1]);
         let ex_ref: Box<str> = "EX123".into();
         assert_eq!(snap.order_ids_by_exch_ref[&ex_ref], vec![1001]);
@@ -500,7 +538,14 @@ mod tests {
         };
         writer.apply_order_detail(detail);
 
-        let snap = writer.publish(HashMap::new(), HashMap::new(), HashMap::new(), vec![], vec![], 1000);
+        let snap = writer.publish(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            1000,
+        );
         assert!(snap.orders.contains_key(&1001));
         assert!(snap.order_details.contains_key(&1001));
     }
@@ -513,7 +558,14 @@ mod tests {
         });
         let mut writer = OmsSnapshotWriterV2::new(meta1);
 
-        let snap1 = writer.publish(HashMap::new(), HashMap::new(), HashMap::new(), vec![], vec![], 1000);
+        let snap1 = writer.publish(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            1000,
+        );
         assert_eq!(snap1.metadata.instrument_name(0), "OLD");
 
         let meta2 = Arc::new(SnapshotMetadata {
@@ -522,7 +574,14 @@ mod tests {
         });
         writer.update_metadata(meta2);
 
-        let snap2 = writer.publish(HashMap::new(), HashMap::new(), HashMap::new(), vec![], vec![], 2000);
+        let snap2 = writer.publish(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            2000,
+        );
         assert_eq!(snap2.metadata.instrument_name(0), "NEW");
         assert_eq!(snap1.metadata.instrument_name(0), "OLD");
     }

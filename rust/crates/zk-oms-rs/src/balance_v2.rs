@@ -26,8 +26,7 @@ impl BalanceStoreV2 {
     /// The `u32` in each tuple is the asset_id; `account_id` is read from the snapshot.
     pub fn init_balances(&mut self, balances: Vec<(u32, ExchBalanceSnapshot)>) {
         for (asset_id, snap) in balances {
-            self.exch_balances
-                .insert((snap.account_id, asset_id), snap);
+            self.exch_balances.insert((snap.account_id, asset_id), snap);
         }
     }
 

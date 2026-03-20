@@ -19,7 +19,6 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct OmsSvcConfig {
     // ── Connectivity ───────────────────────────────────────────────────────
-
     #[serde(default = "default_nats_url")]
     pub nats_url: String,
 
@@ -28,17 +27,14 @@ pub struct OmsSvcConfig {
     pub pg_url: String,
 
     // ── Identity ───────────────────────────────────────────────────────────
-
     /// Unique OMS instance identifier (e.g. "oms_dev_1").
     pub oms_id: String,
 
     // ── gRPC server ────────────────────────────────────────────────────────
-
     #[serde(default = "default_grpc_port")]
     pub grpc_port: u16,
 
     // ── OMS core tunables ──────────────────────────────────────────────────
-
     /// Whether to handle exchange orders not submitted through this OMS.
     #[serde(default)]
     pub handle_external_orders: bool,
@@ -57,14 +53,12 @@ pub struct OmsSvcConfig {
     pub max_cached_orders: usize,
 
     // ── Actor tuning ───────────────────────────────────────────────────────
-
     /// Capacity of the `OmsCommand` channel between gRPC/NATS handlers and
     /// the writer task. Default 4096 gives ~4 ms of buffering at 1M ops/s.
     #[serde(default = "default_cmd_channel_buf")]
     pub cmd_channel_buf: usize,
 
     // ── Service registry ───────────────────────────────────────────────────
-
     /// KV heartbeat interval in seconds (default 10). Entry TTL in the
     /// registry bucket is 3× this value so one missed beat is tolerated.
     #[serde(default = "default_kv_heartbeat_secs")]
@@ -76,7 +70,6 @@ pub struct OmsSvcConfig {
     pub gateway_kv_prefix: String,
 
     // ── Periodic task intervals ────────────────────────────────────────────
-
     /// Order resync interval in seconds (default 60).
     #[serde(default = "default_resync_interval_secs")]
     pub order_resync_interval_secs: u64,
@@ -93,6 +86,17 @@ pub struct OmsSvcConfig {
     #[serde(default = "default_cleanup_interval_secs")]
     pub cleanup_interval_secs: u64,
 
+    // ── Gateway executor tuning ────────────────────────────────────────
+    /// Number of gateway executor shards (default 16). Orders are routed
+    /// by `order_id % gw_exec_shard_count`.
+    #[serde(default = "default_gw_exec_shard_count")]
+    pub gw_exec_shard_count: usize,
+
+    /// Per-shard queue capacity for gateway executor (default 256).
+    #[serde(default = "default_gw_exec_queue_capacity")]
+    pub gw_exec_queue_capacity: usize,
+
+    // ── Latency metrics ──────────────────────────────────────────────
     /// How often (seconds) OMS flushes accumulated latency samples to NATS (default 2).
     #[serde(default = "default_metrics_interval_secs")]
     pub metrics_interval_secs: u64,
@@ -106,22 +110,65 @@ pub struct OmsSvcConfig {
     pub metrics_max_complete: usize,
 }
 
-fn default_nats_url()            -> String { "nats://localhost:4222".into() }
-fn default_grpc_port()           -> u16    { 50051 }
-fn default_true()                -> bool   { true }
-fn default_max_pending_reports() -> usize  { 1_000 }
-fn default_max_cached_orders()   -> usize  { 100_000 }
-fn default_cmd_channel_buf()     -> usize  { 4_096 }
-fn default_kv_heartbeat_secs()   -> u64    { 10 }
-fn default_gw_kv_prefix()        -> String { "svc.gw".into() }
-fn default_resync_interval_secs() -> u64   { 60 }
-fn default_position_recheck_interval_secs() -> u64 { 30 }
-fn default_cleanup_interval_secs() -> u64  { 600 }
-fn default_metrics_interval_secs() -> u64  { 2 }
-fn default_metrics_max_pending()   -> usize { 5_000 }
-fn default_metrics_max_complete()  -> usize { 10_000 }
+fn default_nats_url() -> String {
+    "nats://localhost:4222".into()
+}
+fn default_grpc_port() -> u16 {
+    50051
+}
+fn default_true() -> bool {
+    true
+}
+fn default_max_pending_reports() -> usize {
+    1_000
+}
+fn default_max_cached_orders() -> usize {
+    100_000
+}
+fn default_cmd_channel_buf() -> usize {
+    4_096
+}
+fn default_kv_heartbeat_secs() -> u64 {
+    10
+}
+fn default_gw_kv_prefix() -> String {
+    "svc.gw".into()
+}
+fn default_resync_interval_secs() -> u64 {
+    60
+}
+fn default_position_recheck_interval_secs() -> u64 {
+    30
+}
+fn default_cleanup_interval_secs() -> u64 {
+    600
+}
+fn default_gw_exec_shard_count() -> usize {
+    16
+}
+fn default_gw_exec_queue_capacity() -> usize {
+    256
+}
+fn default_metrics_interval_secs() -> u64 {
+    2
+}
+fn default_metrics_max_pending() -> usize {
+    5_000
+}
+fn default_metrics_max_complete() -> usize {
+    10_000
+}
 
 /// Load config from environment variables.
 pub fn load() -> Result<OmsSvcConfig, envy::Error> {
-    envy::prefixed("ZK_").from_env::<OmsSvcConfig>()
+    let cfg = envy::prefixed("ZK_").from_env::<OmsSvcConfig>()?;
+    assert!(
+        cfg.gw_exec_shard_count >= 1,
+        "ZK_GW_EXEC_SHARD_COUNT must be >= 1"
+    );
+    assert!(
+        cfg.gw_exec_queue_capacity >= 1,
+        "ZK_GW_EXEC_QUEUE_CAPACITY must be >= 1"
+    );
+    Ok(cfg)
 }

@@ -25,9 +25,15 @@ pub fn balance_update_topic(oms_id: &str, _asset: &str) -> String {
     format!("zk.oms.{oms_id}.balance_update")
 }
 
-/// NATS subject for position updates from an OMS instance, filtered by instrument.
-pub fn position_update_topic(oms_id: &str, instrument: &str) -> String {
-    format!("zk.oms.{oms_id}.position_update.{instrument}")
+/// NATS subject for position updates from an OMS instance.
+///
+/// The current OMS runtime publishes to `zk.oms.<oms_id>.position_update` without an
+/// instrument suffix. The architecture contract (api_contracts.md) designates the
+/// per-instrument suffix as deferred. We subscribe to the bare topic to match the
+/// current runtime; the `instrument` parameter is reserved for future per-instrument
+/// filtering when the OMS migrates to the suffixed topic shape.
+pub fn position_update_topic(oms_id: &str, _instrument: &str) -> String {
+    format!("zk.oms.{oms_id}.position_update")
 }
 
 pub fn spawn_protobuf_subscription<T, U, M, F>(
@@ -77,9 +83,7 @@ where
     })
 }
 
-pub async fn try_refresh_and_collect<T>(
-    tasks: Vec<JoinHandle<T>>,
-) -> Result<Vec<T>, SdkError>
+pub async fn try_refresh_and_collect<T>(tasks: Vec<JoinHandle<T>>) -> Result<Vec<T>, SdkError>
 where
     T: Send + 'static,
 {

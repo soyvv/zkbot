@@ -1,13 +1,20 @@
+use crate::config::InstrumentTradingConfig;
 use zk_proto_rs::{
+    ods::{GwConfigEntry, OmsRouteEntry},
     zk::{
         common::v1::InstrumentRefData,
         exch_gw::v1::{BalanceUpdate, OrderReport},
-        gateway::v1::{CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest, BatchSendOrdersRequest as ExchBatchSendOrdersRequest, BatchCancelOrdersRequest as ExchBatchCancelOrdersRequest},
-        oms::v1::{Balance, BalanceUpdateEvent, ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest, OrderUpdateEvent, Position, PositionUpdateEvent, Trade},
+        gateway::v1::{
+            BatchCancelOrdersRequest as ExchBatchCancelOrdersRequest,
+            BatchSendOrdersRequest as ExchBatchSendOrdersRequest,
+            CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest,
+        },
+        oms::v1::{
+            Balance, BalanceUpdateEvent, ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest,
+            OrderUpdateEvent, Position, PositionUpdateEvent, Trade,
+        },
     },
-    ods::{GwConfigEntry, OmsRouteEntry},
 };
-use crate::config::InstrumentTradingConfig;
 
 /// Internal OMS order record. Wraps the proto `Order` snapshot plus bookkeeping.
 /// Mirrors Python `OMSOrder`.
@@ -44,9 +51,7 @@ impl OmsOrder {
         use zk_proto_rs::zk::oms::v1::OrderStatus;
         matches!(
             OrderStatus::try_from(self.order_state.order_status),
-            Ok(OrderStatus::Filled)
-                | Ok(OrderStatus::Cancelled)
-                | Ok(OrderStatus::Rejected)
+            Ok(OrderStatus::Filled) | Ok(OrderStatus::Cancelled) | Ok(OrderStatus::Rejected)
         )
     }
 }
@@ -209,10 +214,16 @@ pub enum OmsMessage {
     BalanceUpdate(BalanceUpdate),
     RecheckOrder(OrderRecheckRequest),
     RecheckCancel(CancelRecheckRequest),
-    Panic { account_id: i64 },
-    DontPanic { account_id: i64 },
+    Panic {
+        account_id: i64,
+    },
+    DontPanic {
+        account_id: i64,
+    },
     /// Periodic cleanup tick; `ts_ms` is the current wall-clock time in milliseconds.
-    Cleanup { ts_ms: i64 },
+    Cleanup {
+        ts_ms: i64,
+    },
     ReloadConfig,
     /// Periodic position recheck — triggers reconciliation of managed positions
     /// against exchange-reported state.
@@ -245,8 +256,8 @@ pub enum OmsAction {
     SendOrderToGw {
         gw_key: String,
         request: ExchSendOrderRequest,
-        order_id: i64,          // for latency tracking
-        order_created_at: i64,  // Order.created_at in ms (= OrderRequest.timestamp)
+        order_id: i64,         // for latency tracking
+        order_created_at: i64, // Order.created_at in ms (= OrderRequest.timestamp)
     },
     /// Send a batch of orders to the gateway (if the exchange supports it).
     BatchSendOrdersToGw {

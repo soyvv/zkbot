@@ -3,19 +3,18 @@
 //! Delegates to the same `MockGwState` as the legacy `ExchangeGatewayService`.
 
 use std::sync::Arc;
-use tonic::{Request, Response, Status};
 use tokio::sync::Mutex;
+use tonic::{Request, Response, Status};
 use tracing::info;
 use uuid::Uuid;
 
 use crate::fill::{publish_booked_report, publish_cancel_report, simulate_fill, system_time_ns};
 use crate::proto::zk_gw_v1::{
-    gateway_service_server::GatewayService,
-    AccountResponse, BatchCancelOrdersRequest, BatchSendOrdersRequest,
-    CancelOrderRequest, FeeResponse, GatewayResponse, GenericRequest, GenericResponse,
-    OrderDetailResponse, OrderTradesResponse, PositionResponse,
-    QueryAccountRequest, QueryFeeRequest, QueryOrderDetailRequest,
-    QueryOrderTradesRequest, QueryPositionRequest, SendOrderRequest,
+    gateway_service_server::GatewayService, AccountResponse, BatchCancelOrdersRequest,
+    BatchSendOrdersRequest, CancelOrderRequest, FeeResponse, GatewayResponse, GenericRequest,
+    GenericResponse, OrderDetailResponse, OrderTradesResponse, PositionResponse,
+    QueryAccountRequest, QueryFeeRequest, QueryOrderDetailRequest, QueryOrderTradesRequest,
+    QueryPositionRequest, SendOrderRequest,
 };
 use crate::state::MockOrder;
 use crate::MockGwState;
@@ -98,7 +97,16 @@ impl GatewayService for ZkGatewayHandler {
         };
 
         if let Some(nats) = nats {
-            publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty, t4_ns).await;
+            publish_booked_report(
+                &nats,
+                &gw_id,
+                &exch_order_ref,
+                order_id,
+                account_id,
+                qty,
+                t4_ns,
+            )
+            .await;
         }
 
         Ok(Response::new(ok_response()))
@@ -112,7 +120,10 @@ impl GatewayService for ZkGatewayHandler {
         for req in reqs {
             let exch_order_ref = format!("mock_{}", Uuid::new_v4().simple());
             let order_id = req.correlation_id;
-            info!(exch_order_ref, order_id, "GatewayService.BatchPlaceOrders entry");
+            info!(
+                exch_order_ref,
+                order_id, "GatewayService.BatchPlaceOrders entry"
+            );
 
             let (account_id, qty, nats, gw_id) = {
                 let mut s = self.state.lock().await;
@@ -140,7 +151,8 @@ impl GatewayService for ZkGatewayHandler {
 
             if let Some(nats) = nats {
                 // batch: no per-order t4 capture; use 0
-                publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty, 0).await;
+                publish_booked_report(&nats, &gw_id, &exch_order_ref, order_id, account_id, qty, 0)
+                    .await;
             }
         }
         Ok(Response::new(ok_response()))
@@ -170,7 +182,8 @@ impl GatewayService for ZkGatewayHandler {
 
         if let Some(account_id) = account_id {
             if let Some(nats) = nats {
-                publish_cancel_report(&nats, &gw_id, &req.exch_order_ref, req.order_id, account_id).await;
+                publish_cancel_report(&nats, &gw_id, &req.exch_order_ref, req.order_id, account_id)
+                    .await;
             }
             Ok(Response::new(ok_response()))
         } else {
@@ -198,19 +211,21 @@ impl GatewayService for ZkGatewayHandler {
         &self,
         _request: Request<QueryAccountRequest>,
     ) -> Result<Response<AccountResponse>, Status> {
-        use zk_proto_rs::zk::exch_gw::v1::{BalanceUpdate, PositionReport};
         use zk_proto_rs::zk::common::v1::InstrumentType;
+        use zk_proto_rs::zk::exch_gw::v1::{BalanceUpdate, PositionReport};
         let s = self.state.lock().await;
-        let entries: Vec<PositionReport> = s.balances.iter().map(|(symbol, &qty)| {
-            PositionReport {
+        let entries: Vec<PositionReport> = s
+            .balances
+            .iter()
+            .map(|(symbol, &qty)| PositionReport {
                 instrument_code: symbol.clone(),
                 instrument_type: InstrumentType::InstTypeSpot as i32,
                 qty,
                 avail_qty: qty,
                 account_id: s.account_id,
                 ..Default::default()
-            }
-        }).collect();
+            })
+            .collect();
         Ok(Response::new(AccountResponse {
             exch_account_code: s.account_id.to_string(),
             balance_update: Some(BalanceUpdate { balances: entries }),
@@ -244,7 +259,9 @@ impl GatewayService for ZkGatewayHandler {
         &self,
         _request: Request<QueryOrderTradesRequest>,
     ) -> Result<Response<OrderTradesResponse>, Status> {
-        Ok(Response::new(OrderTradesResponse { ..Default::default() }))
+        Ok(Response::new(OrderTradesResponse {
+            ..Default::default()
+        }))
     }
 
     async fn generic_rpc_call(

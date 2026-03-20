@@ -41,36 +41,38 @@ use zk_proto_rs::zk::common::v1::{LatencyMetric, LatencyMetricBatch};
 /// Cheap per-order record stored in the hot path — raw nanosecond timestamps only.
 #[derive(Debug, Default)]
 pub struct TimestampRecord {
-    pub order_id:   i64,
-    pub t0_ns:      i64,   // OrderRequest.timestamp × 1_000_000
-    pub t1_ns:      i64,   // system_time_ns() at OMS gRPC handler entry (0 for batch)
-    pub t2_ns:      i64,   // system_time_ns() at writer dequeue/start
-    pub tw_core_ns: i64,   // system_time_ns() right after core.process_message()
-    pub t3_ns:      i64,   // before gw_pool.send_order()
-    pub t3r_ns:     i64,   // after  gw_pool.send_order() returns
-    pub t4_ns:      i64,   // report.gw_received_at_ns   (filled on GW report)
-    pub t5_ns:      i64,   // report.update_timestamp × 1e6 (filled on GW report)
-    pub t6_ns:      i64,   // system_time_ns() on NATS arrival  (filled on GW report)
-    pub t7_ns:      i64,   // event.timestamp × 1e6             (filled on PublishOrderUpdate)
-    /// writer dispatch to gw executor queue (for gw_exec_queue_wait = t3 - writer_dispatch_ts)
+    pub order_id: i64,
+    pub t0_ns: i64,      // OrderRequest.timestamp × 1_000_000
+    pub t1_ns: i64,      // system_time_ns() at OMS gRPC handler entry (0 for batch)
+    pub t2_ns: i64,      // system_time_ns() at writer dequeue/start
+    pub tw_core_ns: i64, // system_time_ns() right after core.process_message()
+    pub t3_ns: i64,      // before gw_pool.send_order()
+    pub t3r_ns: i64,     // after  gw_pool.send_order() returns
+    pub t4_ns: i64,      // report.gw_received_at_ns   (filled on GW report)
+    pub t5_ns: i64,      // report.update_timestamp × 1e6 (filled on GW report)
+    pub t6_ns: i64,      // system_time_ns() on NATS arrival  (filled on GW report)
+    pub t7_ns: i64,      // event.timestamp × 1e6             (filled on PublishOrderUpdate)
+    /// writer dispatch to gw executor queue (for gw_exec_queue_wait = t_gw_dequeue - writer_dispatch_ts)
     pub writer_dispatch_ts: i64,
+    /// system_time_ns() when the gw worker dequeues the action (before client lookup)
+    pub gw_exec_dequeue_ns: i64,
 }
 
 /// Ring-buffer tracker. Lives entirely inside the OMS writer task — no locking needed.
 pub struct LatencyTracker {
     /// In-flight: have t0–t3r, waiting for GW report.
-    pending:      HashMap<i64, TimestampRecord>,
+    pending: HashMap<i64, TimestampRecord>,
     /// Fully populated records (have all t0–t7).
-    complete:     VecDeque<TimestampRecord>,
-    max_pending:  usize,
+    complete: VecDeque<TimestampRecord>,
+    max_pending: usize,
     max_complete: usize,
 }
 
 impl LatencyTracker {
     pub fn new(max_pending: usize, max_complete: usize) -> Self {
         Self {
-            pending:      HashMap::with_capacity(max_pending.min(4096)),
-            complete:     VecDeque::with_capacity(max_complete.min(4096)),
+            pending: HashMap::with_capacity(max_pending.min(4096)),
+            complete: VecDeque::with_capacity(max_complete.min(4096)),
             max_pending,
             max_complete,
         }
@@ -90,27 +92,39 @@ impl LatencyTracker {
         t3_ns: i64,
         t3r_ns: i64,
         writer_dispatch_ts: i64,
+        gw_exec_dequeue_ns: i64,
     ) {
         if self.pending.len() >= self.max_pending {
             return;
         }
-        self.pending.insert(order_id, TimestampRecord {
+        self.pending.insert(
             order_id,
-            t0_ns:  order_created_at_ms * 1_000_000,
-            t1_ns,
-            t2_ns,
-            tw_core_ns,
-            t3_ns,
-            t3r_ns,
-            writer_dispatch_ts,
-            ..Default::default()
-        });
+            TimestampRecord {
+                order_id,
+                t0_ns: order_created_at_ms * 1_000_000,
+                t1_ns,
+                t2_ns,
+                tw_core_ns,
+                t3_ns,
+                t3r_ns,
+                writer_dispatch_ts,
+                gw_exec_dequeue_ns,
+                ..Default::default()
+            },
+        );
     }
 
     /// Called after `PublishOrderUpdate` action is dispatched for a GW report.
     /// Completes the record and moves it to `complete`.
     #[inline]
-    pub fn record_report_published(&mut self, order_id: i64, t4_ns: i64, t5_ns: i64, t6_ns: i64, t7_ns: i64) {
+    pub fn record_report_published(
+        &mut self,
+        order_id: i64,
+        t4_ns: i64,
+        t5_ns: i64,
+        t6_ns: i64,
+        t7_ns: i64,
+    ) {
         let Some(mut rec) = self.pending.remove(&order_id) else {
             // Order was placed before this OMS session or evicted — skip.
             return;
@@ -131,8 +145,12 @@ impl LatencyTracker {
         self.complete.drain(..).collect()
     }
 
-    pub fn pending_count(&self)  -> usize { self.pending.len()  }
-    pub fn complete_count(&self) -> usize { self.complete.len() }
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+    pub fn complete_count(&self) -> usize {
+        self.complete.len()
+    }
 }
 
 /// Monotonic-ish wall-clock nanoseconds.  One `SystemTime::now()` call.
@@ -162,6 +180,7 @@ pub enum LatencyEvent {
         t3_ns: i64,
         t3r_ns: i64,
         writer_dispatch_ts: i64,
+        gw_exec_dequeue_ns: i64,
     },
     /// Publish worker completed an `OrderUpdateEvent` publish for a GW report —
     /// carries t7 captured as `system_time_ns()` immediately after NATS publish.
@@ -177,29 +196,30 @@ pub enum LatencyEvent {
 /// Build `LatencyMetricBatch` from a batch of completed records and publish to NATS.
 /// Called entirely off the hot path (in the periodic flush tick).
 pub async fn publish_latency_batch(
-    nats:         &async_nats::Client,
-    oms_id:       &str,
-    records:      Vec<TimestampRecord>,
+    nats: &async_nats::Client,
+    oms_id: &str,
+    records: Vec<TimestampRecord>,
     publish_ts_ns: i64,
 ) {
     let metrics: Vec<LatencyMetric> = records
         .iter()
         .map(|r| {
             let mut ts = HashMap::new();
-            ts.insert("t0".into(),  r.t0_ns);
-            ts.insert("t1".into(),  r.t1_ns);
-            ts.insert("t2".into(),  r.t2_ns);
+            ts.insert("t0".into(), r.t0_ns);
+            ts.insert("t1".into(), r.t1_ns);
+            ts.insert("t2".into(), r.t2_ns);
             ts.insert("tw_core".into(), r.tw_core_ns);
-            ts.insert("t3".into(),  r.t3_ns);
+            ts.insert("t3".into(), r.t3_ns);
             ts.insert("t3r".into(), r.t3r_ns);
-            ts.insert("t4".into(),  r.t4_ns);
-            ts.insert("t5".into(),  r.t5_ns);
-            ts.insert("t6".into(),  r.t6_ns);
-            ts.insert("t7".into(),  r.t7_ns);
+            ts.insert("t4".into(), r.t4_ns);
+            ts.insert("t5".into(), r.t5_ns);
+            ts.insert("t6".into(), r.t6_ns);
+            ts.insert("t7".into(), r.t7_ns);
             ts.insert("tw_dispatch".into(), r.writer_dispatch_ts);
+            ts.insert("t_gw_dequeue".into(), r.gw_exec_dequeue_ns);
             LatencyMetric {
                 tagged_timestamps: ts,
-                order_id:  r.order_id,
+                order_id: r.order_id,
                 source_id: oms_id.to_string(),
             }
         })
@@ -207,12 +227,12 @@ pub async fn publish_latency_batch(
 
     let batch = LatencyMetricBatch {
         metrics,
-        publisher_id:  oms_id.to_string(),
+        publisher_id: oms_id.to_string(),
         publish_ts_ns,
     };
 
     let subject = format!("zk.oms.{oms_id}.metrics.latency");
-    let payload  = batch.encode_to_vec();
+    let payload = batch.encode_to_vec();
     if let Err(e) = nats.publish(subject.clone(), payload.into()).await {
         warn!(subject, error = %e, "latency batch publish failed");
     }

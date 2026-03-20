@@ -24,24 +24,19 @@ pub async fn build_adapter(cfg: &GwSvcConfig) -> anyhow::Result<BuiltVenue> {
         "simulator" => {
             let balances = GwSvcConfig::parse_balances(&cfg.mock_balances);
             let match_policy = simulator::make_match_policy(&cfg.match_policy);
-            let sim_core =
-                zk_sim_core::simulator::SimulatorCore::new(match_policy, "SIM");
-            let account_state =
-                simulator::SimAccountState::new(cfg.account_id, balances);
-            let control_state =
-                simulator::ManualControlState::new(cfg.match_policy.clone());
+            let sim_core = zk_sim_core::simulator::SimulatorCore::new(match_policy, "SIM");
+            let account_state = simulator::SimAccountState::new(cfg.account_id, balances);
+            let control_state = simulator::ManualControlState::new(cfg.match_policy.clone());
 
-            let sim_state = Arc::new(tokio::sync::Mutex::new(
-                simulator::SimulatorState {
-                    sim_core,
-                    account_state,
-                    control_state,
-                },
-            ));
+            let sim_state = Arc::new(tokio::sync::Mutex::new(simulator::SimulatorState {
+                sim_core,
+                account_state,
+                control_state,
+            }));
 
-            let sim_adapter = Arc::new(simulator::SimulatorVenueAdapter::new(
-                Arc::clone(&sim_state),
-            ));
+            let sim_adapter = Arc::new(simulator::SimulatorVenueAdapter::new(Arc::clone(
+                &sim_state,
+            )));
             let adapter: Arc<dyn VenueAdapter> = Arc::clone(&sim_adapter) as _;
 
             Ok(BuiltVenue {

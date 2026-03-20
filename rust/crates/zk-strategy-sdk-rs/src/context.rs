@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 
 use zk_proto_rs::zk::{
     common::v1::InstrumentRefData,
-    oms::v1::{Balance, BalanceUpdateEvent, Order, OrderStatus, OrderUpdateEvent, Position, PositionUpdateEvent},
+    oms::v1::{
+        Balance, BalanceUpdateEvent, Order, OrderStatus, OrderUpdateEvent, Position,
+        PositionUpdateEvent,
+    },
 };
 
 use crate::models::{StrategyCancel, StrategyOrder};
@@ -105,7 +108,8 @@ impl StrategyContext {
             .entry(order.account_id)
             .or_insert_with(|| AccountState::new(order.account_id));
         acc.pending_orders.insert(order.order_id, order.clone());
-        self.order_id_to_account.insert(order.order_id, order.account_id);
+        self.order_id_to_account
+            .insert(order.order_id, order.account_id);
     }
 
     /// Record a cancel submission for an order.
@@ -169,7 +173,8 @@ impl StrategyContext {
     pub fn on_position_update(&mut self, pue: &PositionUpdateEvent) {
         for pos in &pue.position_snapshots {
             if let Some(acc) = self.account_states.get_mut(&pos.account_id) {
-                acc.positions.insert(pos.instrument_code.clone(), pos.clone());
+                acc.positions
+                    .insert(pos.instrument_code.clone(), pos.clone());
             }
         }
         self.position_generation += 1;
@@ -238,19 +243,17 @@ impl StrategyContext {
     }
 
     /// All balances held by `account_id` (asset → Balance snapshot).
-    pub fn get_balances_map(
-        &self,
-        account_id: i64,
-    ) -> Option<&HashMap<String, Balance>> {
-        self.account_states.get(&account_id).map(|acc| &acc.balances)
+    pub fn get_balances_map(&self, account_id: i64) -> Option<&HashMap<String, Balance>> {
+        self.account_states
+            .get(&account_id)
+            .map(|acc| &acc.balances)
     }
 
     /// All positions held by `account_id` (instrument → Position snapshot).
-    pub fn get_positions_map(
-        &self,
-        account_id: i64,
-    ) -> Option<&HashMap<String, Position>> {
-        self.account_states.get(&account_id).map(|acc| &acc.positions)
+    pub fn get_positions_map(&self, account_id: i64) -> Option<&HashMap<String, Position>> {
+        self.account_states
+            .get(&account_id)
+            .map(|acc| &acc.positions)
     }
 
     /// All registered account IDs.
@@ -306,7 +309,11 @@ mod tests {
         }
     }
 
-    fn make_position_update(account_id: i64, instrument: &str, total_qty: f64) -> PositionUpdateEvent {
+    fn make_position_update(
+        account_id: i64,
+        instrument: &str,
+        total_qty: f64,
+    ) -> PositionUpdateEvent {
         PositionUpdateEvent {
             account_id,
             position_snapshots: vec![Position {
@@ -336,7 +343,10 @@ mod tests {
         ctx.on_position_update(&make_position_update(100, "BTC-USDT-PERP", 1.5));
 
         assert!(ctx.get_position(100, "BTC-USDT-PERP").is_some());
-        assert_eq!(ctx.get_position(100, "BTC-USDT-PERP").unwrap().total_qty, 1.5);
+        assert_eq!(
+            ctx.get_position(100, "BTC-USDT-PERP").unwrap().total_qty,
+            1.5
+        );
         // Must NOT touch balances
         assert!(ctx.get_balances_map(100).unwrap().is_empty());
     }
@@ -358,7 +368,10 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.on_position_update(&make_position_update(100, "BTC-USDT-PERP", 3.0));
 
-        assert_eq!(ctx.get_position(100, "BTC-USDT-PERP").unwrap().total_qty, 3.0);
+        assert_eq!(
+            ctx.get_position(100, "BTC-USDT-PERP").unwrap().total_qty,
+            3.0
+        );
         assert!(ctx.get_position(100, "ETH-USDT-PERP").is_none());
     }
 
