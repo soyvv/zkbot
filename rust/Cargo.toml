@@ -22,6 +22,7 @@ members = [
     "strategies/arbi",
     "crates/zk-rtmd-rs",
     "crates/zk-rtmd-gw-svc",
+    "crates/zk-core-rs",
 ]
 resolver = "2"
 

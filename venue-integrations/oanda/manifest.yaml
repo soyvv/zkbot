@@ -1,0 +1,20 @@
+venue: oanda
+version: 1
+capabilities:
+  gw:
+    language: python
+    entrypoint: python:oanda.gw:OandaGatewayAdaptor
+    config_schema: schemas/gw_config.schema.json
+  rtmd:
+    language: python
+    entrypoint: python:oanda.rtmd:OandaRtmdAdaptor
+    config_schema: schemas/rtmd_config.schema.json
+  refdata:
+    language: python
+    entrypoint: python:oanda.refdata:OandaRefdataLoader
+    config_schema: schemas/refdata_config.schema.json
+metadata:
+  supports_tradfi_sessions: true
+  notes:
+    - Placeholder module only; runtime loading is not implemented yet.
+    - Trading and RTMD should start in hybrid/query-backed mode.

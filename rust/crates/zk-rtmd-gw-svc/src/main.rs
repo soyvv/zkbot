@@ -40,14 +40,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kv_key = format!("{kv_prefix}.{}", cfg.mdgw_id);
     let kv_val = serde_json::json!({
         "service_type": "mdgw",
-        "mdgw_id": cfg.mdgw_id,
+        "service_id": cfg.mdgw_id,
         "venue": cfg.venue,
-        "grpc_port": cfg.grpc_port,
-        "grpc_endpoint": format!("{}:{}", cfg.grpc_host, cfg.grpc_port),
+        "transport": {
+            "protocol": "grpc",
+            "address": format!("{}:{}", cfg.grpc_host, cfg.grpc_port),
+        },
         "capabilities": ["tick", "kline", "funding", "orderbook", "query_current", "query_history"],
-        "query_types": ["current_tick", "current_orderbook", "current_funding", "kline_history"],
-        "publisher_mode": "standalone",
-        "subscription_scope": "global"
+        "metadata": {
+            "publisher_mode": "standalone",
+            "subscription_scope": "global",
+            "query_types": ["current_tick", "current_orderbook", "current_funding", "kline_history"],
+        },
     })
     .to_string();
     let kv_val_bytes = bytes::Bytes::from(kv_val);

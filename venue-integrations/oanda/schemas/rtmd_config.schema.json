@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OANDA RTMD Config",
+  "type": "object",
+  "properties": {
+    "environment": {
+      "type": "string",
+      "enum": ["practice", "live"]
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "stream_base_url": {
+      "type": "string"
+    },
+    "secret_ref": {
+      "type": "string"
+    }
+  },
+  "required": ["environment", "account_id", "secret_ref"],
+  "additionalProperties": true
+}

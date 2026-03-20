@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "IBKR RTMD Config",
+  "type": "object",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["paper", "live"]
+    },
+    "host": {
+      "type": "string"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "client_id": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "market_data_type": {
+      "type": "string"
+    }
+  },
+  "required": ["mode", "host", "port", "client_id"],
+  "additionalProperties": true
+}

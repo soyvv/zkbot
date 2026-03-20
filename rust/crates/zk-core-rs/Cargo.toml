@@ -1,0 +1,9 @@
+[package]
+name = "zk-core-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4"
+cron = "0.12"
+thiserror = { workspace = true }

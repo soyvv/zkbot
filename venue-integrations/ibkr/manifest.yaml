@@ -1,0 +1,20 @@
+venue: ibkr
+version: 1
+capabilities:
+  gw:
+    language: python
+    entrypoint: python:ibkr.gw:IbkrGatewayAdaptor
+    config_schema: schemas/gw_config.schema.json
+  rtmd:
+    language: python
+    entrypoint: python:ibkr.rtmd:IbkrRtmdAdaptor
+    config_schema: schemas/rtmd_config.schema.json
+  refdata:
+    language: python
+    entrypoint: python:ibkr.refdata:IbkrRefdataLoader
+    config_schema: schemas/refdata_config.schema.json
+metadata:
+  supports_tradfi_sessions: true
+  notes:
+    - Placeholder module only; runtime loading is not implemented yet.
+    - IBKR should be treated as a hybrid, session-constrained integration.
