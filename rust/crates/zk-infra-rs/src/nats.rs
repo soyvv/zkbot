@@ -57,6 +57,11 @@ pub mod subject {
         format!("zk.rtmd.{venue}.orderbook.{instrument_exch}")
     }
 
+    /// `zk.rtmd.{venue}.funding.{instrument_exch}`
+    pub fn rtmd_funding(venue: &str, instrument_exch: &str) -> String {
+        format!("zk.rtmd.{venue}.funding.{instrument_exch}")
+    }
+
     // ── Control ───────────────────────────────────────────────────────────────
 
     /// `zk.control.{service_type}.{service_id}` — admin control commands
@@ -107,6 +112,10 @@ mod tests {
         assert_eq!(
             subject::rtmd_kline("OKX", "BTC-USDT", "1m"),
             "zk.rtmd.OKX.kline.BTC-USDT.1m"
+        );
+        assert_eq!(
+            subject::rtmd_funding("OKX", "BTC-USDT-SWAP"),
+            "zk.rtmd.OKX.funding.BTC-USDT-SWAP"
         );
     }
 }

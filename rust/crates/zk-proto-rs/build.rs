@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "zk/gateway/v1/gateway_simulator_admin.proto",
         "zk/strategy/v1/strategy.proto",
         "zk/rtmd/v1/rtmd.proto",
+        "zk/rtmd/v1/rtmd_query_service.proto",
         "zk/engine/v1/engine_service.proto",
         "zk/monitor/v1/monitor.proto",
         "zk/pilot/v1/pilot_service.proto",

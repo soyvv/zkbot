@@ -1,0 +1,33 @@
+syntax = "proto3";
+package zk.rtmd.v1;
+
+import "zk/rtmd/v1/rtmd.proto";
+
+service RtmdQueryService {
+    rpc QueryCurrentTick      (QueryTickRequest)       returns (QueryTickResponse);
+    rpc QueryCurrentOrderBook (QueryOrderBookRequest)  returns (QueryOrderBookResponse);
+    rpc QueryCurrentFunding   (QueryFundingRequest)    returns (QueryFundingResponse);
+    rpc QueryKlines           (QueryKlinesRequest)     returns (QueryKlinesResponse);
+    rpc HealthCheck           (HealthCheckRequest)     returns (HealthCheckResponse);
+}
+
+message QueryTickRequest      { string instrument_code = 1; }
+message QueryTickResponse     { TickData tick = 1; }
+
+message QueryOrderBookRequest { string instrument_code = 1; optional uint32 depth = 2; }
+message QueryOrderBookResponse { OrderBook orderbook = 1; }
+
+message QueryFundingRequest   { string instrument_code = 1; }
+message QueryFundingResponse  { FundingRate funding = 1; }
+
+message QueryKlinesRequest {
+    string instrument_code = 1;
+    string interval = 2;
+    uint32 limit = 3;
+    optional int64 from_ms = 4;
+    optional int64 to_ms = 5;
+}
+message QueryKlinesResponse   { repeated Kline klines = 1; }
+
+message HealthCheckRequest  {}
+message HealthCheckResponse { string status = 1; }
