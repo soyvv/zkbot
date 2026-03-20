@@ -95,6 +95,22 @@ services:
       nats:
         condition: service_healthy
 
+  rtmd-sim-gw:
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile.rtmd-sim-gw
+    environment:
+      ZK_NATS_URL: nats://nats:4222
+      ZK_MDGW_ID: mdgw_sim_1
+      ZK_VENUE: simulator
+      ZK_GRPC_PORT: 52051
+      RUST_LOG: zk_rtmd_gw_svc=info,warn
+    ports:
+      - "52051:52051"
+    depends_on:
+      nats:
+        condition: service_healthy
+
   pilot:
     profiles: ["full"]   # started by 'make dev-up-full'; run locally with 'uv run python -m zk_pilot.main'
     build:
