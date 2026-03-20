@@ -1,0 +1,33 @@
+[package]
+name = "zk-rtmd-gw-svc"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "zk-rtmd-gw-svc"
+path = "src/main.rs"
+
+[lib]
+name = "zk_rtmd_gw_svc"
+path = "src/lib.rs"
+
+[dependencies]
+zk-rtmd-rs = { path = "../zk-rtmd-rs" }
+zk-proto-rs = { path = "../zk-proto-rs" }
+zk-infra-rs = { path = "../zk-infra-rs" }
+tokio = { version = "1", features = ["full"] }
+tonic = "0.12"
+prost = "0.13"
+async-nats = "0.37"
+async-trait = "0.1"
+bytes = "1"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+anyhow = "1"
+
+[build-dependencies]
+tonic-build = "0.12"
