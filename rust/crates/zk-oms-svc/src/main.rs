@@ -24,7 +24,6 @@ use zk_oms_svc::{
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use arc_swap::ArcSwap;
-use bytes::Bytes;
 use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -376,15 +375,14 @@ async fn main() -> anyhow::Result<()> {
 
     // ── 11. Register in NATS KV with heartbeat ────────────────────────────────
     let kv_key = format!("svc.oms.{}", cfg.oms_id);
-    let kv_value = Bytes::from(
-        serde_json::json!({
-            "service_type": "OMS",
-            "instance_id":  cfg.oms_id,
-            "grpc_port":    cfg.grpc_port,
-        })
-        .to_string()
-        .into_bytes(),
+    let account_ids: Vec<i64> = confdata.account_routes.keys().copied().collect();
+    let grpc_address = format!("{}:{}", cfg.grpc_host, cfg.grpc_port);
+    let reg_proto = zk_infra_rs::discovery_registration::oms_registration(
+        &cfg.oms_id,
+        &grpc_address,
+        &account_ids,
     );
+    let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg_proto);
 
     let mut registration = ServiceRegistration::register_direct(
         &js,

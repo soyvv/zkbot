@@ -34,6 +34,10 @@ pub struct OmsSvcConfig {
     #[serde(default = "default_grpc_port")]
     pub grpc_port: u16,
 
+    /// Advertised gRPC host for service registration endpoint.
+    #[serde(default = "default_grpc_host")]
+    pub grpc_host: String,
+
     // ── OMS core tunables ──────────────────────────────────────────────────
     /// Whether to handle exchange orders not submitted through this OMS.
     #[serde(default)]
@@ -115,6 +119,9 @@ fn default_nats_url() -> String {
 }
 fn default_grpc_port() -> u16 {
     50051
+}
+fn default_grpc_host() -> String {
+    "127.0.0.1".into()
 }
 fn default_true() -> bool {
     true

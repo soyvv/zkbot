@@ -11,6 +11,7 @@ pub struct GwSvcConfig {
     pub account_id: i64,
     pub venue: String,
     pub grpc_port: u16,
+    pub grpc_host: String,
     pub nats_url: Option<String>,
     /// Opaque venue-specific config blob (parsed from ZK_VENUE_CONFIG JSON).
     /// Real venue adapters (okx, ibkr, oanda) parse their typed config from this.
@@ -67,6 +68,8 @@ impl GwSvcConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(51051),
+            grpc_host: std::env::var("ZK_GRPC_HOST")
+                .unwrap_or_else(|_| "127.0.0.1".to_string()),
             nats_url: std::env::var("ZK_NATS_URL").ok(),
             exec_shard_count,
             exec_queue_capacity,

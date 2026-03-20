@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OKX Refdata Config",
+  "type": "object",
+  "properties": {
+    "api_base_url": {
+      "type": "string"
+    }
+  },
+  "required": [],
+  "additionalProperties": true
+}

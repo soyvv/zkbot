@@ -107,6 +107,12 @@ impl VenueAdapter for MockAdapter {
     async fn query_order(&self, _: VenueOrderQuery) -> anyhow::Result<Vec<VenueOrderFact>> {
         Ok(vec![])
     }
+    async fn query_open_orders(
+        &self,
+        _: VenueOpenOrdersQuery,
+    ) -> anyhow::Result<Vec<VenueOrderFact>> {
+        Ok(vec![])
+    }
     async fn query_trades(&self, _: VenueTradeQuery) -> anyhow::Result<Vec<VenueTradeFact>> {
         Ok(vec![])
     }

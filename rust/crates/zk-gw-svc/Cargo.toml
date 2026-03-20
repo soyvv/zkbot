@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 # async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
 
 # gRPC
 tonic = "0.12"

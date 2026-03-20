@@ -16,6 +16,7 @@
 | 9 | — | Recorder + Monitor | trade write, snapshot, recon jobs, risk alert | 3, 8 |
 | 10 | — | Pilot service | Java/Go control plane; 7-domain REST API; strategy-executions lifecycle; runtime orchestrator adaptor | 5, 8, 9 |
 | 11 | — | Collocated mode | `zk-collocated-svc`; `GatewayPlugin` trait; inter-thread channels | 3, 4, 8 |
+| 12A | — | Python venue bridge | shared PyO3 bridge for manifest-loaded Python venue adaptors | 1, 4 |
 
 **Why simulator first (Phase 2):** Every downstream phase needs a controllable order-fill loop
 for integration tests. Building `zk-mock-gw` before the OMS service means Phase 3 OMS tests
@@ -69,3 +70,11 @@ Each phase plan specifies:
 | [10-recorder-and-monitor.md](10-recorder-and-monitor.md) | 9 | Recorder, Reconciliation, Monitor |
 | [11-pilot-service.md](11-pilot-service.md) | 10 | Pilot control plane — Java/Go; 7-domain REST API; runtime orchestrator |
 | [12-collocated-mode.md](12-collocated-mode.md) | 11 | 2-layer / all-in-one binary |
+| [13-python-venue-bridge.md](13-python-venue-bridge.md) | 12A | Shared PyO3 bridge for Python venue adaptors |
+| [13-refdata-service.md](13-refdata-service.md) | 12 | Full Python refdata service + scheduled jobs + KV registration |
+
+## Supplemental Follow-on Phases
+
+| Phase | Status | Name | Key deliverable | Depends on |
+|---|---|---|---|---|
+| 12 | — | Full refdata service | Python `zk-refdata-svc` with scheduled refresh jobs, lifecycle management, market session ownership, and shared KV registration | 5, 6 |

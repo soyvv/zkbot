@@ -13,7 +13,6 @@ resolution-markers = [
 [manifest]
 members = [
     "gw-utils",
-    "okx-gw",
     "zk-client",
     "zk-core",
     "zk-data",
@@ -1837,36 +1836,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/66/27/965b8525e9cb5dc16481b30a1b3c21e50c7ebf6e9dbd48d0c4d0d5089c7e/numpy-2.4.2-pp311-pypy311_pp73-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:602f65afdef699cda27ec0b9224ae5dc43e328f4c24c689deaf77133dbee74d0", size = 16727979 },
     { url = "https://files.pythonhosted.org/packages/de/e5/b7d20451657664b07986c2f6e3be564433f5dcaf3482d68eaecd79afaf03/numpy-2.4.2-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:be71bf1edb48ebbbf7f6337b5bfd2f895d1902f6335a5830b20141fc126ffba0", size = 12502577 },
 ]
-
-[[package]]
-name = "okx-gw"
-version = "0.1.0"
-source = { editable = "services/zk-gw-okx" }
-dependencies = [
-    { name = "gw-utils" },
-    { name = "loguru" },
-    { name = "websockets" },
-    { name = "zk-datamodel" },
-    { name = "zk-rpc" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gw-utils", editable = "libs/zk-gw-utils" },
-    { name = "loguru", specifier = ">=0.7" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "websockets", specifier = ">=12.0" },
-    { name = "zk-datamodel", editable = "libs/zk-datamodel" },
-    { name = "zk-rpc", editable = "libs/zk-rpc" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "packaging"

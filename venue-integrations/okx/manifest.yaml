@@ -1,0 +1,20 @@
+venue: okx
+version: 1
+capabilities:
+  gw:
+    language: rust
+    entrypoint: rust::okx::gw::OkxGatewayAdaptor
+    config_schema: schemas/gw_config.schema.json
+  rtmd:
+    language: rust
+    entrypoint: rust::okx::rtmd::OkxRtmdAdaptor
+    config_schema: schemas/rtmd_config.schema.json
+  refdata:
+    language: python
+    entrypoint: python:okx.refdata:OkxRefdataLoader
+    config_schema: schemas/refdata_config.schema.json
+metadata:
+  supports_tradfi_sessions: false
+  notes:
+    - Placeholder module only; runtime loading is not implemented yet.
+    - OKX is the preferred native Rust venue for gateway and RTMD adaptors.

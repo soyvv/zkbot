@@ -312,6 +312,13 @@ impl VenueAdapter for SimulatorVenueAdapter {
         Ok(vec![])
     }
 
+    async fn query_open_orders(
+        &self,
+        _req: VenueOpenOrdersQuery,
+    ) -> anyhow::Result<Vec<VenueOrderFact>> {
+        Ok(vec![])
+    }
+
     async fn query_trades(&self, _req: VenueTradeQuery) -> anyhow::Result<Vec<VenueTradeFact>> {
         Ok(vec![])
     }

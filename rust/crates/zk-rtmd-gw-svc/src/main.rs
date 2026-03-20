@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use tracing::info;
 
+use zk_infra_rs::discovery_registration;
+use zk_infra_rs::service_registry::ServiceRegistration;
 use zk_rtmd_gw_svc::{
     config::RtmdGwConfig,
     grpc_handler::RtmdQueryHandler,
@@ -34,55 +36,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(url = %cfg.nats_url, "connecting to NATS");
     let nats_client = async_nats::connect(&cfg.nats_url).await?;
     let js = async_nats::jetstream::new(nats_client.clone());
-
-    // ── Service registry KV registration ──────────────────────────────────
-    let kv_prefix = &cfg.gateway_kv_prefix;
-    let kv_key = format!("{kv_prefix}.{}", cfg.mdgw_id);
-    let kv_val = serde_json::json!({
-        "service_type": "mdgw",
-        "service_id": cfg.mdgw_id,
-        "venue": cfg.venue,
-        "transport": {
-            "protocol": "grpc",
-            "address": format!("{}:{}", cfg.grpc_host, cfg.grpc_port),
-        },
-        "capabilities": ["tick", "kline", "funding", "orderbook", "query_current", "query_history"],
-        "metadata": {
-            "publisher_mode": "standalone",
-            "subscription_scope": "global",
-            "query_types": ["current_tick", "current_orderbook", "current_funding", "kline_history"],
-        },
-    })
-    .to_string();
-    let kv_val_bytes = bytes::Bytes::from(kv_val);
-
-    let registry_bucket = "zk-svc-registry-v1";
-    let registry_store = match js.get_key_value(registry_bucket).await {
-        Ok(s) => s,
-        Err(_) => js
-            .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: registry_bucket.to_string(),
-                max_age: Duration::from_secs(90),
-                ..Default::default()
-            })
-            .await?,
-    };
-    registry_store.put(&kv_key, kv_val_bytes.clone()).await?;
-    info!(kv_key = %kv_key, "registered in NATS KV");
-
-    // Heartbeat loop.
-    let store_hb = registry_store.clone();
-    let kv_key_hb = kv_key.clone();
-    let kv_val_hb = kv_val_bytes.clone();
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(Duration::from_secs(15));
-        loop {
-            ticker.tick().await;
-            if let Err(e) = store_hb.put(&kv_key_hb, kv_val_hb.clone()).await {
-                tracing::warn!(error = %e, "KV heartbeat failed");
-            }
-        }
-    });
 
     // ── Venue adapter ──────────────────────────────────────────────────────
     let adapter = build_adapter(&cfg.venue)?;
@@ -144,16 +97,75 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // ── gRPC server ────────────────────────────────────────────────────────
+    // ── Bind gRPC listener before registering ──────────────────────────────
     let grpc_addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;
+    let listener = tokio::net::TcpListener::bind(grpc_addr).await?;
+    let local_addr = listener.local_addr()?;
+    info!(%local_addr, "gRPC listener bound");
+
+    // ── Service registry KV registration (after listener is ready) ─────────
+    let kv_prefix = &cfg.gateway_kv_prefix;
+    let kv_key = format!("{kv_prefix}.{}", cfg.mdgw_id);
+    let grpc_address = format!("{}:{}", cfg.grpc_host, cfg.grpc_port);
+    let capabilities = vec![
+        "tick".to_string(), "kline".to_string(), "funding".to_string(),
+        "orderbook".to_string(), "query_current".to_string(), "query_history".to_string(),
+    ];
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("publisher_mode".to_string(), "standalone".to_string());
+    metadata.insert("subscription_scope".to_string(), "global".to_string());
+    metadata.insert(
+        "query_types".to_string(),
+        "current_tick,current_orderbook,current_funding,kline_history".to_string(),
+    );
+    let reg_proto = discovery_registration::mdgw_registration(
+        &cfg.mdgw_id,
+        &grpc_address,
+        &cfg.venue,
+        capabilities,
+        metadata,
+    );
+    let kv_value = discovery_registration::encode_registration(&reg_proto);
+
+    let mut registration = ServiceRegistration::register_direct(
+        &js,
+        kv_key.clone(),
+        kv_value,
+        Duration::from_secs(15),
+    )
+    .await
+    .expect("failed to register in NATS KV");
+    info!(kv_key = %kv_key, "registered in NATS KV");
+
+    // ── gRPC server (serve on already-bound listener) ──────────────────────
     let handler = RtmdQueryHandler { adapter: Arc::clone(&adapter) };
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
 
-    info!(%grpc_addr, mdgw_id = %cfg.mdgw_id, "zk-rtmd-gw-svc LIVE");
+    info!(mdgw_id = %cfg.mdgw_id, "zk-rtmd-gw-svc LIVE");
 
-    tonic::transport::Server::builder()
+    let grpc_server = tonic::transport::Server::builder()
         .add_service(RtmdQueryServiceServer::new(handler))
-        .serve(grpc_addr)
-        .await?;
+        .serve_with_incoming(incoming);
 
+    let fenced = tokio::select! {
+        r = grpc_server => {
+            r?;
+            false
+        }
+        _ = tokio::signal::ctrl_c() => {
+            info!("shutdown signal received");
+            false
+        }
+        _ = registration.wait_fenced() => {
+            tracing::warn!("KV fencing detected — shutting down");
+            true
+        }
+    };
+
+    if !fenced {
+        registration.deregister().await.ok();
+    }
+
+    info!("zk-rtmd-gw-svc stopped");
     Ok(())
 }

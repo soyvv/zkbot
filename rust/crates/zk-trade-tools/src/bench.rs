@@ -551,7 +551,7 @@ pub(crate) async fn run_gw_latency_bench(
                 notes,
             };
         };
-        match resolve_gw_addr(nats, &cli.grpc_host, gw_id, gw_addr_override).await {
+        match resolve_gw_addr(nats, gw_id, gw_addr_override).await {
             Ok(addr) => addr,
             Err(err) => {
                 return GatewayBenchmarkReport {
@@ -1032,7 +1032,7 @@ pub(crate) async fn run_oms_latency_bench(
                 notes,
             };
         };
-        match resolve_oms_addr(nats, &cli.grpc_host, oms_id, oms_addr_override).await {
+        match resolve_oms_addr(nats, oms_id, oms_addr_override).await {
             Ok(addr) => addr,
             Err(err) => {
                 return OmsBenchmarkReport {

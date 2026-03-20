@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OKX Gateway Config",
+  "type": "object",
+  "properties": {
+    "api_base_url": {
+      "type": "string"
+    },
+    "ws_public_url": {
+      "type": "string"
+    },
+    "ws_private_url": {
+      "type": "string"
+    },
+    "passphrase_ref": {
+      "type": "string"
+    },
+    "secret_ref": {
+      "type": "string"
+    }
+  },
+  "required": ["secret_ref", "passphrase_ref"],
+  "additionalProperties": true
+}

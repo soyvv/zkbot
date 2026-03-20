@@ -16,6 +16,7 @@ zk-rtmd-rs = { path = "../zk-rtmd-rs" }
 zk-proto-rs = { path = "../zk-proto-rs" }
 zk-infra-rs = { path = "../zk-infra-rs" }
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
 tonic = "0.12"
 prost = "0.13"
 async-nats = "0.37"

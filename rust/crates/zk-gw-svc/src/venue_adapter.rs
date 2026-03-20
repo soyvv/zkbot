@@ -47,6 +47,21 @@ pub struct VenueOrderQuery {
     pub instrument: Option<String>,
 }
 
+/// Query for open orders, primarily used for startup/reconnect resync.
+#[derive(Debug, Clone, Default)]
+pub struct VenueOpenOrdersQuery {
+    pub instrument: Option<String>,
+    pub updated_since_ts: Option<i64>,
+    pub limit: Option<u32>,
+}
+
+/// Direction for cursor-based venue pagination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VenuePageDirection {
+    Forward,
+    Backward,
+}
+
 /// Query for trades.
 #[derive(Debug, Clone)]
 pub struct VenueTradeQuery {
@@ -55,11 +70,29 @@ pub struct VenueTradeQuery {
     pub start_ts: Option<i64>,
     pub end_ts: Option<i64>,
     pub limit: Option<i64>,
+    /// Optional venue paging cursor or page token.
+    pub page_cursor: Option<String>,
+    /// Direction for cursor-based paging when the venue supports it.
+    pub page_direction: Option<VenuePageDirection>,
+    /// Explicit page size when the venue separates page size from result limit.
+    pub page_size: Option<u32>,
 }
 
 /// Query for positions.
 #[derive(Debug, Clone)]
 pub struct VenuePositionQuery {}
+
+/// Query for funding fees or analogous venue financing charges.
+#[derive(Debug, Clone, Default)]
+pub struct VenueFundingFeeQuery {
+    pub instrument: Option<String>,
+    pub start_ts: Option<i64>,
+    pub end_ts: Option<i64>,
+    pub limit: Option<u32>,
+    pub page_cursor: Option<String>,
+    pub page_direction: Option<VenuePageDirection>,
+    pub page_size: Option<u32>,
+}
 
 // ─── Venue fact types (pre-semantic-unification) ────────────────────────────
 
@@ -105,6 +138,16 @@ pub struct VenueTradeFact {
     pub filled_qty: f64,
     pub filled_price: f64,
     pub timestamp: i64,
+}
+
+/// A funding fee or similar financing-charge fact from the venue.
+#[derive(Debug, Clone)]
+pub struct VenueFundingFeeFact {
+    pub instrument: String,
+    pub fee_asset: String,
+    pub fee_qty: f64,
+    pub timestamp: i64,
+    pub venue_ref: Option<String>,
 }
 
 /// A position fact from the venue.
@@ -176,8 +219,25 @@ pub trait VenueAdapter: Send + Sync {
     /// Query order details.
     async fn query_order(&self, req: VenueOrderQuery) -> anyhow::Result<Vec<VenueOrderFact>>;
 
+    /// Query open orders for startup/reconnect resync.
+    async fn query_open_orders(
+        &self,
+        req: VenueOpenOrdersQuery,
+    ) -> anyhow::Result<Vec<VenueOrderFact>>;
+
     /// Query trade history.
     async fn query_trades(&self, req: VenueTradeQuery) -> anyhow::Result<Vec<VenueTradeFact>>;
+
+    /// Query funding fees or similar financing charges.
+    ///
+    /// Optional because many venues do not expose these semantics or expose them
+    /// only through cold-path account statements.
+    async fn query_funding_fees(
+        &self,
+        _req: VenueFundingFeeQuery,
+    ) -> anyhow::Result<Vec<VenueFundingFeeFact>> {
+        Err(anyhow::anyhow!("funding fee query not supported by this venue adaptor"))
+    }
 
     /// Query positions.
     async fn query_positions(

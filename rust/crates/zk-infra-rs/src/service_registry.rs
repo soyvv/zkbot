@@ -27,7 +27,7 @@
 //! use bytes::Bytes;
 //! use std::time::Duration;
 //!
-//! # async fn example(js: async_nats::jetstream::Context) -> anyhow::Result<()> {
+//! # async fn example(js: async_nats::jetstream::Context) -> Result<(), async_nats::Error> {
 //! let mut reg = ServiceRegistration::register_direct(
 //!     &js,
 //!     "svc.oms.oms_dev_1",

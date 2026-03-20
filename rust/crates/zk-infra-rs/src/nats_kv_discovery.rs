@@ -25,7 +25,7 @@
 //! ```no_run
 //! use zk_infra_rs::nats_kv_discovery::KvDiscoveryClient;
 //!
-//! # async fn example(js: async_nats::jetstream::Context) -> anyhow::Result<()> {
+//! # async fn example(js: async_nats::jetstream::Context) -> Result<(), async_nats::Error> {
 //! let disc = KvDiscoveryClient::start(&js).await?;
 //! disc.spawn_watch_loop();
 //!

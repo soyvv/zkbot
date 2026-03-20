@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OKX RTMD Config",
+  "type": "object",
+  "properties": {
+    "api_base_url": {
+      "type": "string"
+    },
+    "ws_public_url": {
+      "type": "string"
+    },
+    "ws_private_url": {
+      "type": "string"
+    },
+    "secret_ref": {
+      "type": "string"
+    }
+  },
+  "required": [],
+  "additionalProperties": true
+}

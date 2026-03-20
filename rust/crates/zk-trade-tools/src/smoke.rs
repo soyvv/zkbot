@@ -49,7 +49,7 @@ pub(crate) async fn run_gw_smoke(
     };
 
     let gw_addr = match timed_step(&mut report, "resolve_gateway", async {
-        let addr = resolve_gw_addr(&nats, &cli.grpc_host, gw_id, gw_addr).await?;
+        let addr = resolve_gw_addr(&nats, gw_id, gw_addr).await?;
         Ok((addr.clone(), format!("resolved {gw_id} to {addr}")))
     })
     .await
@@ -221,7 +221,7 @@ pub(crate) async fn run_oms_smoke(
     };
 
     let oms_addr = match timed_step(&mut report, "resolve_oms", async {
-        let addr = resolve_oms_addr(&nats, &cli.grpc_host, oms_id, oms_addr).await?;
+        let addr = resolve_oms_addr(&nats, oms_id, oms_addr).await?;
         Ok((addr.clone(), format!("resolved {oms_id} to {addr}")))
     })
     .await
@@ -472,7 +472,7 @@ pub(crate) async fn run_sim_full_cycle(
     };
 
     let gw_addr = match timed_step(&mut report, "resolve_gateway", async {
-        let addr = resolve_gw_addr(&nats, &cli.grpc_host, gw_id, gw_addr).await?;
+        let addr = resolve_gw_addr(&nats, gw_id, gw_addr).await?;
         Ok((addr.clone(), format!("resolved {gw_id} to {addr}")))
     })
     .await
@@ -485,7 +485,7 @@ pub(crate) async fn run_sim_full_cycle(
     };
 
     let oms_addr = match timed_step(&mut report, "resolve_oms", async {
-        let addr = resolve_oms_addr(&nats, &cli.grpc_host, oms_id, oms_addr).await?;
+        let addr = resolve_oms_addr(&nats, oms_id, oms_addr).await?;
         Ok((addr.clone(), format!("resolved {oms_id} to {addr}")))
     })
     .await

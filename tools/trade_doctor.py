@@ -82,6 +82,7 @@ def load_proto_modules() -> dict[str, Any]:
         "oms_pb2": "zk.oms.v1.oms_pb2",
         "oms_service_grpc": "zk.oms.v1.oms_service_pb2_grpc",
         "rtmd_pb2": "zk.rtmd.v1.rtmd_pb2",
+        "discovery_pb2": "zk.discovery.v1.discovery_pb2",
     }
     return {key: importlib.import_module(path) for key, path in modules.items()}
 
@@ -155,28 +156,28 @@ async def connect_nats(url: str):
     return nc
 
 
-async def resolve_addr_from_kv(nc, grpc_host: str, key: str) -> str:
+async def resolve_addr_from_kv(nc, key: str) -> str:
     js = nc.jetstream()
     kv = await js.key_value(REGISTRY_BUCKET)
     entry = await kv.get(key)
     if entry is None:
         raise TradeDoctorError(f"service registry entry not found: {key}")
-    payload = json.loads(entry.value.decode())
-    port = payload.get("grpc_port")
-    if not port:
-        raise TradeDoctorError(f"registry entry missing grpc_port: {key}")
-    return f"{grpc_host}:{port}"
+    reg = PROTO["discovery_pb2"].ServiceRegistration()
+    reg.ParseFromString(entry.value)
+    if not reg.endpoint.address:
+        raise TradeDoctorError(f"registry entry missing endpoint address: {key}")
+    return reg.endpoint.address
 
 
 async def resolve_gw_addr(nc, grpc_host: str, gw_id: str, override: str | None) -> str:
     return _normalize_addr(override) if override else await resolve_addr_from_kv(
-        nc, grpc_host, f"svc.gw.{gw_id}"
+        nc, f"svc.gw.{gw_id}"
     )
 
 
 async def resolve_oms_addr(nc, grpc_host: str, oms_id: str, override: str | None) -> str:
     return _normalize_addr(override) if override else await resolve_addr_from_kv(
-        nc, grpc_host, f"svc.oms.{oms_id}"
+        nc, f"svc.oms.{oms_id}"
     )
 
 

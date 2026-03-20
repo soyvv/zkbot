@@ -11,5 +11,6 @@ Use this folder for:
 - rollout notes
 - progress tracking
 - outstanding TODO items
+- service-specific execution plans such as the full refdata rollout in [plan/13-refdata-service.md](/Users/zzk/workspace/zklab/zkbot/docs/system-redesign-plan/plan/13-refdata-service.md)
 
 Do not add multi-topic architecture design docs here.

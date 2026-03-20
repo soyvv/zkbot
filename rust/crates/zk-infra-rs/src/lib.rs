@@ -1,6 +1,7 @@
 // zk-infra-rs: infrastructure adapters for all zkbot service binaries.
 // Domain crates (zk-oms-rs, zk-engine-rs, etc.) have no infra dependencies.
 
+pub mod discovery_registration;
 pub mod config;
 pub mod grpc;
 pub mod mongo;

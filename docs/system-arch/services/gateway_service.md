@@ -87,7 +87,12 @@ pub trait VenueAdapter: Send + Sync {
 
     async fn query_balance(&self, req: VenueBalanceQuery) -> Result<Vec<VenueBalanceFact>>;
     async fn query_order(&self, req: VenueOrderQuery) -> Result<Vec<VenueOrderFact>>;
+    async fn query_open_orders(&self, req: VenueOpenOrdersQuery) -> Result<Vec<VenueOrderFact>>;
     async fn query_trades(&self, req: VenueTradeQuery) -> Result<Vec<VenueTradeFact>>;
+    async fn query_funding_fees(
+        &self,
+        req: VenueFundingFeeQuery,
+    ) -> Result<Vec<VenueFundingFeeFact>>;
     async fn query_positions(&self, req: VenuePositionQuery) -> Result<Vec<VenuePositionFact>>;
 
     async fn next_event(&self) -> Result<VenueEvent>;
@@ -147,8 +152,9 @@ Recommended behavior by mode:
 - after `place_order` / `cancel_order`, adaptor may immediately query order state and recent trades
   to synthesize follow-up facts
 - periodic polling should query:
-  - open/recent orders
+  - open/recent orders, including a dedicated startup/reconnect open-orders resync path
   - recent trades/fills
+  - optional funding-fee / financing-charge history where the venue exposes it
   - balance snapshots
   - position snapshots
 - polling deltas should be converted into `VenueEvent` facts, not published directly

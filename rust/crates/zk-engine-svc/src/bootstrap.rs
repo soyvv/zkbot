@@ -6,7 +6,6 @@
 
 use std::time::Duration;
 
-use bytes::Bytes;
 use tracing::{info, warn};
 
 use zk_infra_rs::service_registry::ServiceRegistration;
@@ -66,19 +65,17 @@ pub async fn register_kv(
     grant: &BootstrapGrant,
 ) -> anyhow::Result<ServiceRegistration> {
     let kv_key = format!("svc.engine.{}", cfg.engine_id);
-    let kv_value = Bytes::from(
-        serde_json::json!({
-            "service_type": "ENGINE",
-            "instance_id": cfg.engine_id,
-            "execution_id": grant.execution_id,
-            "strategy_key": grant.strategy_key,
-            "grpc_port": cfg.grpc_port,
-        })
-        .to_string()
-        .into_bytes(),
+    let grpc_address = format!("{}:{}", cfg.grpc_host, cfg.grpc_port);
+    let reg = zk_infra_rs::discovery_registration::engine_registration(
+        &cfg.engine_id,
+        &grpc_address,
+        &grant.execution_id,
+        &grant.strategy_key,
+        &grant.account_ids,
     );
+    let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg);
 
-    let reg = ServiceRegistration::register_direct(
+    let registration = ServiceRegistration::register_direct(
         js,
         kv_key,
         kv_value,
@@ -88,11 +85,11 @@ pub async fn register_kv(
     .map_err(|e| anyhow::anyhow!("KV registration failed: {e}"))?;
 
     info!(
-        kv_key = reg.grant().kv_key,
-        session_id = reg.grant().owner_session_id,
+        kv_key = registration.grant().kv_key,
+        session_id = registration.grant().owner_session_id,
         "registered in NATS KV"
     );
-    Ok(reg)
+    Ok(registration)
 }
 
 /// Generate a short pseudo-unique suffix (first 8 chars of a timestamp + random).

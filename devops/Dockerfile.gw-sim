@@ -31,6 +31,18 @@ COPY rust/crates/zk-oms-svc/build.rs           ./rust/crates/zk-oms-svc/
 COPY rust/crates/zk-gw-svc/Cargo.toml          ./rust/crates/zk-gw-svc/
 COPY rust/crates/zk-gw-svc/build.rs            ./rust/crates/zk-gw-svc/
 COPY rust/crates/zk-trading-sdk-rs/Cargo.toml  ./rust/crates/zk-trading-sdk-rs/
+COPY rust/crates/zk-rtmd-rs/Cargo.toml         ./rust/crates/zk-rtmd-rs/
+COPY rust/crates/zk-rtmd-gw-svc/Cargo.toml     ./rust/crates/zk-rtmd-gw-svc/
+COPY rust/crates/zk-rtmd-gw-svc/build.rs       ./rust/crates/zk-rtmd-gw-svc/
+COPY rust/crates/zk-trade-tools/Cargo.toml      ./rust/crates/zk-trade-tools/
+COPY rust/crates/zk-engine-svc/Cargo.toml      ./rust/crates/zk-engine-svc/
+COPY rust/crates/zk-engine-svc/build.rs        ./rust/crates/zk-engine-svc/
+COPY rust/crates/zk-strategy-host-rs/Cargo.toml ./rust/crates/zk-strategy-host-rs/
+COPY rust/crates/zk-core-rs/Cargo.toml         ./rust/crates/zk-core-rs/
+COPY rust/strategies/noop/Cargo.toml            ./rust/strategies/noop/
+COPY rust/strategies/strategy-smoke-test/Cargo.toml ./rust/strategies/strategy-smoke-test/
+COPY rust/strategies/mm/Cargo.toml              ./rust/strategies/mm/
+COPY rust/strategies/arbi/Cargo.toml            ./rust/strategies/arbi/
 
 # Stub out every crate's lib/main so cargo can resolve the dep graph.
 RUN for dir in \
@@ -45,14 +57,27 @@ RUN for dir in \
       rust/crates/zk-pyo3-rs \
       rust/crates/zk-mock-gw \
       rust/crates/zk-oms-svc \
-      rust/crates/zk-trading-sdk-rs; do \
+      rust/crates/zk-trading-sdk-rs \
+      rust/crates/zk-rtmd-rs \
+      rust/crates/zk-strategy-host-rs \
+      rust/crates/zk-core-rs \
+      rust/strategies/noop \
+      rust/strategies/strategy-smoke-test \
+      rust/strategies/mm \
+      rust/strategies/arbi; do \
         mkdir -p $dir/src && echo "" > $dir/src/lib.rs; \
     done && \
     mkdir -p rust/crates/zk-mock-gw/src && echo "fn main() {}" > rust/crates/zk-mock-gw/src/main.rs && \
     mkdir -p rust/crates/zk-oms-svc/src && echo "fn main() {}" > rust/crates/zk-oms-svc/src/main.rs && \
     mkdir -p rust/crates/zk-gw-svc/src && \
     echo "" > rust/crates/zk-gw-svc/src/lib.rs && \
-    echo "fn main() {}" > rust/crates/zk-gw-svc/src/main.rs
+    echo "fn main() {}" > rust/crates/zk-gw-svc/src/main.rs && \
+    mkdir -p rust/crates/zk-rtmd-gw-svc/src && \
+    echo "fn main() {}" > rust/crates/zk-rtmd-gw-svc/src/main.rs && \
+    mkdir -p rust/crates/zk-trade-tools/src && echo "fn main() {}" > rust/crates/zk-trade-tools/src/main.rs && \
+    mkdir -p rust/crates/zk-engine-svc/src && \
+    echo "" > rust/crates/zk-engine-svc/src/lib.rs && \
+    echo "fn main() {}" > rust/crates/zk-engine-svc/src/main.rs
 
 # Copy protos (needed by zk-proto-rs build.rs and zk-gw-svc build.rs).
 COPY protos/ ./protos/

@@ -84,9 +84,11 @@ fn normalize_endpoint(addr: &str) -> String {
 
 async fn resolve_addr_from_kv(
     nats: &async_nats::Client,
-    grpc_host: &str,
     key: &str,
 ) -> Result<String> {
+    use prost::Message as _;
+    use zk_proto_rs::zk::discovery::v1::ServiceRegistration as SvcRegProto;
+
     let js = async_nats::jetstream::new(nats.clone());
     let kv = KvRegistryClient::open(&js, REGISTRY_BUCKET)
         .await
@@ -96,37 +98,37 @@ async fn resolve_addr_from_kv(
         .await
         .map_err(|e| anyhow!("failed to read registry key {key}: {e}"))?
         .ok_or_else(|| anyhow!("service registry entry not found: {key}"))?;
-    let value: serde_json::Value =
-        serde_json::from_slice(&bytes).context("failed to parse registry JSON")?;
-    let port = value
-        .get("grpc_port")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| anyhow!("registry entry missing grpc_port: {key}"))?;
-    Ok(format!("http://{grpc_host}:{port}"))
+    let reg = SvcRegProto::decode(bytes.as_ref())
+        .context("failed to decode registry proto")?;
+    let address = reg
+        .endpoint
+        .as_ref()
+        .map(|ep| &ep.address)
+        .filter(|a| !a.is_empty())
+        .ok_or_else(|| anyhow!("registry entry missing endpoint address: {key}"))?;
+    Ok(normalize_endpoint(address))
 }
 
 pub(crate) async fn resolve_gw_addr(
     nats: &async_nats::Client,
-    grpc_host: &str,
     gw_id: &str,
     override_addr: &Option<String>,
 ) -> Result<String> {
     if let Some(addr) = override_addr {
         return Ok(normalize_endpoint(addr));
     }
-    resolve_addr_from_kv(nats, grpc_host, &format!("svc.gw.{gw_id}")).await
+    resolve_addr_from_kv(nats, &format!("svc.gw.{gw_id}")).await
 }
 
 pub(crate) async fn resolve_oms_addr(
     nats: &async_nats::Client,
-    grpc_host: &str,
     oms_id: &str,
     override_addr: &Option<String>,
 ) -> Result<String> {
     if let Some(addr) = override_addr {
         return Ok(normalize_endpoint(addr));
     }
-    resolve_addr_from_kv(nats, grpc_host, &format!("svc.oms.{oms_id}")).await
+    resolve_addr_from_kv(nats, &format!("svc.oms.{oms_id}")).await
 }
 
 pub(crate) fn default_exch_account_id(cli: &Cli) -> String {

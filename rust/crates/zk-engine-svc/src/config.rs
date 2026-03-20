@@ -24,6 +24,10 @@ pub struct EngineSvcConfig {
     #[serde(rename = "zk_grpc_port", default = "default_grpc_port")]
     pub grpc_port: u16,
 
+    /// Advertised gRPC host for service registration endpoint.
+    #[serde(rename = "zk_grpc_host", default = "default_grpc_host")]
+    pub grpc_host: String,
+
     /// KV heartbeat interval in seconds.
     #[serde(rename = "zk_kv_heartbeat_secs", default = "default_heartbeat")]
     pub kv_heartbeat_secs: u64,
@@ -64,6 +68,9 @@ pub struct EngineSvcConfig {
 
 fn default_grpc_port() -> u16 {
     50060
+}
+fn default_grpc_host() -> String {
+    "127.0.0.1".into()
 }
 fn default_heartbeat() -> u64 {
     5

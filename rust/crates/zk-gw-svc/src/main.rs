@@ -42,49 +42,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // ── NATS KV self-registration ──────────────────────────────────────────
-    if let Some(ref nats) = nats_client {
-        let kv_prefix =
-            std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".to_string());
-        let kv_key = format!("{kv_prefix}.{}", cfg.gw_id);
-        let kv_val_str = format!(
-            r#"{{"service_type":"GW","gw_id":"{}","grpc_port":{},"venue":"{}"}}"#,
-            cfg.gw_id, cfg.grpc_port, cfg.venue
-        );
-        let kv_val = bytes::Bytes::from(kv_val_str.clone());
-
-        let js = async_nats::jetstream::new(nats.clone());
-        let bucket = "zk-svc-registry-v1";
-        let store = match js.get_key_value(bucket).await {
-            Ok(s) => s,
-            Err(_) => js
-                .create_key_value(async_nats::jetstream::kv::Config {
-                    bucket: bucket.to_string(),
-                    max_age: std::time::Duration::from_secs(90),
-                    ..Default::default()
-                })
-                .await
-                .expect("KV bucket create failed"),
-        };
-        store
-            .put(&kv_key, kv_val.clone())
-            .await
-            .expect("KV put failed");
-        info!(kv_key, "registered in NATS KV");
-
-        // Heartbeat loop.
-        let kv_key2 = kv_key.clone();
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
-            loop {
-                ticker.tick().await;
-                if let Err(e) = store.put(&kv_key2, kv_val.clone()).await {
-                    tracing::warn!(kv_key = kv_key2, error = %e, "KV heartbeat failed");
-                }
-            }
-        });
-    }
-
     // ── Gateway state ──────────────────────────────────────────────────────
     let gw_state = Arc::new(Mutex::new(GatewayState::Starting));
 
@@ -181,8 +138,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let gw_addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;
+    let gw_listener = tokio::net::TcpListener::bind(gw_addr).await?;
 
-    if cfg.venue == "simulator" && cfg.enable_admin_controls {
+    // Bind admin listener early (before registration) so the port is guaranteed live.
+    let admin_listener = if cfg.venue == "simulator" && cfg.enable_admin_controls {
+        let admin_addr: SocketAddr = format!("0.0.0.0:{}", cfg.admin_grpc_port).parse()?;
+        Some(tokio::net::TcpListener::bind(admin_addr).await?)
+    } else {
+        None
+    };
+
+
+    // ── NATS KV self-registration (after adapter connected + listener bound) ──
+    let mut registration = if let Some(ref nats) = nats_client {
+        let js = async_nats::jetstream::new(nats.clone());
+        let kv_prefix =
+            std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".to_string());
+        let kv_key = format!("{kv_prefix}.{}", cfg.gw_id);
+        let grpc_address = format!("{}:{}", cfg.grpc_host, cfg.grpc_port);
+        let reg_proto = zk_infra_rs::discovery_registration::gw_registration(
+            &cfg.gw_id,
+            &grpc_address,
+            &cfg.venue,
+            cfg.account_id,
+        );
+        let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg_proto);
+
+        let reg = zk_infra_rs::service_registry::ServiceRegistration::register_direct(
+            &js,
+            kv_key.clone(),
+            kv_value,
+            std::time::Duration::from_secs(15),
+        )
+        .await
+        .expect("failed to register in NATS KV");
+        info!(kv_key, "registered in NATS KV");
+        Some(reg)
+    } else {
+        None
+    };
+
+    // ── Serve ──────────────────────────────────────────────────────────────
+    let fenced;
+
+    if let Some(admin_listener) = admin_listener {
         let handles = built
             .simulator_handles
             .expect("simulator_handles must be present when venue=simulator");
@@ -200,29 +199,72 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pipeline: Arc::clone(&pipeline),
         };
 
-        let admin_addr: SocketAddr = format!("0.0.0.0:{}", cfg.admin_grpc_port).parse()?;
+        info!(gw_addr = %gw_listener.local_addr()?, admin_addr = %admin_listener.local_addr()?, "starting dual gRPC servers");
 
-        info!(%gw_addr, %admin_addr, "starting dual gRPC servers");
+        let gw_incoming = tokio_stream::wrappers::TcpListenerStream::new(gw_listener);
+        let admin_incoming = tokio_stream::wrappers::TcpListenerStream::new(admin_listener);
 
         let gw_server = tonic::transport::Server::builder()
             .add_service(GatewayServiceServer::new(gw_handler))
-            .serve(gw_addr);
+            .serve_with_incoming(gw_incoming);
 
         let admin_server = tonic::transport::Server::builder()
             .add_service(GatewaySimulatorAdminServiceServer::new(admin_handler))
-            .serve(admin_addr);
+            .serve_with_incoming(admin_incoming);
 
-        tokio::select! {
-            r = gw_server => r?,
-            r = admin_server => r?,
+        if let Some(ref mut reg) = registration {
+            fenced = tokio::select! {
+                r = gw_server => { r?; false }
+                r = admin_server => { r?; false }
+                _ = tokio::signal::ctrl_c() => {
+                    info!("shutdown signal received");
+                    false
+                }
+                _ = reg.wait_fenced() => {
+                    tracing::warn!("KV fencing detected — shutting down");
+                    true
+                }
+            };
+        } else {
+            tokio::select! {
+                r = gw_server => r?,
+                r = admin_server => r?,
+            }
+            fenced = false;
         }
     } else {
-        info!(%gw_addr, "starting gRPC server");
-        tonic::transport::Server::builder()
+        info!(addr = %gw_listener.local_addr()?, "starting gRPC server");
+
+        let gw_incoming = tokio_stream::wrappers::TcpListenerStream::new(gw_listener);
+        let gw_server = tonic::transport::Server::builder()
             .add_service(GatewayServiceServer::new(gw_handler))
-            .serve(gw_addr)
-            .await?;
+            .serve_with_incoming(gw_incoming);
+
+        if let Some(ref mut reg) = registration {
+            fenced = tokio::select! {
+                r = gw_server => { r?; false }
+                _ = tokio::signal::ctrl_c() => {
+                    info!("shutdown signal received");
+                    false
+                }
+                _ = reg.wait_fenced() => {
+                    tracing::warn!("KV fencing detected — shutting down");
+                    true
+                }
+            };
+        } else {
+            gw_server.await?;
+            fenced = false;
+        }
     }
 
+    // Deregister on clean shutdown (not when fenced — new owner holds the key).
+    if !fenced {
+        if let Some(ref reg) = registration {
+            reg.deregister().await.ok();
+        }
+    }
+
+    info!("zk-gw-svc stopped");
     Ok(())
 }
