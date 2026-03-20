@@ -224,3 +224,48 @@ async fn test_simulator_adapter_event_injection_and_query() {
     let queried = adapter.query_current_tick("BTC-USDT").await.unwrap();
     assert_eq!(queried.instrument_code, "BTC-USDT");
 }
+
+/// Verify that the exch_map is refcounted per instrument_code, so that unsubscribing
+/// one channel does not remove the instrument_exch mapping for other active channels.
+#[tokio::test]
+async fn test_simulator_exch_map_refcounted_across_channels() {
+    use zk_rtmd_rs::venue::simulator::SimRtmdAdapter;
+
+    let adapter = SimRtmdAdapter::new();
+
+    let tick_spec = RtmdSubscriptionSpec {
+        stream_key: StreamKey { instrument_code: "BTC-USDT".to_string(), channel: ChannelType::Tick },
+        instrument_exch: "BTC-USDT-SWAP".to_string(),
+        venue: "OKX".to_string(),
+    };
+    let funding_spec = RtmdSubscriptionSpec {
+        stream_key: StreamKey { instrument_code: "BTC-USDT".to_string(), channel: ChannelType::Funding },
+        instrument_exch: "BTC-USDT-SWAP".to_string(),
+        venue: "OKX".to_string(),
+    };
+
+    adapter.subscribe(tick_spec.clone()).await.unwrap();
+    adapter.subscribe(funding_spec.clone()).await.unwrap();
+
+    // Both channels active — exch resolved
+    assert_eq!(
+        adapter.instrument_exch_for("BTC-USDT"),
+        Some("BTC-USDT-SWAP".to_string())
+    );
+
+    // Unsubscribe tick — funding still active
+    adapter.unsubscribe(tick_spec).await.unwrap();
+    assert_eq!(
+        adapter.instrument_exch_for("BTC-USDT"),
+        Some("BTC-USDT-SWAP".to_string()),
+        "exch_map should remain while funding channel is still subscribed"
+    );
+
+    // Unsubscribe funding — no channels left
+    adapter.unsubscribe(funding_spec).await.unwrap();
+    assert_eq!(
+        adapter.instrument_exch_for("BTC-USDT"),
+        None,
+        "exch_map should be empty once all channels unsubscribed"
+    );
+}

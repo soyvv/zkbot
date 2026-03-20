@@ -28,10 +28,12 @@ pub struct SimRtmdAdapter {
     cache: Mutex<SimCache>,
     /// Active subscriptions (instrument_code → spec).
     active: Mutex<Vec<RtmdSubscriptionSpec>>,
-    /// Mapping from internal instrument_code to venue-native instrument_exch.
-    /// Populated on subscribe, cleared on unsubscribe.
+    /// Mapping from internal instrument_code to (venue-native instrument_exch, refcount).
+    /// Refcount tracks how many distinct channels are active for this instrument.
+    /// Removed only when refcount reaches zero so that unsubscribing one channel
+    /// (e.g. tick) does not drop the mapping for other active channels (e.g. funding).
     /// Uses std::sync::Mutex so instrument_exch_for() can be called from sync context.
-    exch_map: StdMutex<HashMap<String, String>>,
+    exch_map: StdMutex<HashMap<String, (String, usize)>>,
 }
 
 impl SimRtmdAdapter {
@@ -70,14 +72,26 @@ impl RtmdVenueAdapter for SimRtmdAdapter {
         self.exch_map
             .lock()
             .unwrap()
-            .insert(spec.stream_key.instrument_code.clone(), spec.instrument_exch.clone());
+            .entry(spec.stream_key.instrument_code.clone())
+            .and_modify(|(_, refcount)| *refcount += 1)
+            .or_insert((spec.instrument_exch.clone(), 1));
         self.active.lock().await.push(spec);
         Ok(())
     }
 
     async fn unsubscribe(&self, spec: RtmdSubscriptionSpec) -> Result<()> {
         debug!(instrument_code = %spec.stream_key.instrument_code, "SimRtmdAdapter: unsubscribe");
-        self.exch_map.lock().unwrap().remove(&spec.stream_key.instrument_code);
+        {
+            let mut map = self.exch_map.lock().unwrap();
+            if let Some(entry) = map.get_mut(&spec.stream_key.instrument_code) {
+                if entry.1 > 0 {
+                    entry.1 -= 1;
+                }
+                if entry.1 == 0 {
+                    map.remove(&spec.stream_key.instrument_code);
+                }
+            }
+        }
         self.active.lock().await.retain(|s| s.stream_key != spec.stream_key);
         Ok(())
     }
@@ -127,6 +141,6 @@ impl RtmdVenueAdapter for SimRtmdAdapter {
     }
 
     fn instrument_exch_for(&self, instrument_code: &str) -> Option<String> {
-        self.exch_map.lock().unwrap().get(instrument_code).cloned()
+        self.exch_map.lock().unwrap().get(instrument_code).map(|(exch, _)| exch.clone())
     }
 }

@@ -43,6 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "mdgw_id": cfg.mdgw_id,
         "venue": cfg.venue,
         "grpc_port": cfg.grpc_port,
+        "grpc_endpoint": format!("{}:{}", cfg.grpc_host, cfg.grpc_port),
         "capabilities": ["tick", "kline", "funding", "orderbook", "query_current", "query_history"],
         "query_types": ["current_tick", "current_orderbook", "current_funding", "kline_history"],
         "publisher_mode": "standalone",

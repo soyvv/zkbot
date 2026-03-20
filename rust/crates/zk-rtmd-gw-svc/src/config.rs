@@ -5,6 +5,10 @@ pub struct RtmdGwConfig {
     pub venue: String,
     pub nats_url: String,
     pub grpc_port: u16,
+    /// Advertised host used in service registration gRPC endpoint.
+    /// Set to the container/pod hostname or IP reachable by query clients.
+    /// Default "127.0.0.1" is suitable for local dev / docker-compose.
+    pub grpc_host: String,
     /// KV prefix for service registration (default: "svc.mdgw")
     pub gateway_kv_prefix: String,
     /// KV bucket for RTMD subscription leases (default: "zk-rtmd-subs-v1")
@@ -24,6 +28,8 @@ impl RtmdGwConfig {
                 .unwrap_or_else(|_| "52051".to_string())
                 .parse()
                 .unwrap_or(52051),
+            grpc_host: std::env::var("ZK_GRPC_HOST")
+                .unwrap_or_else(|_| "127.0.0.1".to_string()),
             gateway_kv_prefix: std::env::var("ZK_GATEWAY_KV_PREFIX")
                 .unwrap_or_else(|_| "svc.mdgw".to_string()),
             rtmd_sub_bucket: std::env::var("ZK_RTMD_SUB_BUCKET")
