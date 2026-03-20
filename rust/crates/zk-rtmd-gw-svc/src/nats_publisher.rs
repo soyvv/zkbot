@@ -1,17 +1,25 @@
+use std::sync::Arc;
+
 use prost::Message as _;
 use tracing::warn;
 use zk_infra_rs::nats::subject;
 use zk_proto_rs::zk::rtmd::v1::{FundingRate, Kline, OrderBook, TickData};
-use zk_rtmd_rs::types::RtmdEvent;
+use zk_rtmd_rs::{types::RtmdEvent, venue_adapter::RtmdVenueAdapter};
 
 pub struct RtmdNatsPublisher {
     client: async_nats::Client,
     venue: String,
+    /// Used to resolve internal instrument_code → venue-native instrument_exch for subjects.
+    adapter: Arc<dyn RtmdVenueAdapter>,
 }
 
 impl RtmdNatsPublisher {
-    pub fn new(client: async_nats::Client, venue: String) -> Self {
-        Self { client, venue }
+    pub fn new(
+        client: async_nats::Client,
+        venue: String,
+        adapter: Arc<dyn RtmdVenueAdapter>,
+    ) -> Self {
+        Self { client, venue, adapter }
     }
 
     pub async fn publish(&self, event: RtmdEvent) {
@@ -24,23 +32,39 @@ impl RtmdNatsPublisher {
     }
 
     async fn publish_tick(&self, tick: TickData) {
-        let subj = subject::rtmd_tick(&self.venue, &tick.instrument_code);
+        let instrument_exch = self
+            .adapter
+            .instrument_exch_for(&tick.instrument_code)
+            .unwrap_or_else(|| tick.instrument_code.clone());
+        let subj = subject::rtmd_tick(&self.venue, &instrument_exch);
         self.publish_bytes(&subj, tick.encode_to_vec()).await;
     }
 
     async fn publish_kline(&self, kline: Kline) {
         let interval = kline_interval_str(kline.kline_type);
-        let subj = subject::rtmd_kline(&self.venue, &kline.symbol, interval);
+        let instrument_exch = self
+            .adapter
+            .instrument_exch_for(&kline.symbol)
+            .unwrap_or_else(|| kline.symbol.clone());
+        let subj = subject::rtmd_kline(&self.venue, &instrument_exch, interval);
         self.publish_bytes(&subj, kline.encode_to_vec()).await;
     }
 
     async fn publish_orderbook(&self, ob: OrderBook) {
-        let subj = subject::rtmd_orderbook(&self.venue, &ob.instrument_code);
+        let instrument_exch = self
+            .adapter
+            .instrument_exch_for(&ob.instrument_code)
+            .unwrap_or_else(|| ob.instrument_code.clone());
+        let subj = subject::rtmd_orderbook(&self.venue, &instrument_exch);
         self.publish_bytes(&subj, ob.encode_to_vec()).await;
     }
 
     async fn publish_funding(&self, fr: FundingRate) {
-        let subj = subject::rtmd_funding(&self.venue, &fr.instrument_code);
+        let instrument_exch = self
+            .adapter
+            .instrument_exch_for(&fr.instrument_code)
+            .unwrap_or_else(|| fr.instrument_code.clone());
+        let subj = subject::rtmd_funding(&self.venue, &instrument_exch);
         self.publish_bytes(&subj, fr.encode_to_vec()).await;
     }
 

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex as StdMutex;
 use tokio::sync::{mpsc, Mutex};
 use async_trait::async_trait;
 use tracing::debug;
@@ -27,6 +28,10 @@ pub struct SimRtmdAdapter {
     cache: Mutex<SimCache>,
     /// Active subscriptions (instrument_code → spec).
     active: Mutex<Vec<RtmdSubscriptionSpec>>,
+    /// Mapping from internal instrument_code to venue-native instrument_exch.
+    /// Populated on subscribe, cleared on unsubscribe.
+    /// Uses std::sync::Mutex so instrument_exch_for() can be called from sync context.
+    exch_map: StdMutex<HashMap<String, String>>,
 }
 
 impl SimRtmdAdapter {
@@ -37,6 +42,7 @@ impl SimRtmdAdapter {
             receiver: Mutex::new(receiver),
             cache: Mutex::new(SimCache::default()),
             active: Mutex::new(Vec::new()),
+            exch_map: StdMutex::new(HashMap::new()),
         }
     }
 
@@ -61,12 +67,17 @@ impl RtmdVenueAdapter for SimRtmdAdapter {
 
     async fn subscribe(&self, spec: RtmdSubscriptionSpec) -> Result<()> {
         debug!(instrument_code = %spec.stream_key.instrument_code, "SimRtmdAdapter: subscribe");
+        self.exch_map
+            .lock()
+            .unwrap()
+            .insert(spec.stream_key.instrument_code.clone(), spec.instrument_exch.clone());
         self.active.lock().await.push(spec);
         Ok(())
     }
 
     async fn unsubscribe(&self, spec: RtmdSubscriptionSpec) -> Result<()> {
         debug!(instrument_code = %spec.stream_key.instrument_code, "SimRtmdAdapter: unsubscribe");
+        self.exch_map.lock().unwrap().remove(&spec.stream_key.instrument_code);
         self.active.lock().await.retain(|s| s.stream_key != spec.stream_key);
         Ok(())
     }
@@ -113,5 +124,9 @@ impl RtmdVenueAdapter for SimRtmdAdapter {
         let all = cache.klines.get(instrument_code).cloned().unwrap_or_default();
         let limit = limit as usize;
         Ok(if all.len() > limit { all[all.len() - limit..].to_vec() } else { all })
+    }
+
+    fn instrument_exch_for(&self, instrument_code: &str) -> Option<String> {
+        self.exch_map.lock().unwrap().get(instrument_code).cloned()
     }
 }

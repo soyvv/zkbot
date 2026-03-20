@@ -9,7 +9,7 @@ use zk_infra_rs::nats_kv::KvRegistryClient;
 
 use crate::error::SdkError;
 
-const RTMD_SUB_BUCKET: &str = "zk.rtmd.subs.v1";
+const RTMD_SUB_BUCKET: &str = "zk-rtmd-subs-v1";
 
 // ── Deterministic topic constructors ─────────────────────────────────────────
 

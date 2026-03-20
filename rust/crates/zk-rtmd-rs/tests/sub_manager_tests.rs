@@ -74,6 +74,7 @@ impl RtmdVenueAdapter for MockAdapter {
     async fn query_current_orderbook(&self, code: &str, _: Option<u32>) -> Result<OrderBook, RtmdError> { Err(RtmdError::NotFound(code.to_string())) }
     async fn query_current_funding(&self, code: &str) -> Result<FundingRate, RtmdError> { Err(RtmdError::NotFound(code.to_string())) }
     async fn query_klines(&self, code: &str, _: &str, _: u32, _: Option<i64>, _: Option<i64>) -> Result<Vec<Kline>, RtmdError> { Err(RtmdError::NotFound(code.to_string())) }
+    fn instrument_exch_for(&self, _instrument_code: &str) -> Option<String> { None }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

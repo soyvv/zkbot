@@ -41,25 +41,27 @@ pub mod subject {
     }
 
     // ── RTMD ──────────────────────────────────────────────────────────────────
+    // Subject format: zk.rtmd.<channel>.<venue>.<instrument_exch>[.<param>]
+    // Channel-first matches the SDK topic builders and the rtmd_subscription_protocol.md spec.
 
-    /// `zk.rtmd.{venue}.tick.{instrument_exch}`
+    /// `zk.rtmd.tick.{venue}.{instrument_exch}`
     pub fn rtmd_tick(venue: &str, instrument_exch: &str) -> String {
-        format!("zk.rtmd.{venue}.tick.{instrument_exch}")
+        format!("zk.rtmd.tick.{venue}.{instrument_exch}")
     }
 
-    /// `zk.rtmd.{venue}.kline.{instrument_exch}.{interval}`
+    /// `zk.rtmd.kline.{venue}.{instrument_exch}.{interval}`
     pub fn rtmd_kline(venue: &str, instrument_exch: &str, interval: &str) -> String {
-        format!("zk.rtmd.{venue}.kline.{instrument_exch}.{interval}")
+        format!("zk.rtmd.kline.{venue}.{instrument_exch}.{interval}")
     }
 
-    /// `zk.rtmd.{venue}.orderbook.{instrument_exch}`
+    /// `zk.rtmd.orderbook.{venue}.{instrument_exch}`
     pub fn rtmd_orderbook(venue: &str, instrument_exch: &str) -> String {
-        format!("zk.rtmd.{venue}.orderbook.{instrument_exch}")
+        format!("zk.rtmd.orderbook.{venue}.{instrument_exch}")
     }
 
-    /// `zk.rtmd.{venue}.funding.{instrument_exch}`
+    /// `zk.rtmd.funding.{venue}.{instrument_exch}`
     pub fn rtmd_funding(venue: &str, instrument_exch: &str) -> String {
-        format!("zk.rtmd.{venue}.funding.{instrument_exch}")
+        format!("zk.rtmd.funding.{venue}.{instrument_exch}")
     }
 
     // ── Control ───────────────────────────────────────────────────────────────
@@ -107,15 +109,19 @@ mod tests {
     fn test_rtmd_subjects() {
         assert_eq!(
             subject::rtmd_tick("OKX", "BTC-USDT"),
-            "zk.rtmd.OKX.tick.BTC-USDT"
+            "zk.rtmd.tick.OKX.BTC-USDT"
         );
         assert_eq!(
             subject::rtmd_kline("OKX", "BTC-USDT", "1m"),
-            "zk.rtmd.OKX.kline.BTC-USDT.1m"
+            "zk.rtmd.kline.OKX.BTC-USDT.1m"
+        );
+        assert_eq!(
+            subject::rtmd_orderbook("OKX", "BTC-USDT"),
+            "zk.rtmd.orderbook.OKX.BTC-USDT"
         );
         assert_eq!(
             subject::rtmd_funding("OKX", "BTC-USDT-SWAP"),
-            "zk.rtmd.OKX.funding.BTC-USDT-SWAP"
+            "zk.rtmd.funding.OKX.BTC-USDT-SWAP"
         );
     }
 }

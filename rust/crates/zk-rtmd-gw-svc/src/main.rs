@@ -43,7 +43,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "mdgw_id": cfg.mdgw_id,
         "venue": cfg.venue,
         "grpc_port": cfg.grpc_port,
-        "capabilities": ["tick", "kline", "funding", "orderbook", "query_current"],
+        "capabilities": ["tick", "kline", "funding", "orderbook", "query_current", "query_history"],
+        "query_types": ["current_tick", "current_orderbook", "current_funding", "kline_history"],
         "publisher_mode": "standalone",
         "subscription_scope": "global"
     })
@@ -113,7 +114,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // ── Event loop: adapter events → NATS publisher ────────────────────────
-    let publisher = Arc::new(RtmdNatsPublisher::new(nats_client.clone(), cfg.venue.clone()));
+    let publisher = Arc::new(RtmdNatsPublisher::new(
+        nats_client.clone(),
+        cfg.venue.clone(),
+        Arc::clone(&adapter),
+    ));
     let adapter_events = Arc::clone(&adapter);
     let publisher_events = Arc::clone(&publisher);
     tokio::spawn(async move {

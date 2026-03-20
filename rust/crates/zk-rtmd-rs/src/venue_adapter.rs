@@ -22,6 +22,11 @@ pub trait RtmdVenueAdapter: Send + Sync {
     /// Block until the next market data event is available.
     async fn next_event(&self) -> Result<RtmdEvent>;
 
+    /// Map an internal `instrument_code` to the venue-native `instrument_exch` used in
+    /// NATS subject names. Returns `None` if the mapping is unknown (caller should fall
+    /// back to using `instrument_code` directly).
+    fn instrument_exch_for(&self, instrument_code: &str) -> Option<String>;
+
     // ── Query API (venue-backed, not gateway-local cache) ──────────────────
 
     async fn query_current_tick(&self, instrument_code: &str) -> Result<TickData>;
