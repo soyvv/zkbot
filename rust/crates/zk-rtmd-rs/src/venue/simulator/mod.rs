@@ -85,6 +85,8 @@ impl RtmdVenueAdapter for SimRtmdAdapter {
             RtmdEvent::OrderBook(ob) => { cache.orderbooks.insert(ob.instrument_code.clone(), ob.clone()); }
             RtmdEvent::Funding(f) => { cache.funding.insert(f.instrument_code.clone(), f.clone()); }
             RtmdEvent::Kline(k) => {
+                // In the simulator, k.symbol is treated as the instrument_code.
+                // query_klines looks up by instrument_code, so use the same key here.
                 cache.klines.entry(k.symbol.clone()).or_default().push(k.clone());
             }
         }

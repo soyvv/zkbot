@@ -76,6 +76,7 @@ pub struct SubscriptionManager {
 }
 
 impl SubscriptionManager {
+    /// Create a new manager wrapping the given adapter and interest source.
     pub fn new(adapter: Arc<dyn RtmdVenueAdapter>, source: Arc<dyn SubInterestSource>) -> Self {
         Self { adapter, source, state: Mutex::new(HashMap::new()) }
     }
@@ -88,17 +89,27 @@ impl SubscriptionManager {
         let active_keys: std::collections::HashSet<StreamKey> =
             active.iter().map(|s| s.stream_key.clone()).collect();
 
-        let mut state = self.state.lock().await;
-        for lease in leases {
-            let key = lease.stream_key();
-            let spec = lease.to_spec();
-            let entry = state.entry(key.clone()).or_insert((0, spec.clone()));
-            entry.0 += 1;
-            if entry.0 == 1 && !active_keys.contains(&key) {
-                info!(instrument_code = %key.instrument_code, "reconcile: subscribing upstream");
-                if let Err(e) = self.adapter.subscribe(spec).await {
-                    warn!(error = %e, "reconcile: subscribe failed");
+        // Build list of specs that need subscribing, update refcounts under the lock,
+        // then drop the lock before calling adapter.subscribe() across the async boundary.
+        let to_subscribe: Vec<(StreamKey, RtmdSubscriptionSpec)> = {
+            let mut state = self.state.lock().await;
+            let mut to_subscribe = Vec::new();
+            for lease in leases {
+                let key = lease.stream_key();
+                let spec = lease.to_spec();
+                let entry = state.entry(key.clone()).or_insert((0, spec.clone()));
+                entry.0 += 1;
+                if entry.0 == 1 && !active_keys.contains(&key) {
+                    to_subscribe.push((key, spec));
                 }
+            }
+            to_subscribe
+        }; // lock dropped here
+
+        for (key, spec) in to_subscribe {
+            info!(instrument_code = %key.instrument_code, "reconcile: subscribing upstream");
+            if let Err(e) = self.adapter.subscribe(spec).await {
+                warn!(error = %e, "reconcile: subscribe failed");
             }
         }
         Ok(())
@@ -106,35 +117,66 @@ impl SubscriptionManager {
 
     /// Process a single interest change event.
     pub async fn apply_change(&self, change: SubInterestChange) -> Result<()> {
-        let mut state = self.state.lock().await;
         match change {
             SubInterestChange::Added(lease) => {
                 let key = lease.stream_key();
                 let spec = lease.to_spec();
-                let entry = state.entry(key.clone()).or_insert((0, spec.clone()));
-                entry.0 += 1;
-                debug!(instrument_code = %key.instrument_code, refcount = entry.0, "lease added");
-                if entry.0 == 1 {
+                let refcount = {
+                    let mut state = self.state.lock().await;
+                    let entry = state.entry(key.clone()).or_insert((0, spec.clone()));
+                    entry.0 += 1;
+                    let refcount = entry.0;
+                    debug!(instrument_code = %key.instrument_code, refcount, "lease added");
+                    refcount
+                }; // lock dropped here
+                if refcount == 1 {
                     info!(instrument_code = %key.instrument_code, "refcount 0→1: subscribing upstream");
-                    drop(state);
-                    self.adapter.subscribe(spec).await?;
-                    return Ok(());
+                    if let Err(e) = self.adapter.subscribe(spec.clone()).await {
+                        // Roll back refcount — upstream subscription was never established.
+                        let mut state = self.state.lock().await;
+                        if let Some(entry) = state.get_mut(&key) {
+                            if entry.0 > 0 {
+                                entry.0 -= 1;
+                            }
+                            if entry.0 == 0 {
+                                state.remove(&key);
+                            }
+                        }
+                        return Err(e);
+                    }
                 }
             }
             SubInterestChange::Removed { stream_key, .. } => {
-                if let Some(entry) = state.get_mut(&stream_key) {
-                    if entry.0 > 0 {
-                        entry.0 -= 1;
-                        let remaining = entry.0;
-                        let spec = entry.1.clone();
-                        debug!(instrument_code = %stream_key.instrument_code, refcount = remaining, "lease removed");
-                        if remaining == 0 {
-                            info!(instrument_code = %stream_key.instrument_code, "refcount 1→0: unsubscribing upstream");
-                            state.remove(&stream_key);
-                            drop(state);
-                            self.adapter.unsubscribe(spec).await?;
-                            return Ok(());
+                let unsubscribe = {
+                    let mut state = self.state.lock().await;
+                    if let Some(entry) = state.get_mut(&stream_key) {
+                        if entry.0 > 0 {
+                            entry.0 -= 1;
+                            let remaining = entry.0;
+                            debug!(instrument_code = %stream_key.instrument_code, refcount = remaining, "lease removed");
+                            if remaining == 0 {
+                                let spec = entry.1.clone();
+                                state.remove(&stream_key);
+                                Some((stream_key.clone(), spec))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
                         }
+                    } else {
+                        None
+                    }
+                }; // lock dropped here
+
+                if let Some((key, spec)) = unsubscribe {
+                    info!(instrument_code = %key.instrument_code, "refcount 1→0: unsubscribing upstream");
+                    if let Err(e) = self.adapter.unsubscribe(spec.clone()).await {
+                        // On failure: re-insert to keep state consistent —
+                        // upstream subscription is still active.
+                        let mut state = self.state.lock().await;
+                        state.entry(key).or_insert((1, spec));
+                        return Err(e);
                     }
                 }
             }

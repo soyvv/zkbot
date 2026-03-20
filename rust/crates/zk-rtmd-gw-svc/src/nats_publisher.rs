@@ -51,17 +51,16 @@ impl RtmdNatsPublisher {
     }
 }
 
-/// Map kline_type i32 to an interval string.
-/// Values: 0=1m, 1=5m, 2=15m, 3=30m, 4=1h, 5=4h, 6=1d
+/// Map kline_type i32 to an interval string using the proto enum.
 fn kline_interval_str(kline_type: i32) -> &'static str {
-    match kline_type {
-        0 => "1m",
-        1 => "5m",
-        2 => "15m",
-        3 => "30m",
-        4 => "1h",
-        5 => "4h",
-        6 => "1d",
-        _ => "1m",
+    use zk_proto_rs::zk::rtmd::v1::kline::KlineType;
+    match KlineType::try_from(kline_type).unwrap_or(KlineType::Kline1min) {
+        KlineType::Kline1min  => "1m",
+        KlineType::Kline5min  => "5m",
+        KlineType::Kline15min => "15m",
+        KlineType::Kline30min => "30m",
+        KlineType::Kline1hour => "1h",
+        KlineType::Kline4hour => "4h",
+        KlineType::Kline1day  => "1d",
     }
 }
