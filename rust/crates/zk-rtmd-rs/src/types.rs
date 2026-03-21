@@ -2,6 +2,7 @@ use zk_proto_rs::zk::rtmd::v1::{FundingRate, Kline, OrderBook, TickData};
 
 /// Which market data channel a subscription targets.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChannelType {
     /// Best-bid/offer and last-trade tick stream.
     Tick,
@@ -15,7 +16,7 @@ pub enum ChannelType {
 
 /// Deduplication key for upstream venue subscriptions.
 /// Multiple downstream leases with the same StreamKey collapse to one upstream subscription.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct StreamKey {
     /// Canonical internal instrument identifier (e.g. `"BTC-USDT-PERP"`).
     pub instrument_code: String,
@@ -24,7 +25,7 @@ pub struct StreamKey {
 }
 
 /// A resolved subscription spec ready to send to the venue adapter.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RtmdSubscriptionSpec {
     pub stream_key: StreamKey,
     /// Venue-native instrument identifier (resolved from refdata).

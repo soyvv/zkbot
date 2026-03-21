@@ -16,6 +16,9 @@ pub struct GwSvcConfig {
     /// Opaque venue-specific config blob (parsed from ZK_VENUE_CONFIG JSON).
     /// Real venue adapters (okx, ibkr, oanda) parse their typed config from this.
     pub venue_config: serde_json::Value,
+    /// Root directory for venue integration modules (ZK_VENUE_ROOT).
+    /// When set, manifest-driven adapter loading is used.
+    pub venue_root: Option<String>,
 
     // ── Internal execution pool ──────────────────────────────────────────
     /// Number of internal execution shards (default 4).
@@ -74,6 +77,7 @@ impl GwSvcConfig {
             exec_shard_count,
             exec_queue_capacity,
             venue_config,
+            venue_root: std::env::var("ZK_VENUE_ROOT").ok(),
             mock_balances: std::env::var("ZK_MOCK_BALANCES")
                 .unwrap_or_else(|_| "BTC:10,USDT:100000,ETH:50".to_string()),
             fill_delay_ms: std::env::var("ZK_FILL_DELAY_MS")

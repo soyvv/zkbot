@@ -23,6 +23,35 @@ pub struct SimulatorHandles {
 
 /// Factory: build the venue adapter for the configured venue.
 pub async fn build_adapter(cfg: &GwSvcConfig) -> anyhow::Result<BuiltVenue> {
+    // ── Manifest-driven Python venue loading ────────────────────────────
+    #[cfg(feature = "python-venue")]
+    if let Some(ref venue_root) = cfg.venue_root {
+        use std::path::PathBuf;
+        let root = PathBuf::from(venue_root);
+        // Fail-fast: if venue_root is set, manifest must load successfully.
+        let manifest = zk_pyo3_bridge::manifest::load_manifest(&root, &cfg.venue)?;
+        // Capability miss is OK — venue may only declare refdata/rtmd, not gw.
+        if let Ok(cap) = zk_pyo3_bridge::manifest::resolve_capability(
+            &manifest,
+            zk_pyo3_bridge::manifest::CAP_GW,
+        ) {
+            if cap.language == "python" {
+                zk_pyo3_bridge::manifest::validate_config(
+                    &root, &cfg.venue, cap, &cfg.venue_config,
+                )?;
+                let ep = zk_pyo3_bridge::manifest::parse_python_entrypoint(&cap.entrypoint)?;
+                let rt = zk_pyo3_bridge::py_runtime::PyRuntime::initialize(&root)?;
+                let handle = rt.load_class(&ep, cfg.venue_config.clone(), Some(&cfg.venue))?;
+                let adapter: Arc<dyn VenueAdapter> =
+                    Arc::new(zk_pyo3_bridge::gw_adapter::PyVenueAdapter::new(handle));
+                return Ok(BuiltVenue {
+                    adapter,
+                    simulator_handles: None,
+                });
+            }
+        }
+    }
+
     match cfg.venue.as_str() {
         "simulator" => {
             let balances = GwSvcConfig::parse_balances(&cfg.mock_balances);

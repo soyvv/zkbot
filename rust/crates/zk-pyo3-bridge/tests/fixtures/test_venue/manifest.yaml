@@ -1,0 +1,15 @@
+venue: test_venue
+version: 1
+capabilities:
+  gw:
+    language: python
+    entrypoint: "python:fake_gw:FakeGatewayAdaptor"
+  rtmd:
+    language: python
+    entrypoint: "python:fake_rtmd:FakeRtmdAdaptor"
+  refdata:
+    language: python
+    entrypoint: "python:fake_refdata:FakeRefdataLoader"
+metadata:
+  notes:
+    - Test fixture venue for integration testing
