@@ -20,6 +20,13 @@
     },
     "account_code": {
       "type": "string"
+    },
+    "universe": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of IB contract spec strings to qualify, e.g. AAPL-USD-STK-SMART"
     }
   },
   "required": ["mode", "host", "port", "client_id"],
