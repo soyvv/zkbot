@@ -1,0 +1,48 @@
+[package]
+name = "zk-venue-okx"
+version = "0.1.0"
+edition = "2021"
+description = "OKX venue integration — auth, REST, WebSocket, and normalization"
+
+[lib]
+name = "zk_venue_okx"
+path = "src/lib.rs"
+
+[dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP + WebSocket
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+
+# crypto
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
+# rate limiting
+governor = "0.8"
+
+# concurrent maps
+dashmap = "6"
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# logging
+tracing = "0.1"
+
+# errors
+anyhow = "1"
+
+# async trait
+async-trait = "0.1"
+
+# proto types (for OrderReport, etc.)
+zk-proto-rs = { path = "../../../rust/crates/zk-proto-rs" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

@@ -79,6 +79,23 @@ pub async fn build_adapter(cfg: &GwSvcConfig) -> anyhow::Result<BuiltVenue> {
                 }),
             })
         }
+        "okx" => {
+            let okx_cfg: zk_venue_okx::config::OkxConfig =
+                serde_json::from_value(cfg.venue_config.clone())
+                    .map_err(|e| anyhow::anyhow!("invalid OKX venue config: {e}"))?;
+            let okx_cfg = okx_cfg.resolve_secrets()?;
+
+            let adapter = Arc::new(okx::adapter::OkxVenueAdapter::new(
+                okx_cfg,
+                cfg.gw_id.clone(),
+                cfg.account_id,
+            ));
+
+            Ok(BuiltVenue {
+                adapter,
+                simulator_handles: None,
+            })
+        }
         "ibkr" => Err(anyhow::anyhow!(
             "venue adaptor placeholder exists for ibkr but implementation is not wired yet"
         )),
