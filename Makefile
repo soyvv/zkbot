@@ -2,7 +2,8 @@
         dev-up dev-up-full dev-down dev-reset dev-logs dev-ps \
         test-unit test-integration test-parity \
         oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-run-release oms-redis-clear \
-        gw-check gw-build gw-test gw-run
+        gw-check gw-build gw-test gw-run \
+        rtmd-okx-demo
 
 gen:
 	buf generate protos
@@ -142,3 +143,12 @@ gw-okx-demo: ## Run OKX gateway against demo account (requires NATS: make dev-up
 	  ZK_VENUE_CONFIG='"'"'{"api_key":"env:apikey","secret_key":"env:secretkey","passphrase":"env:OKX_PASSPHRASE","demo_mode":true}'"'"' \
 	  RUST_LOG=zk_gw_svc=debug,zk_venue_okx=debug,info \
 	  cargo run --release -p zk-gw-svc'
+
+rtmd-okx-demo: ## Run OKX RTMD gateway against demo/public endpoints (requires NATS: make dev-up)
+	@cd rust && ZK_MDGW_ID=mdgw_okx_demo \
+	  ZK_VENUE=okx \
+	  ZK_GRPC_PORT=51054 \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_VENUE_CONFIG='{"demo_mode":true}' \
+	  RUST_LOG=zk_rtmd_gw_svc=debug,zk_rtmd_rs=debug,zk_venue_okx=debug,info \
+	  cargo run --release -p zk-rtmd-gw-svc

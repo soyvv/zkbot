@@ -6,7 +6,6 @@ Loaded by ``zk-refdata-svc`` through the manifest-driven Python bridge.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -38,7 +37,7 @@ class OandaRefdataLoader:
         cfg = config or {}
         env = cfg.get("environment", "practice")
         self._account_id = cfg.get("account_id", "")
-        self._token = cfg.get("token", "")
+        self._token = cfg.get("token") or cfg.get("secret_ref", "")
         self._api_base_url = cfg.get("api_base_url") or _API_URLS.get(env, _API_URLS["practice"])
 
     async def load_instruments(self) -> list[dict]:
@@ -102,7 +101,7 @@ class OandaRefdataLoader:
                 "min_order_qty": float(min_trade_size),
                 "max_order_qty": float(max_order_units) if max_order_units != "0" else None,
                 "max_mkt_order_qty": None,
-                "extra_properties": json.dumps(extra) if extra else None,
+                "extra_properties": extra if extra else None,
                 "disabled": False,
             })
 

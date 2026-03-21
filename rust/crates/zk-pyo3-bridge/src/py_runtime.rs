@@ -72,12 +72,15 @@ impl PyRuntime {
     /// A persistent asyncio event loop is created and attached to the returned
     /// handle so that all async calls share the same loop.
     ///
-    /// `venue` is used to resolve the module path: manifest entrypoints use
-    /// `<venue>.<module>` as a namespace (e.g. `oanda.gw`), but the actual file
-    /// is at `<venue>/python/gw.py`. When `venue` is `Some`, the venue-specific
-    /// `<venue>/python/` directory is prepended to `sys.path` and the venue
-    /// prefix is stripped from the module name. This ensures each service loads
-    /// from the correct venue directory without cross-venue collisions.
+    /// Two venue layouts are supported:
+    ///
+    /// 1. **Flat layout** (`<venue>/python/gw.py`): when a `<venue>/python/`
+    ///    directory exists, it is prepended to `sys.path` and the venue-name
+    ///    prefix is stripped from the module path (e.g. `oanda.gw` → `gw`).
+    ///
+    /// 2. **Package layout** (`<venue>/<venue>/gw.py` with `__init__.py`): when
+    ///    no `python/` directory exists, the full dotted module path is kept
+    ///    (e.g. `oanda.gw`) and resolves via `venue-integrations/` on `sys.path`.
     ///
     /// Pass `None` for test fixtures or when the module path is already flat.
     pub fn load_class(
@@ -89,16 +92,9 @@ impl PyRuntime {
         // Start a persistent event loop for this adapter instance.
         let event_loop = Arc::new(PyEventLoop::start()?);
 
-        // Resolve the actual importable module path by stripping the venue prefix.
-        let import_path = match venue {
-            Some(v) => crate::manifest::resolve_module_path(entrypoint, v),
-            None => entrypoint.module_path.clone(),
-        };
-
         Python::with_gil(|py| {
-            // When loading a real venue, prepend its python/ dir to sys.path so
-            // that flat module names like `gw` resolve to this venue's files only.
-            if let Some(v) = venue {
+            // Resolve the import path based on the venue's directory layout.
+            let import_path = if let Some(v) = venue {
                 let sys = py.import_bound("sys").map_err(|e| {
                     PyBridgeError::PythonImport(format!("failed to import sys: {e}"))
                 })?;
@@ -117,12 +113,21 @@ impl PyRuntime {
                     .join(v)
                     .join("python");
                 if py_dir.is_dir() {
+                    // Flat layout: prepend python/ dir and strip venue prefix.
                     let dir_str = py_dir.to_string_lossy().to_string();
                     path.insert(0, dir_str).map_err(|e| {
                         PyBridgeError::PythonImport(format!("sys.path insert: {e}"))
                     })?;
+                    crate::manifest::resolve_module_path(entrypoint, v)
+                } else {
+                    // Package layout: keep full dotted module path as-is.
+                    // The venue root (venue-integrations/) is already on sys.path,
+                    // so `oanda.gw` resolves to venue-integrations/oanda/gw.py.
+                    entrypoint.module_path.clone()
                 }
-            }
+            } else {
+                entrypoint.module_path.clone()
+            };
 
             // Import the module
             let importlib = py.import_bound("importlib").map_err(|e| {

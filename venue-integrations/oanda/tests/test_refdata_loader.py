@@ -1,6 +1,5 @@
 """Tests for the OANDA refdata loader."""
 
-import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -132,7 +131,7 @@ class TestLoadInstruments:
             records = await loader.load_instruments()
 
         eur = next(r for r in records if r["instrument_exch"] == "EUR_USD")
-        extra = json.loads(eur["extra_properties"])
+        extra = eur["extra_properties"]
         assert extra["oanda_type"] == "CURRENCY"
         assert extra["margin_rate"] == "0.05"
 

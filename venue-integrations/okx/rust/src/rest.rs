@@ -114,6 +114,43 @@ pub struct OkxPositionData {
     pub avail_pos: String,
 }
 
+// ── Public market data types ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OkxTickerData {
+    pub inst_id: String,
+    pub last: String,
+    #[serde(default)]
+    pub last_sz: String,
+    #[serde(default)]
+    pub bid_px: String,
+    #[serde(default)]
+    pub bid_sz: String,
+    #[serde(default)]
+    pub ask_px: String,
+    #[serde(default)]
+    pub ask_sz: String,
+    #[serde(default)]
+    pub vol24h: String,
+    #[serde(default)]
+    pub ts: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OkxFundingData {
+    pub inst_id: String,
+    #[serde(default)]
+    pub funding_rate: String,
+    #[serde(default)]
+    pub next_funding_rate: String,
+    #[serde(default)]
+    pub funding_time: String,
+    #[serde(default)]
+    pub next_funding_time: String,
+}
+
 // ── REST client ─────────────────────────────────────────────────────────────
 
 pub struct OkxRestClient {
@@ -300,7 +337,103 @@ impl OkxRestClient {
         Ok(resp.data)
     }
 
+    // ── Public market data (unsigned) ──────────────────────────────────
+
+    /// GET /api/v5/market/ticker (public, unsigned)
+    pub async fn query_ticker(&self, inst_id: &str) -> anyhow::Result<OkxTickerData> {
+        let path = format!("/api/v5/market/ticker?instId={inst_id}");
+        let resp: OkxResponse<OkxTickerData> = self.public_get(&path).await?;
+        resp.data.into_iter().next().ok_or_else(|| {
+            anyhow::anyhow!("OKX ticker: empty data for {inst_id}")
+        })
+    }
+
+    /// GET /api/v5/market/books (public, unsigned). Returns raw Value for normalizer.
+    pub async fn query_orderbook(
+        &self,
+        inst_id: &str,
+        depth: Option<u32>,
+    ) -> anyhow::Result<serde_json::Value> {
+        let sz = depth.unwrap_or(5);
+        let path = format!("/api/v5/market/books?instId={inst_id}&sz={sz}");
+        let resp: OkxResponse<serde_json::Value> = self.public_get(&path).await?;
+        resp.data.into_iter().next().ok_or_else(|| {
+            anyhow::anyhow!("OKX orderbook: empty data for {inst_id}")
+        })
+    }
+
+    /// GET /api/v5/market/candles (public, unsigned). Returns raw array items for normalizer.
+    /// OKX `after` = return records before this timestamp, `before` = return records after.
+    pub async fn query_candles(
+        &self,
+        inst_id: &str,
+        bar: &str,
+        limit: Option<u32>,
+        after_ms: Option<i64>,
+        before_ms: Option<i64>,
+    ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let limit = limit.unwrap_or(100);
+        let mut path = format!("/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}");
+        if let Some(after) = after_ms {
+            path.push_str(&format!("&after={after}"));
+        }
+        if let Some(before) = before_ms {
+            path.push_str(&format!("&before={before}"));
+        }
+        let resp: OkxResponse<serde_json::Value> = self.public_get(&path).await?;
+        Ok(resp.data)
+    }
+
+    /// GET /api/v5/public/funding-rate (public, unsigned)
+    pub async fn query_funding_rate(&self, inst_id: &str) -> anyhow::Result<OkxFundingData> {
+        let path = format!("/api/v5/public/funding-rate?instId={inst_id}");
+        let resp: OkxResponse<OkxFundingData> = self.public_get(&path).await?;
+        resp.data.into_iter().next().ok_or_else(|| {
+            anyhow::anyhow!("OKX funding rate: empty data for {inst_id}")
+        })
+    }
+
     // ── Internal helpers ────────────────────────────────────────────────
+
+    async fn public_get<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<OkxResponse<T>> {
+        self.query_limiter.until_ready().await;
+        let url = format!("{}{}", self.config.api_base_url, path);
+
+        let mut req = self.http.get(&url).header("Content-Type", "application/json");
+        if self.config.demo_mode {
+            req = req.header("x-simulated-trading", "1");
+        }
+
+        let resp: Response = req.send().await?;
+        let status = resp.status();
+
+        if status.as_u16() == 429 {
+            warn!("OKX rate limit hit (429) on {path}");
+            anyhow::bail!("OKX rate limit exceeded on {path}");
+        }
+
+        let text = resp.text().await?;
+        debug!(path, status = %status, "OKX public response");
+
+        if !status.is_success() {
+            if let Ok(err_val) = serde_json::from_str::<serde_json::Value>(&text) {
+                let msg = err_val["msg"].as_str().unwrap_or("unknown");
+                let code = err_val["code"].as_str().unwrap_or("?");
+                anyhow::bail!("OKX HTTP {status} on {path}: code={code}, msg={msg}");
+            }
+            anyhow::bail!("OKX HTTP {status} on {path}, body_len={}", text.len());
+        }
+
+        let parsed: OkxResponse<T> = serde_json::from_str(&text).map_err(|e| {
+            anyhow::anyhow!("OKX response parse error on {path}: {e}, body_len={}", text.len())
+        })?;
+
+        if parsed.code != "0" {
+            anyhow::bail!("OKX API error on {path}: code={}, msg={}", parsed.code, parsed.msg);
+        }
+
+        Ok(parsed)
+    }
 
     async fn signed_get<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<OkxResponse<T>> {
         self.signed_request(Method::GET, path, "").await

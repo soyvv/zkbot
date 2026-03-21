@@ -52,7 +52,7 @@ class OandaRtmdAdaptor:
     def __init__(self, config: dict) -> None:
         env = config.get("environment", "practice")
         self._oanda_account_id = config["account_id"]
-        self._token = config["token"]
+        self._token = config.get("token") or config["secret_ref"]
         self._api_base_url = config.get("api_base_url") or _API_URLS[env]
         self._stream_base_url = config.get("stream_base_url") or _STREAM_URLS[env]
         self._event_queue: asyncio.Queue = asyncio.Queue(maxsize=8192)

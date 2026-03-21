@@ -66,15 +66,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Arc::new(zk_pyo3_bridge::rtmd_adapter::PyRtmdVenueAdapter::new(handle))
                         as Arc<dyn zk_rtmd_rs::venue_adapter::RtmdVenueAdapter>
                 } else {
-                    build_adapter(&cfg.venue)?
+                    build_adapter(&cfg.venue, &cfg.venue_config)?
                 }
             } else {
-                build_adapter(&cfg.venue)?
+                build_adapter(&cfg.venue, &cfg.venue_config)?
             }
         }
         #[cfg(not(feature = "python-venue"))]
         {
-            build_adapter(&cfg.venue)?
+            build_adapter(&cfg.venue, &cfg.venue_config)?
         }
     };
     adapter.connect().await?;

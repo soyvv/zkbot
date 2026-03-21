@@ -14,8 +14,11 @@ fn default_api_base() -> String {
 /// - live: `wss://ws.okx.com:8443/ws/v5/private`
 #[derive(Debug, Clone, Deserialize)]
 pub struct OkxConfig {
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
     pub secret_key: String,
+    #[serde(default)]
     pub passphrase: String,
     #[serde(default)]
     pub demo_mode: bool,
@@ -24,6 +27,9 @@ pub struct OkxConfig {
     /// If omitted, derived from `demo_mode` in `resolve_secrets()`.
     #[serde(default)]
     pub ws_private_url: Option<String>,
+    /// If omitted, derived from `demo_mode` in `resolve_secrets()`.
+    #[serde(default)]
+    pub ws_public_url: Option<String>,
 }
 
 impl OkxConfig {
@@ -42,14 +48,42 @@ impl OkxConfig {
             });
         }
 
+        if self.ws_public_url.is_none() {
+            self.ws_public_url = Some(if self.demo_mode {
+                "wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999".to_string()
+            } else {
+                "wss://ws.okx.com:8443/ws/v5/public".to_string()
+            });
+        }
+
         Ok(self)
     }
 
-    /// Returns the resolved WS URL. Panics if called before `resolve_secrets()`.
+    /// Returns the resolved private WS URL. Panics if called before `resolve_secrets()`.
     pub fn ws_url(&self) -> &str {
         self.ws_private_url
             .as_deref()
             .expect("ws_private_url not resolved — call resolve_secrets() first")
+    }
+
+    /// Returns the resolved public WS URL. Panics if called before `resolve_secrets()`.
+    pub fn ws_public_url(&self) -> &str {
+        self.ws_public_url
+            .as_deref()
+            .expect("ws_public_url not resolved — call resolve_secrets() first")
+    }
+
+    /// Config for public-only access (no credentials required).
+    pub fn public_only(demo_mode: bool) -> Self {
+        Self {
+            api_key: String::new(),
+            secret_key: String::new(),
+            passphrase: String::new(),
+            demo_mode,
+            api_base_url: default_api_base(),
+            ws_private_url: None,
+            ws_public_url: None,
+        }
     }
 }
 
@@ -117,5 +151,31 @@ mod tests {
     #[test]
     fn test_resolve_env_missing() {
         assert!(resolve_env_ref("env:_ZK_NONEXISTENT", "f").is_err());
+    }
+
+    #[test]
+    fn test_ws_public_url_demo() {
+        let json = r#"{"api_key":"k","secret_key":"s","passphrase":"p","demo_mode":true}"#;
+        let cfg: OkxConfig = serde_json::from_str(json).unwrap();
+        let cfg = cfg.resolve_secrets().unwrap();
+        assert!(cfg.ws_public_url().contains("wspap.okx.com"));
+        assert!(cfg.ws_public_url().contains("/public"));
+    }
+
+    #[test]
+    fn test_ws_public_url_live() {
+        let json = r#"{"api_key":"k","secret_key":"s","passphrase":"p","demo_mode":false}"#;
+        let cfg: OkxConfig = serde_json::from_str(json).unwrap();
+        let cfg = cfg.resolve_secrets().unwrap();
+        assert_eq!(cfg.ws_public_url(), "wss://ws.okx.com:8443/ws/v5/public");
+    }
+
+    #[test]
+    fn test_public_only() {
+        let cfg = OkxConfig::public_only(true);
+        assert!(cfg.demo_mode);
+        assert!(cfg.api_key.is_empty());
+        let cfg = cfg.resolve_secrets().unwrap();
+        assert!(cfg.ws_public_url().contains("wspap.okx.com"));
     }
 }

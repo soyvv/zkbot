@@ -12,7 +12,7 @@ name = "zk_rtmd_gw_svc"
 path = "src/lib.rs"
 
 [dependencies]
-zk-rtmd-rs = { path = "../zk-rtmd-rs" }
+zk-rtmd-rs = { path = "../zk-rtmd-rs", features = ["venue-okx"] }
 zk-proto-rs = { path = "../zk-proto-rs" }
 zk-infra-rs = { path = "../zk-infra-rs" }
 tokio = { version = "1", features = ["full"] }

@@ -3,6 +3,15 @@ name = "zk-rtmd-rs"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+venue-okx = [
+    "dep:zk-venue-okx",
+    "dep:dashmap",
+    "dep:tokio-tungstenite",
+    "dep:futures-util",
+]
+
 [dependencies]
 zk-proto-rs = { path = "../zk-proto-rs" }
 async-trait = "0.1"
@@ -11,6 +20,12 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
+
+# venue-okx optional deps
+zk-venue-okx = { path = "../../../venue-integrations/okx/rust", optional = true }
+dashmap = { version = "6", optional = true }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
+futures-util = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

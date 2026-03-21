@@ -30,25 +30,167 @@ This avoids three different plugin stories for the same venue.
 
 ## Integration Package Shape
 
-Suggested logical shape:
+Canonical rule:
+
+- one venue = one directory under `venue-integrations/`
+- one manifest per venue
+- one canonical Python package path per venue
+- one canonical Rust source tree per venue
+- no duplicate flat-module and package-module layouts for the same capability
+
+Required top-level shape:
+
+```text
+venue-integrations/
+  <venue>/
+    manifest.yaml
+    schemas/
+      gw_config.schema.json
+      rtmd_config.schema.json
+      refdata_config.schema.json
+    rust/
+      Cargo.toml
+      src/
+        lib.rs
+        ...
+    <venue>/
+      __init__.py
+      ...
+    tests/
+      ...
+```
+
+Directory contract:
+
+- `manifest.yaml`
+  - required for every venue
+- `schemas/`
+  - stores JSON schemas referenced by the manifest
+- `rust/`
+  - present only if the venue provides at least one native Rust capability
+  - must use normal Rust crate layout under `rust/src/`
+- `<venue>/`
+  - present only if the venue provides at least one Python capability
+  - must be the canonical Python package root
+- `tests/`
+  - venue-local tests for Python and/or Rust behavior
+
+Disallowed layout:
+
+- top-level `python/` flat modules such as `python/gw.py`, `python/rtmd.py`, `python/refdata.py`
+- duplicate implementations of the same capability under both `python/` and `<venue>/`
+- manifest entrypoints that do not match the actual on-disk module path
+
+### Rust-Only Venue
+
+Use this when `gw` and/or `rtmd` are native Rust and the venue has no Python capability except
+possibly Python refdata.
 
 ```text
 venue-integrations/
   okx/
     manifest.yaml
-    rust/
-      gw.rs
-      rtmd.rs
-      refdata.rs
-    python/
-      gw.py
-      rtmd.py
-      refdata.py
     schemas/
       gw_config.schema.json
       rtmd_config.schema.json
       refdata_config.schema.json
+    rust/
+      Cargo.toml
+      src/
+        lib.rs
+        config.rs
+        gw.rs
+        rtmd.rs
+        rest.rs
+        ws.rs
+        normalize.rs
+    okx/
+      __init__.py
+      refdata.py
+    tests/
+      rust/
+      python/
 ```
+
+Contract:
+
+- Rust capability code lives only under `rust/src/`
+- if Python refdata exists, it lives only under `<venue>/refdata.py`
+- manifest must point to the exact Rust module path and Python package path
+
+### Rust + Python Mixed Venue
+
+Use this when some capabilities are Rust and others are Python.
+
+```text
+venue-integrations/
+  <venue>/
+    manifest.yaml
+    schemas/
+      gw_config.schema.json
+      rtmd_config.schema.json
+      refdata_config.schema.json
+    rust/
+      Cargo.toml
+      src/
+        lib.rs
+        gw.rs
+        rtmd.rs
+        common.rs
+    <venue>/
+      __init__.py
+      config.py
+      refdata.py
+      common.py
+    tests/
+      rust/
+      python/
+```
+
+Contract:
+
+- the manifest is the only source of truth for which capability is Rust vs Python
+- shared logic may exist in `common.*`, but host binaries must not embed venue-specific logic
+- Python code must be package-based under `<venue>/`
+- Rust code must be crate-based under `rust/src/`
+
+### Python-Only Venue
+
+Use this for OANDA- and IBKR-style integrations.
+
+```text
+venue-integrations/
+  oanda/
+    manifest.yaml
+    pyproject.toml
+    uv.lock
+    schemas/
+      gw_config.schema.json
+      rtmd_config.schema.json
+      refdata_config.schema.json
+    oanda/
+      __init__.py
+      config.py
+      gw.py
+      rtmd.py
+      refdata.py
+      client.py
+      normalize.py
+      stream.py
+      proto/
+    tests/
+      conftest.py
+      test_gw.py
+      test_rtmd.py
+      test_refdata.py
+```
+
+Contract:
+
+- Python capability modules live only under the venue package, for example `oanda/gw.py`
+- manifest entrypoints must be package-style imports such as `python:oanda.gw:OandaGatewayAdaptor`
+- bridge and Python hosts should import the module path exactly as declared in the manifest
+- no parallel placeholder modules outside the package root
 
 Language rule:
 
@@ -103,6 +245,22 @@ Manifest validation rules:
 - `refdata.language` must be `python`
 - `gw.language` may be `rust` or `python`
 - `rtmd.language` may be `rust` or `python`
+- `python:` entrypoints must resolve to the actual package path under `<venue>/`
+- `rust::` entrypoints must resolve to the actual Rust module path under `rust/src/`
+- `config_schema` must exist if declared
+- implemented capabilities must not be marked as placeholders in the manifest notes
+
+Entrypoint rules:
+
+- Python entrypoints use `python:<package.module>:<ClassName>`
+- Rust entrypoints use `rust::<venue>::<capability_module>::<TypeName>`
+
+Examples:
+
+- `python:oanda.gw:OandaGatewayAdaptor`
+- `python:ibkr.refdata:IbkrRefdataLoader`
+- `rust::okx::gw::OkxGatewayAdaptor`
+- `rust::okx::rtmd::OkxRtmdAdaptor`
 
 ## Common Facade
 
@@ -200,6 +358,12 @@ For the current Python `zk-refdata-svc`, the recommended first implementation is
 - same manifest/config/schema semantics as the long-term bridge design
 - venue-specific refdata code still lives under `zkbot/venue-integrations/<venue>/`
 
+For Python venue loading specifically:
+
+- the refdata host should import `python:<venue>.<module>:<Class>`
+- it should add the venue directory itself to `sys.path`, not a parallel flat-module directory
+- the bridge should not rewrite package entrypoints into unrelated flat module names
+
 ## Capability Interfaces
 
 The per-capability interfaces should remain service-specific:
@@ -226,11 +390,55 @@ class SomeRefdataLoader:
     async def load_market_sessions(self) -> list[dict]: ...
 ```
 
+Recommended first-pass Python RTMD adaptor contract:
+
+```python
+class SomeRtmdAdaptor:
+    def __init__(self, config: dict | None = None): ...
+    async def connect(self) -> None: ...
+    async def subscribe(self, spec: dict) -> None: ...
+    async def unsubscribe(self, spec: dict) -> None: ...
+    async def snapshot_active(self) -> list[dict]: ...
+    def instrument_exch_for(self, instrument_code: str) -> str | None: ...
+    async def query_current_tick(self, instrument_code: str) -> bytes: ...
+    async def query_current_orderbook(self, instrument_code: str, depth: int | None = None) -> bytes: ...
+    async def query_current_funding(self, instrument_code: str) -> bytes: ...
+    async def query_klines(
+        self,
+        instrument_code: str,
+        interval: str,
+        limit: int,
+        from_ms: int | None = None,
+        to_ms: int | None = None,
+    ) -> list[bytes]: ...
+    async def next_event(self) -> dict: ...
+```
+
+Recommended first-pass Python GW adaptor contract:
+
+```python
+class SomeGatewayAdaptor:
+    def __init__(self, config: dict | None = None): ...
+    async def connect(self) -> None: ...
+    async def place_order(self, req: dict) -> list[dict]: ...
+    async def cancel_order(self, req: dict) -> list[dict]: ...
+    async def query_balance(self, req: dict) -> list[dict]: ...
+    async def query_order(self, req: dict) -> list[dict]: ...
+    async def query_open_orders(self, req: dict) -> list[dict]: ...
+    async def query_trades(self, req: dict) -> list[dict]: ...
+    async def query_positions(self, req: dict) -> list[dict]: ...
+    async def query_funding_fees(self, req: dict) -> list[dict]: ...
+    async def next_event(self) -> dict: ...
+```
+
 Interface rule:
 
 - `load_market_sessions()` may return an empty list for always-open crypto venues
 - session-constrained venues should provide real market-session or calendar data through the adaptor
 - the host should not synthesize a blanket `open` state for every venue
+- Python adaptor methods should be async by default
+- Python package/module names should remain stable once published in the manifest
+- a capability should have exactly one canonical implementation path
 
 ## Service Wrapper Pattern
 
