@@ -115,6 +115,45 @@ class OandaRestClient:
             params={"sinceTransactionID": since_transaction_id},
         )
 
+
+    # ── pricing / RTMD queries ──────────────────────────────────────────
+
+    async def get_pricing(self, instruments: list[str]) -> dict:
+        """GET /v3/accounts/{accountID}/pricing?instruments=EUR_USD,GBP_USD"""
+        return await self._request(
+            "GET",
+            f"{self._acct()}/pricing",
+            params={"instruments": ",".join(instruments)},
+        )
+
+    async def get_candles(
+        self,
+        instrument: str,
+        *,
+        granularity: str = "M1",
+        count: int | None = None,
+        from_time: str | None = None,
+        to_time: str | None = None,
+    ) -> dict:
+        """GET /v3/instruments/{instrument}/candles"""
+        params: dict[str, str] = {"granularity": granularity, "price": "M"}
+        if count and count > 0:
+            params["count"] = str(min(count, 5000))
+        if from_time:
+            params["from"] = from_time
+        if to_time:
+            params["to"] = to_time
+        return await self._request("GET", f"/v3/instruments/{instrument}/candles", params=params)
+
+    # ── instrument / refdata queries ──────────────────────────────────
+
+    async def get_instruments(self, *, instruments: list[str] | None = None) -> dict:
+        """GET /v3/accounts/{accountID}/instruments"""
+        params: dict[str, str] = {}
+        if instruments:
+            params["instruments"] = ",".join(instruments)
+        return await self._request("GET", f"{self._acct()}/instruments", params=params)
+
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     async def close(self) -> None:
