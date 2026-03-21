@@ -20,6 +20,35 @@
     },
     "account_code": {
       "type": "string"
+    },
+    "read_only": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, place_order and cancel_order are rejected at the adaptor level."
+    },
+    "max_msg_rate": {
+      "type": "number",
+      "minimum": 1,
+      "default": 40,
+      "description": "Sustained outbound message rate limit (msg/s). IBKR hard ceiling is 50."
+    },
+    "reconnect_delay_s": {
+      "type": "number",
+      "minimum": 0.1,
+      "default": 5,
+      "description": "Initial reconnect backoff delay in seconds."
+    },
+    "reconnect_max_delay_s": {
+      "type": "number",
+      "minimum": 1,
+      "default": 60,
+      "description": "Maximum reconnect backoff delay in seconds."
+    },
+    "next_valid_id_timeout_s": {
+      "type": "number",
+      "minimum": 1,
+      "default": 10,
+      "description": "Timeout in seconds waiting for nextValidId handshake after connect."
     }
   },
   "required": ["mode", "host", "port", "client_id"],
