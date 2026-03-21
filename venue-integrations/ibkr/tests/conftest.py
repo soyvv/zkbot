@@ -96,6 +96,56 @@ class MockAccountValue:
     account: str = ""
 
 
+@dataclass
+class MockTicker:
+    contract: MockContract | None = None
+    bid: float = 0.0
+    bidSize: float = 0.0
+    ask: float = 0.0
+    askSize: float = 0.0
+    last: float = 0.0
+    lastSize: float = 0.0
+    volume: float = 0.0
+    time: float = 0.0  # Unix timestamp
+    domBids: list = field(default_factory=list)  # List of (price, size, numOrders) tuples for L2
+    domAsks: list = field(default_factory=list)
+
+
+@dataclass
+class MockBarData:
+    date: str = ""  # ISO format string
+    open: float = 0.0
+    high: float = 0.0
+    low: float = 0.0
+    close: float = 0.0
+    volume: float = 0.0
+    average: float = 0.0
+    barCount: int = 0
+
+
+@dataclass
+class MockContractDetails:
+    contract: MockContract | None = None
+    minTick: float = 0.01
+    tradingHours: str = "20230901:0930-1600;20230904:0930-1600"
+    liquidHours: str = "20230901:0930-1600;20230904:0930-1600"
+    timeZoneId: str = "US/Eastern"
+    longName: str = ""
+    multiplier: str = ""
+    orderTypes: str = ""
+    validExchanges: str = ""
+    industry: str = ""
+    category: str = ""
+    subcategory: str = ""
+
+
+@dataclass
+class MockDOMLevel:
+    price: float = 0.0
+    size: float = 0.0
+    numOrders: int = 0
+
+
 class _MockClient:
     """Minimal mock of ib_async.client.Client."""
 
@@ -124,11 +174,18 @@ class MockIB:
         self.positionEvent = _MockEvent()
         self.accountValueEvent = _MockEvent()
         self.newOrderEvent = _MockEvent()
+        self.pendingTickersEvent = _MockEvent()
+        self.updatePortfolioEvent = _MockEvent()
         # Stored state
         self._open_trades: list[MockTrade] = []
         self._fills: list[MockFill] = []
         self._positions: list[MockPosition] = []
         self._account_values: list[MockAccountValue] = []
+        self._tickers: dict = {}
+        self._depth_tickers: dict = {}
+        self._market_data_type: int = 1
+        self._historical_bars: dict = {}  # symbol -> list[MockBarData]
+        self._contract_details: dict = {}  # symbol -> list[MockContractDetails]
 
     async def connectAsync(self, host: str, port: int, clientId: int, **kwargs) -> None:
         self._connected = True
@@ -172,6 +229,60 @@ class MockIB:
 
     def reqPositions(self) -> None:
         pass
+
+    # -- Market data methods --------------------------------------------------
+
+    def reqMarketDataType(self, marketDataType: int) -> None:
+        self._market_data_type = marketDataType
+
+    def reqMktData(self, contract, genericTickList="", snapshot=False, regulatorySnapshot=False):
+        """Mock market data subscription. Returns a MockTicker."""
+        ticker = MockTicker(contract=MockContract(
+            symbol=contract.symbol, currency=contract.currency,
+            secType=contract.secType, exchange=contract.exchange,
+        ))
+        self._tickers[contract.symbol] = ticker
+        return ticker
+
+    def cancelMktData(self, contract) -> None:
+        self._tickers.pop(getattr(contract, "symbol", None), None)
+
+    def reqMktDepth(self, contract, numRows=5, isSmartDepth=False, mktDepthOptions=None):
+        """Mock L2 depth subscription."""
+        ticker = MockTicker(contract=MockContract(
+            symbol=contract.symbol, currency=contract.currency,
+            secType=contract.secType, exchange=contract.exchange,
+        ))
+        self._depth_tickers[contract.symbol] = ticker
+        return ticker
+
+    def cancelMktDepth(self, contract, isSmartDepth=False) -> None:
+        self._depth_tickers.pop(getattr(contract, "symbol", None), None)
+
+    async def reqHistoricalDataAsync(
+        self, contract, endDateTime="", durationStr="1 D",
+        barSizeSetting="1 min", whatToShow="TRADES",
+        useRTH=True, formatDate=1, keepUpToDate=False,
+        chartOptions=None, timeout=60,
+    ):
+        """Mock historical data request. Returns list of MockBarData."""
+        return self._historical_bars.get(contract.symbol, [])
+
+    async def reqContractDetailsAsync(self, contract):
+        """Mock contract details request."""
+        return self._contract_details.get(contract.symbol, [])
+
+    async def qualifyContractsAsync(self, *contracts):
+        """Mock contract qualification. Returns contracts with conId set."""
+        result = []
+        for c in contracts:
+            qualified = MockContract(
+                symbol=c.symbol, currency=c.currency,
+                secType=c.secType, exchange=c.exchange,
+                conId=hash(c.symbol) % 100000,
+            )
+            result.append(qualified)
+        return result
 
     # Helper to set nextValidId for tests
     def _set_next_order_id(self, oid: int) -> None:

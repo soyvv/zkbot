@@ -9,6 +9,7 @@ description = "IBKR venue integration for zkbot"
 requires-python = ">=3.11"
 dependencies = [
     "ib_async>=1.0.0",
+    "protobuf>=5.0",
 ]
 
 [project.optional-dependencies]
