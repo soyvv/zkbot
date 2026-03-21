@@ -38,7 +38,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let js = async_nats::jetstream::new(nats_client.clone());
 
     // ── Venue adapter ──────────────────────────────────────────────────────
-    let adapter = build_adapter(&cfg.venue)?;
+    let adapter = {
+        #[cfg(feature = "python-venue")]
+        {
+            if let Some(ref venue_root) = cfg.venue_root {
+                let root = std::path::PathBuf::from(venue_root);
+                // Fail-fast: if venue_root is set, manifest must load successfully.
+                let manifest =
+                    zk_pyo3_bridge::manifest::load_manifest(&root, &cfg.venue)?;
+                // Capability miss is OK — venue may only declare gw/refdata, not rtmd.
+                let rtmd_cap = zk_pyo3_bridge::manifest::resolve_capability(
+                    &manifest,
+                    zk_pyo3_bridge::manifest::CAP_RTMD,
+                )
+                .ok()
+                .filter(|cap| cap.language == "python");
+
+                if let Some(cap) = rtmd_cap {
+                    zk_pyo3_bridge::manifest::validate_config(
+                        &root, &cfg.venue, cap, &cfg.venue_config,
+                    )?;
+                    let ep =
+                        zk_pyo3_bridge::manifest::parse_python_entrypoint(&cap.entrypoint)?;
+                    let rt = zk_pyo3_bridge::py_runtime::PyRuntime::initialize(&root)?;
+                    let handle =
+                        rt.load_class(&ep, cfg.venue_config.clone(), Some(&cfg.venue))?;
+                    Arc::new(zk_pyo3_bridge::rtmd_adapter::PyRtmdVenueAdapter::new(handle))
+                        as Arc<dyn zk_rtmd_rs::venue_adapter::RtmdVenueAdapter>
+                } else {
+                    build_adapter(&cfg.venue)?
+                }
+            } else {
+                build_adapter(&cfg.venue)?
+            }
+        }
+        #[cfg(not(feature = "python-venue"))]
+        {
+            build_adapter(&cfg.venue)?
+        }
+    };
     adapter.connect().await?;
     info!(venue = %cfg.venue, "venue adapter connected");
 

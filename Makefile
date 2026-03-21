@@ -130,3 +130,15 @@ gw-run: ## Run gateway simulator locally (requires NATS: make dev-up)
 	           ZK_ENABLE_ADMIN_CONTROLS=true \
 	           RUST_LOG=zk_gw_svc=debug,info \
 	           cargo run -p zk-gw-svc
+
+gw-okx-demo: ## Run OKX gateway against demo account (requires NATS: make dev-up)
+	@bash -c '\
+	  source devops/scripts/load-okx-demo-env.sh && \
+	  cd rust && ZK_GW_ID=gw_okx_demo \
+	  ZK_VENUE=okx \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_ACCOUNT_ID=9001 \
+	  ZK_GRPC_PORT=51053 \
+	  ZK_VENUE_CONFIG='"'"'{"api_key":"env:apikey","secret_key":"env:secretkey","passphrase":"env:OKX_PASSPHRASE","demo_mode":true}'"'"' \
+	  RUST_LOG=zk_gw_svc=debug,zk_venue_okx=debug,info \
+	  cargo run --release -p zk-gw-svc'
