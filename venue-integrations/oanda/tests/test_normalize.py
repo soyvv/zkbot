@@ -1,6 +1,6 @@
 """Tests for OANDA normalization functions."""
 
-from oanda import oanda_normalize as norm
+from oanda import normalize as norm
 
 # Proto stubs for deserializing payload_bytes
 import oanda.proto  # noqa: F401

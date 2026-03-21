@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
-from .oanda_client import OandaRestClient
+from .client import OandaRestClient
 
 _API_URLS = {
     "practice": "https://api-fxpractice.oanda.com",

@@ -13,7 +13,7 @@ import time
 import httpx
 from loguru import logger
 
-from . import oanda_normalize as norm
+from . import normalize as norm
 
 
 class OandaPricingStream:

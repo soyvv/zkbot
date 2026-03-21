@@ -16,5 +16,6 @@ capabilities:
 metadata:
   supports_tradfi_sessions: true
   notes:
-    - Placeholder module only; runtime loading is not implemented yet.
-    - Trading and RTMD should start in hybrid/query-backed mode.
+    - Trading gateway uses hybrid/query-backed mode.
+    - RTMD supports tick (pricing stream) and kline (REST candle polling).
+    - OrderBook and Funding are not supported (OANDA is FX/CFD).

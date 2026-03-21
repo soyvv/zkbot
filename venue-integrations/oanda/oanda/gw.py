@@ -18,9 +18,9 @@ import asyncio
 
 from loguru import logger
 
-from .oanda_client import OandaApiError, OandaRestClient
-from .oanda_stream import OandaTransactionStream
-from . import oanda_normalize as norm
+from .client import OandaApiError, OandaRestClient
+from .stream import OandaTransactionStream
+from . import normalize as norm
 
 _API_URLS = {
     "practice": "https://api-fxpractice.oanda.com",

@@ -19,7 +19,7 @@ class OandaRestClient:
     """Thin async httpx wrapper around the OANDA v20 REST API.
 
     All methods return parsed JSON dicts. Normalization is handled separately
-    in ``oanda_normalize.py``.
+    in ``normalize.py``.
     """
 
     def __init__(self, api_base_url: str, token: str, account_id: str) -> None:

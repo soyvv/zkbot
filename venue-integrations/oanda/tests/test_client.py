@@ -4,7 +4,7 @@ import pytest
 import httpx
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from oanda.oanda_client import OandaRestClient, OandaApiError
+from oanda.client import OandaRestClient, OandaApiError
 
 
 @pytest.fixture

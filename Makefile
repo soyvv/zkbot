@@ -1,9 +1,10 @@
 .PHONY: gen lint test build publish \
-        dev-up dev-up-full dev-down dev-reset dev-logs dev-ps \
+        dev-up dev-up-full dev-down dev-reset dev-logs dev-ps dev-health dev-reset-redis dev-reset-pg \
         test-unit test-integration test-parity \
         oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-run-release oms-redis-clear \
-        gw-check gw-build gw-test gw-run \
-        rtmd-okx-demo
+        gw-check gw-build gw-test gw-run gw-okx-demo \
+        rtmd-sim-run rtmd-okx-demo \
+        refdata-run pilot-run engine-run
 
 gen:
 	buf generate protos
@@ -54,6 +55,17 @@ dev-logs:
 
 dev-ps:
 	$(COMPOSE) ps
+
+dev-health: ## Show container health/status with ports
+	$(COMPOSE) ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+
+dev-reset-redis: ## Flush Redis without full stack reset
+	docker exec zk-dev-redis-1 redis-cli flushall
+
+dev-reset-pg: ## Wipe Postgres volume and restart (re-runs init scripts)
+	$(COMPOSE) stop postgres && $(COMPOSE) rm -f postgres && \
+	docker volume rm zkbot_postgres_data 2>/dev/null; \
+	$(COMPOSE) up -d postgres
 
 # ── Rust tests ────────────────────────────────────────────────────────────────
 test-unit:
@@ -144,6 +156,15 @@ gw-okx-demo: ## Run OKX gateway against demo account (requires NATS: make dev-up
 	  RUST_LOG=zk_gw_svc=debug,zk_venue_okx=debug,info \
 	  cargo run --release -p zk-gw-svc'
 
+# ── RTMD gateway service ──────────────────────────────────────────────────────
+rtmd-sim-run: ## Run RTMD simulator gateway locally (requires NATS: make dev-up)
+	cd rust && ZK_MDGW_ID=mdgw_sim_1 \
+	           ZK_VENUE=simulator \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_GRPC_PORT=52051 \
+	           RUST_LOG=zk_rtmd_gw_svc=debug,info \
+	           cargo run -p zk-rtmd-gw-svc
+
 rtmd-okx-demo: ## Run OKX RTMD gateway against demo/public endpoints (requires NATS: make dev-up)
 	@cd rust && ZK_MDGW_ID=mdgw_okx_demo \
 	  ZK_VENUE=okx \
@@ -152,3 +173,30 @@ rtmd-okx-demo: ## Run OKX RTMD gateway against demo/public endpoints (requires N
 	  ZK_VENUE_CONFIG='{"demo_mode":true}' \
 	  RUST_LOG=zk_rtmd_gw_svc=debug,zk_rtmd_rs=debug,zk_venue_okx=debug,info \
 	  cargo run --release -p zk-rtmd-gw-svc
+
+# ── Refdata service ───────────────────────────────────────────────────────────
+refdata-run: ## Run refdata-svc locally (requires NATS+PG: make dev-up)
+	ZK_NATS_URL=nats://localhost:4222 \
+	ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
+	ZK_REFDATA_LOGICAL_ID=refdata_dev_1 \
+	ZK_REFDATA_GRPC_PORT=50052 \
+	uv run zk-refdata-svc
+
+# ── Pilot service ─────────────────────────────────────────────────────────────
+pilot-run: ## Run pilot locally (requires NATS+PG: make dev-up)
+	cd services/zk-pilot && \
+	ZK_NATS_URL=nats://localhost:4222 \
+	ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
+	ZK_ENV=dev \
+	ZK_PILOT_ID=pilot_dev_1 \
+	ZK_HTTP_PORT=8090 \
+	uv run python -m zk_pilot.main
+
+# ── Engine service ────────────────────────────────────────────────────────────
+engine-run: ## Run engine-svc locally (requires NATS+PG: make dev-up)
+	cd rust && ZK_ENGINE_ID=engine_dev_1 \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
+	           ZK_GRPC_PORT=50053 \
+	           RUST_LOG=zk_engine_svc=debug,info \
+	           cargo run -p zk-engine-svc
