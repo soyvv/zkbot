@@ -339,3 +339,106 @@ def normalize_positions(positions_resp: dict, account_id: int) -> list[dict]:
 
 def _ts_ms() -> int:
     return int(time.time() * 1000)
+
+
+# ── RTMD normalization ───────────────────────────────────────────────────────
+
+from zk.rtmd.v1 import rtmd_pb2 as rtmd_pb  # noqa: E402
+
+
+def parse_oanda_time(time_str: str) -> int:
+    """Parse OANDA RFC3339 timestamp to epoch milliseconds.
+
+    OANDA uses nanosecond-precision timestamps like:
+    ``2024-01-15T12:30:00.123456789Z``
+    """
+    from datetime import datetime
+
+    # Strip trailing nanoseconds beyond microseconds
+    if "." in time_str:
+        base, frac = time_str.rstrip("Z").split(".")
+        frac = frac[:6].ljust(6, "0")
+        time_str = f"{base}.{frac}Z"
+    dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+    return int(dt.timestamp() * 1000)
+
+
+_GRANULARITY_MAP: dict[str, str] = {
+    "1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30",
+    "1h": "H1", "4h": "H4", "1d": "D",
+}
+
+_KLINE_TYPE_MAP: dict[str, int] = {
+    "1m": rtmd_pb.Kline.KLINE_1MIN,
+    "5m": rtmd_pb.Kline.KLINE_5MIN,
+    "15m": rtmd_pb.Kline.KLINE_15MIN,
+    "30m": rtmd_pb.Kline.KLINE_30MIN,
+    "1h": rtmd_pb.Kline.KLINE_1HOUR,
+    "4h": rtmd_pb.Kline.KLINE_4HOUR,
+    "1d": rtmd_pb.Kline.KLINE_1DAY,
+}
+
+_INTERVAL_FROM_GRANULARITY: dict[str, str] = {v: k for k, v in _GRANULARITY_MAP.items()}
+
+
+def oanda_granularity(interval: str) -> str:
+    """Map standard interval string to OANDA granularity code."""
+    return _GRANULARITY_MAP.get(interval, interval)
+
+
+def kline_type_from_interval(interval: str) -> int:
+    """Map interval string to KlineType proto enum value."""
+    return _KLINE_TYPE_MAP.get(interval, rtmd_pb.Kline.KLINE_1MIN)
+
+
+def build_tick_data(price_msg: dict, venue: str = "oanda") -> bytes:
+    """Convert OANDA PRICE stream message to serialized TickData proto bytes."""
+    instrument = price_msg.get("instrument", "")
+    bids = price_msg.get("bids", [])
+    asks = price_msg.get("asks", [])
+    orig_ts = parse_oanda_time(price_msg["time"]) if "time" in price_msg else _ts_ms()
+
+    buy_levels = [
+        rtmd_pb.PriceLevel(price=float(b["price"]), qty=float(b.get("liquidity", 0)))
+        for b in bids
+    ]
+    sell_levels = [
+        rtmd_pb.PriceLevel(price=float(a["price"]), qty=float(a.get("liquidity", 0)))
+        for a in asks
+    ]
+
+    tick = rtmd_pb.TickData(
+        tick_type=rtmd_pb.OB,
+        instrument_code=instrument,
+        exchange=venue,
+        original_timestamp=orig_ts,
+        received_timestamp=_ts_ms(),
+        buy_price_levels=buy_levels,
+        sell_price_levels=sell_levels,
+    )
+    return tick.SerializeToString()
+
+
+def build_kline(
+    candle: dict,
+    instrument: str,
+    granularity: str,
+    venue: str = "oanda",
+) -> bytes:
+    """Convert OANDA candle dict to serialized Kline proto bytes."""
+    mid = candle.get("mid", {})
+    ts = parse_oanda_time(candle["time"]) if "time" in candle else _ts_ms()
+    interval = _INTERVAL_FROM_GRANULARITY.get(granularity, "1m")
+
+    kline = rtmd_pb.Kline(
+        timestamp=ts,
+        open=float(mid.get("o", 0)),
+        high=float(mid.get("h", 0)),
+        close=float(mid.get("c", 0)),
+        low=float(mid.get("l", 0)),
+        volume=float(candle.get("volume", 0)),
+        kline_type=kline_type_from_interval(interval),
+        symbol=instrument,
+        source=venue,
+    )
+    return kline.SerializeToString()
