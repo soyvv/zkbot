@@ -44,3 +44,7 @@ Cargo.lock
 project_memo.md
 .gitignore
 .worktrees/
+
+# AI tools
+.claude/
+.codex/
