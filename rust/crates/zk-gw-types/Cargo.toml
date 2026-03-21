@@ -1,0 +1,11 @@
+[package]
+name = "zk-gw-types"
+version = "0.1.0"
+edition = "2021"
+description = "Shared venue adapter trait and request/response types for gateway services"
+
+[dependencies]
+async-trait = "0.1"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+zk-proto-rs = { path = "../zk-proto-rs" }

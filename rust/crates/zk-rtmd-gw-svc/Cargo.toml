@@ -29,5 +29,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 
+# optional: Python venue bridge
+zk-pyo3-bridge = { path = "../zk-pyo3-bridge", optional = true }
+
+[features]
+python-venue = ["dep:zk-pyo3-bridge"]
+
 [build-dependencies]
 tonic-build = "0.12"
