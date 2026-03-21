@@ -16,5 +16,4 @@ capabilities:
 metadata:
   supports_tradfi_sessions: false
   notes:
-    - Placeholder module only; runtime loading is not implemented yet.
     - OKX is the preferred native Rust venue for gateway and RTMD adaptors.

@@ -204,11 +204,19 @@ Implementation path:
 
 - Python loader through the shared bridge described in
   [13-python-venue-bridge.md](/Users/zzk/workspace/zklab/zkbot/docs/system-redesign-plan/plan/13-python-venue-bridge.md)
+- loaded from the OKX venue manifest `refdata` capability and validated against
+  `schemas/refdata_config.schema.json`
 
 Recommended source material:
 
 - existing OKX metadata fetchers if already present
-- otherwise one Python loader module inside the refdata runtime or venue module
+- otherwise one Python loader module inside `venue-integrations/okx/python/refdata.py`
+
+Integration rule:
+
+- the entrypoint should be `python:okx.refdata:OkxRefdataLoader`
+- the generic refdata host should resolve that entrypoint from `venue-integrations/okx/manifest.yaml`
+- OKX-specific refdata logic should live in the venue package rather than in `zk-refdata-svc`
 
 Refresh characteristics:
 
@@ -358,7 +366,7 @@ OKX modules own:
 
 1. Finish native Rust OKX gateway adaptor.
 2. Finish native Rust OKX RTMD adaptor.
-3. Add Python OKX refdata loader into `zk-refdata-svc`.
+3. Add Python OKX refdata loader into `venue-integrations/okx/python/refdata.py` and wire it through the manifest-driven refdata host path.
 4. Validate end-to-end discovery and registration from manifest-driven loading.
 
 ## Main risks

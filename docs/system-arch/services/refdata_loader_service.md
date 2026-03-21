@@ -41,6 +41,7 @@ Bottom-line design constraint:
 
 Recommended runtime split:
 
+- venue-integration facade
 - venue loader adaptors
 - normalization/enrichment layer
 - PostgreSQL writer
@@ -51,17 +52,19 @@ Recommended runtime split:
 Suggested logical shape:
 
 ```text
-venue loader -> normalize/enrich -> compare with cfg.instrument_refdata
-                                     |
-                                     +-> write inserts/updates/disables
-                                     +-> emit refdata change event
-                                     +-> serve query API from PostgreSQL
+venue manifest/config -> venue-integration facade -> venue loader adaptor
+                                                   -> normalize/enrich -> compare with cfg.instrument_refdata
+                                                                          |
+                                                                          +-> write inserts/updates/disables
+                                                                          +-> emit refdata change event
+                                                                          +-> serve query API from PostgreSQL
 
-market calendar/session sources -> normalize/enrich -> compare with canonical market session state
-                                                   |
-                                                   +-> write open/close/session updates
-                                                   +-> emit market session event
-                                                   +-> serve market-status query API
+venue manifest/config -> venue-integration facade -> market-session adaptor path
+                                                   -> normalize/enrich -> compare with canonical market session state
+                                                                          |
+                                                                          +-> write open/close/session updates
+                                                                          +-> emit market session event
+                                                                          +-> serve market-status query API
 ```
 
 ## Venue Loader Adaptor
@@ -72,11 +75,32 @@ The refdata loader adaptor should be resolved through the shared venue-integrati
 described in
 [Venue Integration Modules](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/venue_integration.md).
 
+Design rule:
+
+- the refdata service host must not hardcode a separate per-venue loader registry
+- venue-specific refdata code should live under `zkbot/venue-integrations/<venue>/`
+- the host should resolve the `refdata` capability from the venue manifest and instantiate the
+  declared Python entrypoint
+- per-venue refdata config should be validated against the manifest-declared
+  `schemas/refdata_config.schema.json` before the adaptor is instantiated
+
+Recommended host-side loading sequence:
+
+1. load `venue-integrations/<venue>/manifest.yaml`
+2. confirm the venue exposes the `refdata` capability
+3. confirm `refdata.language == python`
+4. validate the provided config against `refdata.config_schema`
+5. resolve and instantiate the manifest-declared Python loader class
+6. call the adaptor through the stable refdata-loader interface
+
+This keeps the refdata host generic and aligned with the gateway/RTMD venue-integration pattern.
+
 Suggested responsibilities:
 
 - fetch venue instrument metadata
 - map venue fields into normalized `InstrumentRefdata`-like records
 - expose venue-specific extra properties without leaking transport details into callers
+- optionally provide market-session or market-calendar source data for that venue
 
 Suggested non-responsibilities:
 
@@ -84,6 +108,8 @@ Suggested non-responsibilities:
 - global diffing
 - cache distribution
 - query serving
+- service registration/discovery
+- scheduler ownership
 
 For TradFi-oriented venues or exchanges, a parallel loader/adaptor path is also needed for market
 session metadata:
@@ -92,6 +118,17 @@ session metadata:
 - trading day exceptions
 - session open/close schedule
 - intraday halt or special-session status where available
+
+Recommended adaptor interface shape:
+
+```python
+class SomeRefdataLoader:
+    def __init__(self, config: dict | None = None): ...
+    async def load_instruments(self) -> list[dict]: ...
+    async def load_market_sessions(self) -> list[dict]: ...
+```
+
+`load_market_sessions()` may return an empty list for always-open crypto venues.
 
 ## Source Conflict Policy
 
@@ -160,6 +197,15 @@ Design rule:
 - downstream services and SDKs may cache it, but the refdata service remains the canonical source
 - timestamps should be represented as Unix timestamps; caller-side timezone/display interpretation is
   the caller's responsibility
+- venue-specific market-session truth should come from the same venue-integration boundary as
+  refdata, not from a blanket host-wide assumption that every venue is always open
+
+Recommended host behavior:
+
+- if a venue adaptor provides session/calendar data, use it
+- if manifest metadata indicates session-constrained operation, do not synthesize a default
+  `open` state
+- only explicit always-open venues should use the trivial default-open path
 
 ## gRPC Query Service
 

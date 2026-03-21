@@ -21,33 +21,45 @@ async def refresh_refdata(
     repo: RefdataRepo,
     nc: nats.NATS,
     venues: list[str],
+    venue_configs: dict[str, dict] | None = None,
 ) -> None:
     """Run one refresh cycle for all configured venues."""
-    # Lazy import to avoid circular dependency at module level.
-    from zk_refdata_svc.loaders import VENUE_LOADERS
-
     for venue_name in venues:
-        loader_cls = VENUE_LOADERS.get(venue_name)
-        if loader_cls is None:
-            logger.warning(f"no loader registered for venue {venue_name!r}, skipping")
+        loader = _resolve_loader(venue_name, (venue_configs or {}).get(venue_name))
+        if loader is None:
+            logger.warning(f"no loader for venue {venue_name!r}, skipping")
             continue
         try:
-            await _refresh_venue(repo, nc, venue_name, loader_cls)
+            await _refresh_venue(repo, nc, venue_name, loader)
         except Exception:
             logger.exception(f"refresh failed for venue {venue_name}")
+
+
+def _resolve_loader(venue_name: str, config: dict | None = None):
+    """Try manifest-driven resolution first, then fall back to old registry."""
+    try:
+        from zk_refdata_svc.venue_registry import resolve_refdata_loader
+
+        return resolve_refdata_loader(venue_name, config)
+    except (FileNotFoundError, ValueError) as e:
+        logger.debug(f"manifest resolution failed for {venue_name!r}: {e}, trying legacy registry")
+    # Fall back to hardcoded VENUE_LOADERS for venues not yet in venue-integrations.
+    from zk_refdata_svc.loaders import VENUE_LOADERS
+
+    loader_cls = VENUE_LOADERS.get(venue_name)
+    return loader_cls(config=config) if loader_cls else None
 
 
 async def _refresh_venue(
     repo: RefdataRepo,
     nc: nats.NATS,
     venue_name: str,
-    loader_cls: type,
+    loader: object,
 ) -> None:
     run_id = await repo.insert_refresh_run(source_name=venue_name, venue=venue_name)
     logger.info(f"[{venue_name}] refresh run {run_id} started")
 
     try:
-        loader = loader_cls()
         raw_records = await loader.load_instruments()
         records = [normalize_instrument(r) for r in raw_records]
 

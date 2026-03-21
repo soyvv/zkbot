@@ -127,8 +127,19 @@ pub trait VenueIntegrationRegistry {
 The important design point is not the exact Rust trait, but that all three service families resolve
 their venue-specific implementation through the same facade.
 
-For refdata, the loaded implementation should always come through the Python bridge even if the
-service host itself is not Python.
+For refdata, the logical loading contract is the same even if the host itself is already Python:
+
+- the host must resolve the `refdata` capability from the venue manifest
+- the host must validate the refdata config against the manifest-declared schema
+- the host must instantiate the manifest-declared Python entrypoint
+- the host must then call the adaptor through the stable refdata-loader interface
+
+That means:
+
+- a Rust refdata host would reach the adaptor through the shared Python bridge
+- a Python refdata host may import the Python entrypoint directly
+- neither host should maintain a separate hardcoded per-venue loader registry outside the manifest
+  model
 
 ## Language Bridging
 
@@ -149,7 +160,9 @@ Design rule:
 - the service wrapper should not care whether the venue adaptor is Rust or Python once loaded
 - the language bridge should be shared infrastructure, not reimplemented separately for gateway,
   RTMD, and refdata
-- refdata loader implementations are always loaded through the Python bridge
+- refdata loader implementations are always Python, but the exact loading path depends on the host:
+  - Rust host: through the shared Python bridge
+  - Python host: direct Python import using the same manifest semantics
 
 ## Loading Model
 
@@ -180,6 +193,13 @@ Preferred initial rule:
 This keeps the architecture flexible without forcing the first implementation into a fragile plugin
 system.
 
+For the current Python `zk-refdata-svc`, the recommended first implementation is:
+
+- manifest-driven Python import inside the refdata host
+- no dependency on the Rust bridge just to load Python refdata adaptors
+- same manifest/config/schema semantics as the long-term bridge design
+- venue-specific refdata code still lives under `zkbot/venue-integrations/<venue>/`
+
 ## Capability Interfaces
 
 The per-capability interfaces should remain service-specific:
@@ -196,6 +216,21 @@ That means:
 - same config-validation approach
 - same venue module directory/package concept
 - same operational ownership model
+
+Recommended first-pass Python refdata adaptor contract:
+
+```python
+class SomeRefdataLoader:
+    def __init__(self, config: dict | None = None): ...
+    async def load_instruments(self) -> list[dict]: ...
+    async def load_market_sessions(self) -> list[dict]: ...
+```
+
+Interface rule:
+
+- `load_market_sessions()` may return an empty list for always-open crypto venues
+- session-constrained venues should provide real market-session or calendar data through the adaptor
+- the host should not synthesize a blanket `open` state for every venue
 
 ## Service Wrapper Pattern
 
@@ -248,6 +283,7 @@ The venue module should own:
 - venue-specific API/session behavior
 - venue-specific metadata normalization
 - venue-specific quirks and feature support
+- venue-specific market-session source behavior for refdata when applicable
 
 ## Adaptor State Ownership
 
@@ -308,6 +344,12 @@ Examples:
   - start generic refdata host
   - config says `venue=ice`
   - host loads `ice` manifest and its Python `refdata` loader
+
+For a Python refdata host, step 6 becomes:
+
+- instantiate the manifest-declared Python class directly after schema validation
+
+The important invariant is that manifest-driven resolution remains the source of truth.
 
 This keeps deployment and operations consistent:
 

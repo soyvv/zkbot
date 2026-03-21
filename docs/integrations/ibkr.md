@@ -26,10 +26,14 @@ Recommended module shape:
 ```text
 venue-integrations/ibkr/
   manifest.yaml
-  python/
+  ibkr/
+    __init__.py
     gw.py
     rtmd.py
     refdata.py
+    ibkr_client.py
+    ibkr_contracts.py
+    ibkr_normalize.py
   schemas/
     gw_config.schema.json
     rtmd_config.schema.json
@@ -41,6 +45,15 @@ Manifest language choices:
 - `gw.language = python`
 - `rtmd.language = python`
 - `refdata.language = python`
+
+Implementation note:
+
+- the manifest entrypoint should use package-style module paths such as
+  `python:ibkr.gw:IbkrGatewayAdaptor`
+- the Python code should therefore live in a real package under
+  `venue-integrations/ibkr/ibkr/`
+- avoid flat shared module names under a common `python/` folder because the merged Python bridge
+  resolves venue modules by package path and must not collide with other venues’ `gw.py` / `rtmd.py`
 
 ## Recommended library choice
 
@@ -78,6 +91,47 @@ Implementation path:
 
 - Python adaptor loaded through the shared bridge
 
+Python adaptor implementation requirements:
+
+- implement async class `IbkrGatewayAdaptor`
+- constructor signature:
+  - `__init__(self, config: dict)`
+- required async methods:
+  - `connect()`
+  - `place_order(req: dict) -> dict`
+  - `cancel_order(req: dict) -> dict`
+  - `query_balance(req: dict) -> list[dict]`
+  - `query_order(req: dict) -> list[dict]`
+  - `query_open_orders(req: dict) -> list[dict]`
+  - `query_trades(req: dict) -> list[dict]`
+  - `query_funding_fees(req: dict) -> list[dict]`
+  - `query_positions(req: dict) -> list[dict]`
+  - `next_event() -> dict`
+
+Bridge/runtime constraints:
+
+- all async methods run on one persistent Python event loop managed by `zk-pyo3-bridge`
+- keep `ib_async` session state, callback wiring, queues, and polling tasks on that loop
+- do not call `asyncio.run()` inside the adaptor
+- push normalized facts/events into an internal `asyncio.Queue`; `next_event()` should await that queue
+
+Returned event shape:
+
+- `order_report`
+  - `{"event_type": "order_report", "payload_bytes": b"...protobuf bytes..."}`
+- `balance`
+  - `{"event_type": "balance", "payload": [...]}`
+- `position`
+  - `{"event_type": "position", "payload": [...]}`
+- `system`
+  - `{"event_type": "system", "payload": {...}}`
+
+Config-loading rules:
+
+- the host passes `ZK_VENUE_CONFIG` JSON into the adaptor constructor
+- the Rust bridge validates that config against the manifest-declared schema before class construction
+- keep live secrets and session details outside source-controlled config; pass secret refs or deployment config instead
+
 Recommended adaptor mode:
 
 - `hybrid`, heavily query-backed
@@ -95,6 +149,17 @@ Why this matters:
 - IBKR callback behavior is useful but not sufficient as the semantic source of truth
 - order identity, fill state, and account updates may require compensating queries
 - reconnect and session churn are part of normal operation
+
+Suggested Python module split:
+
+- `ibkr_client.py`
+  - `ib_async` session setup, reconnect, callback registration
+- `ibkr_contracts.py`
+  - contract construction and canonical mapping helpers
+- `ibkr_normalize.py`
+  - callback/query output -> gateway-facing dicts / protobuf bytes
+- `gw.py`
+  - `IbkrGatewayAdaptor`, polling tasks, queue management, query-after-action logic
 
 Adaptor-owned responsibilities:
 
@@ -149,6 +214,29 @@ Host:
 Implementation path:
 
 - Python adaptor through the shared bridge
+
+Python adaptor implementation requirements:
+
+- implement async class `IbkrRtmdAdaptor`
+- constructor signature:
+  - `__init__(self, config: dict)`
+- required async methods:
+  - `connect()`
+  - `subscribe(req: dict)`
+  - `unsubscribe(req: dict)`
+  - `snapshot_active() -> list[dict]`
+  - `instrument_exch_for(instrument_id: str) -> str | None`
+  - `query_current_tick(instrument_id: str) -> bytes`
+  - `query_current_orderbook(instrument_id: str, depth: int | None = None) -> bytes`
+  - `query_current_funding(instrument_id: str) -> bytes`
+  - `query_klines(...) -> list[bytes]`
+  - `next_event() -> dict`
+
+Bridge/runtime constraints:
+
+- keep the `ib_async` connection, subscription state, and callback queue on the persistent bridge-managed loop
+- publish RTMD events to an internal queue consumed by `next_event()`
+- only advertise capabilities that the current session and entitlements actually support
 
 Recommended capabilities:
 
@@ -208,6 +296,34 @@ Host:
 Implementation path:
 
 - Python loader through the shared bridge
+- loaded from the IBKR venue manifest `refdata` capability and validated against
+  `schemas/refdata_config.schema.json`
+
+Python loader implementation requirements:
+
+- implement async class `IbkrRefdataLoader`
+- constructor signature:
+  - `__init__(self, config: dict)`
+- required async methods:
+  - `load_instruments() -> list[dict]`
+  - `load_market_sessions() -> list[dict]`
+
+Suggested Python module split:
+
+- `refdata.py`
+  - loader entrypoint and orchestration
+- `ibkr_client.py`
+  - `ib_async` or other session-backed metadata lookups
+- `ibkr_contracts.py`
+  - canonical contract shaping
+- `ibkr_normalize.py`
+  - refdata row normalization for the refdata host
+
+Integration rule:
+
+- the entrypoint should be `python:ibkr.refdata:IbkrRefdataLoader`
+- the generic refdata host should resolve that entrypoint from `venue-integrations/ibkr/manifest.yaml`
+- IBKR-specific refdata logic should stay in the venue package, not in a service-local loader list
 
 Recommended scope for first implementation:
 
@@ -237,6 +353,11 @@ Required canonical concerns:
 - contract exchange, currency, secType, multiplier
 - trading-class / primary-exchange style metadata where needed
 - market/session linkage suitable for `QueryMarketStatus` and `QueryMarketCalendar`
+
+Session rule:
+
+- IBKR session metadata must come from the IBKR refdata/session adaptor path
+- the refdata host must not treat IBKR as an always-open venue
 
 ### Refdata API mapping
 
@@ -281,6 +402,12 @@ Operational notes:
 - TWS or IB Gateway must be running and authenticated
 - live and paper sessions use different defaults and should be configured explicitly
 - the deployment must account for daily restart/reset behavior
+
+Bridge-specific config note:
+
+- the Python bridge is enabled in the Rust hosts with the `python-venue` cargo feature
+- `ZK_VENUE_ROOT` must point at `venue-integrations/`
+- `ZK_VENUE_CONFIG` must validate against the manifest-declared JSON schema before startup
 
 ## ID linkage mechanism
 
@@ -380,7 +507,7 @@ IBKR Python modules own:
 
 ## Initial rollout order
 
-1. Implement IBKR refdata loader for ETFs and stocks first.
+1. Implement IBKR refdata loader for ETFs and stocks first under `venue-integrations/ibkr/ibkr/refdata.py` and wire it through the manifest-driven host path.
 2. Implement Python IBKR gateway adaptor with hybrid callback-plus-query recovery.
 3. Implement Python IBKR RTMD adaptor with tick and bounded history support.
 4. Add futures and other richer contract families after the first lifecycle path is stable.

@@ -1,6 +1,8 @@
 """Runtime configuration loaded from environment variables."""
 
+import json
 import os
+import pathlib
 
 
 class Config:
@@ -12,6 +14,7 @@ class Config:
     heartbeat_interval_s: int
     lease_ttl_s: int
     venues: list[str]
+    venue_configs: dict[str, dict]
 
     def __init__(self) -> None:
         self.nats_url = os.environ["ZK_NATS_URL"]
@@ -24,3 +27,11 @@ class Config:
         self.advertise_host = os.getenv("ZK_REFDATA_ADVERTISE_HOST", "localhost")
         venues_str = os.getenv("ZK_REFDATA_VENUES", "")
         self.venues = [v.strip() for v in venues_str.split(",") if v.strip()]
+
+        # Per-venue config: JSON file mapping venue name -> config dict
+        venue_configs_path = os.getenv("ZK_REFDATA_VENUE_CONFIGS")
+        if venue_configs_path and pathlib.Path(venue_configs_path).exists():
+            with open(venue_configs_path) as f:
+                self.venue_configs = json.load(f)
+        else:
+            self.venue_configs = {}

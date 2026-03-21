@@ -87,18 +87,31 @@ async def _main() -> None:
         logger.info(f"configured venues: {cfg.venues}")
         # Run initial refresh before entering steady-state.
         try:
-            await refresh_refdata(repo, nc, cfg.venues)
+            await refresh_refdata(repo, nc, cfg.venues, venue_configs=cfg.venue_configs)
         except Exception:
             logger.exception("initial refdata refresh failed (will retry on schedule)")
 
         background_tasks.append(
             asyncio.create_task(
-                run_periodic(cfg.refresh_interval_s, refresh_refdata, repo, nc, cfg.venues)
+                run_periodic(
+                    cfg.refresh_interval_s,
+                    refresh_refdata,
+                    repo,
+                    nc,
+                    cfg.venues,
+                    venue_configs=cfg.venue_configs,
+                )
             )
         )
         background_tasks.append(
             asyncio.create_task(
-                run_periodic(cfg.refresh_interval_s, refresh_sessions, repo, cfg.venues)
+                run_periodic(
+                    cfg.refresh_interval_s,
+                    refresh_sessions,
+                    repo,
+                    cfg.venues,
+                    venue_configs=cfg.venue_configs,
+                )
             )
         )
     else:

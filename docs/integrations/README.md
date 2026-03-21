@@ -22,3 +22,9 @@ Default client-library guidance from the current design:
 - Rust native venues: `reqwest` + `tokio-tungstenite`
 - Python API-driven venues: `httpx` + explicit streaming client handling
 - IBKR: `ib_async`
+
+Refdata integration rule:
+
+- venue-specific refdata adaptors live under `zkbot/venue-integrations/<venue>/`
+- the refdata host loads them from the venue manifest and validates `schemas/refdata_config.schema.json`
+- venue modules should provide both instrument loading and, where relevant, market-session loading

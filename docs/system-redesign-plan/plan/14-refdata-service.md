@@ -46,13 +46,17 @@ requires a fuller runtime split and explicit lifecycle behavior.
 The recommended production runtime is:
 
 ```text
-venue adaptors
+venue manifest/config
+  -> venue-integration facade
+  -> refdata adaptor
   -> normalization / canonicalization
   -> diff + lifecycle engine
   -> PostgreSQL writer
   -> refdata change events
 
-market calendar/session adaptors
+venue manifest/config
+  -> venue-integration facade
+  -> session adaptor path
   -> normalization
   -> session state writer
   -> market session events
@@ -69,6 +73,7 @@ Design rules:
 - the gRPC service is the canonical shared lookup surface
 - scheduled jobs own refresh and lifecycle transitions
 - callers still own local caches and degraded-mode policy
+- venue-specific refdata logic belongs under `zkbot/venue-integrations`, not inside the host service
 
 ## Deliverables
 
@@ -83,6 +88,7 @@ zkbot/services/zk-refdata-svc/
     service.py             -- RefdataService RPC handlers
     repo.py                -- PostgreSQL query layer
     registry.py            -- NATS KV registration / heartbeat
+    venue_registry.py      -- manifest/config/entrypoint resolution for refdata capability
     config.py              -- env + bootstrap config
     health.py              -- readiness / liveness helpers
     jobs/
@@ -91,8 +97,7 @@ zkbot/services/zk-refdata-svc/
       refresh_sessions.py  -- market calendar/session refresh job
       publish_changes.py   -- change/invalidation event publishing
     loaders/
-      base.py              -- venue adaptor interface
-      <venue>.py           -- reused/adapted venue fetchers
+      base.py              -- optional shared adaptor protocol only
     normalize/
       instruments.py
       sessions.py
@@ -105,7 +110,41 @@ Implementation rule:
 
 - keep `zk-refdata-loader` logic only as an adaptor/reference source
 - do not keep MongoDB as part of the new runtime
-- move to one canonical Python service package, even if some fetcher modules are reused from the current loader
+- the host service must not own a hardcoded per-venue loader registry long-term
+- venue-specific refdata implementations should live under `zkbot/venue-integrations/<venue>/`
+- if temporary compatibility wrappers are needed during migration, they should delegate into
+  `venue-integrations` rather than becoming the lasting architecture
+
+### 12.1A Venue-integration loading model
+
+The refdata host should consume the same venue manifest model described in
+[venue_integration.md](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/venue_integration.md).
+
+Required host behavior:
+
+1. resolve `zkbot/venue-integrations/<venue>/manifest.yaml`
+2. confirm the venue exposes `capabilities.refdata`
+3. confirm `capabilities.refdata.language == python`
+4. validate the provided refdata config against the manifest-declared schema
+5. resolve the Python entrypoint
+6. instantiate the adaptor and call it through the stable refdata-loader contract
+
+Recommended entrypoint form:
+
+- `python:<module_path>:<class_name>`
+
+Recommended first-pass Python adaptor contract:
+
+```python
+class SomeRefdataLoader:
+    def __init__(self, config: dict | None = None): ...
+    async def load_instruments(self) -> list[dict]: ...
+    async def load_market_sessions(self) -> list[dict]: ...
+```
+
+This keeps the host generic and aligns the Python refdata path with the long-term bridge direction
+in
+[13-python-venue-bridge.md](/Users/zzk/workspace/zklab/zkbot/docs/system-redesign-plan/plan/13-python-venue-bridge.md).
 
 ### 12.2 Scheduled jobs
 
@@ -135,6 +174,13 @@ Failure policy:
 - a failed venue refresh does not corrupt prior canonical state
 - partial success across venues is allowed
 - per-venue failures must be visible through logs, metrics, and admin status
+
+Session-job rule:
+
+- the session refresh path should use adaptor-provided market-session data when available
+- only explicit always-open venues may use the trivial default-open fallback
+- session-constrained venues such as TradFi integrations must not be forced through a blanket
+  `open` host assumption
 
 ### 12.3 Canonical storage and lifecycle tables
 
@@ -300,7 +346,8 @@ Exit condition:
 
 ### Step 3: Build the refresh pipeline
 
-- port venue adaptor logic into the new runtime shape
+- port venue adaptor logic into `zkbot/venue-integrations`
+- add a Python-side venue-integration facade for the refdata host
 - normalize all records to canonical `instrument_id`
 - write diff/lifecycle logic
 - write refresh-run metadata and change-event rows
@@ -308,6 +355,8 @@ Exit condition:
 Exit condition:
 
 - scheduled refresh updates PostgreSQL canonically without blind overwrite
+- the host resolves venue-specific refdata adaptors from `venue-integrations` rather than a
+  service-local registry
 
 ### Step 4: Add service registration and Python registry helper
 
@@ -323,11 +372,13 @@ Exit condition:
 
 - add session/calendar tables
 - add refresh jobs for session sources
+- route market-session loading through the same venue adaptor boundary
 - implement real `QueryMarketStatus` and `QueryMarketCalendar`
 
 Exit condition:
 
 - market status is no longer a stub and is backed by canonical state
+- session-constrained venues no longer depend on a host-wide default-open assumption
 
 ### Step 6: Integrate downstream invalidation
 
@@ -348,6 +399,9 @@ Exit condition:
 - `(venue, instrument_exch)` uniqueness validation
 - disclosure-level shaping
 - registry heartbeat payload construction
+- venue manifest loading and entrypoint resolution
+- refdata config-schema validation
+- adaptor-provided market-session loading behavior
 
 ### Integration tests
 
@@ -357,6 +411,7 @@ Exit condition:
 - Rust SDK can resolve the gRPC endpoint from KV and perform a lookup
 - change notification is emitted after commit, not before
 - market-status query returns canonical session state once session jobs are enabled
+- refdata host loads venue adaptors from `zkbot/venue-integrations`
 
 ## Exit Criteria
 

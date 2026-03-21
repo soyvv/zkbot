@@ -26,10 +26,14 @@ Recommended module shape:
 ```text
 venue-integrations/oanda/
   manifest.yaml
-  python/
+  oanda/
+    __init__.py
     gw.py
     rtmd.py
     refdata.py
+    oanda_client.py
+    oanda_stream.py
+    oanda_normalize.py
   schemas/
     gw_config.schema.json
     rtmd_config.schema.json
@@ -41,6 +45,15 @@ Manifest language choices:
 - `gw.language = python`
 - `rtmd.language = python`
 - `refdata.language = python`
+
+Implementation note:
+
+- the manifest entrypoint should use package-style module paths such as
+  `python:oanda.gw:OandaGatewayAdaptor`
+- the Python code should therefore be organized as a real package under
+  `venue-integrations/oanda/oanda/`, not as loose flat files under `python/`
+- this matches the merged Python venue bridge and avoids cross-venue import collisions on generic
+  names like `gw`, `rtmd`, and `refdata`
 
 ## Recommended library choice
 
@@ -78,6 +91,51 @@ Implementation path:
 
 - Python adaptor loaded through the shared PyO3 bridge
 
+Python adaptor implementation requirements:
+
+- implement an async class `OandaGatewayAdaptor`
+- constructor signature:
+  - `__init__(self, config: dict)`
+- required async methods:
+  - `connect()`
+  - `place_order(req: dict) -> dict`
+  - `cancel_order(req: dict) -> dict`
+  - `query_balance(req: dict) -> list[dict]`
+  - `query_order(req: dict) -> list[dict]`
+  - `query_open_orders(req: dict) -> list[dict]`
+  - `query_trades(req: dict) -> list[dict]`
+  - `query_funding_fees(req: dict) -> list[dict]`
+  - `query_positions(req: dict) -> list[dict]`
+  - `next_event() -> dict`
+
+Bridge/runtime constraints:
+
+- all async methods run on one persistent Python event loop managed by `zk-pyo3-bridge`
+- the adaptor may safely keep long-lived state on that loop:
+  - `httpx.AsyncClient`
+  - streaming connections
+  - asyncio queues
+  - background polling tasks
+- do not call `asyncio.run()` inside the adaptor
+- use an internal `asyncio.Queue` for gateway facts/events and have `next_event()` await it
+
+Returned event shape:
+
+- `order_report`
+  - `{"event_type": "order_report", "payload_bytes": b"...protobuf bytes..."}`
+- `balance`
+  - `{"event_type": "balance", "payload": [...]}`
+- `position`
+  - `{"event_type": "position", "payload": [...]}`
+- `system`
+  - `{"event_type": "system", "payload": {...}}`
+
+Config-loading rules:
+
+- the host passes `ZK_VENUE_CONFIG` as a JSON object to the Python adaptor constructor
+- the Rust bridge validates that config against the manifest-declared JSON schema before class construction
+- keep secret material out of that JSON when possible; prefer secret refs and let the host/bootstrap layer resolve them
+
 Recommended adaptor mode:
 
 - `hybrid`, biased toward query-backed correctness
@@ -93,6 +151,17 @@ Why this matters:
 
 - OANDA’s trade, order, and position concepts do not map one-to-one onto the OMS model
 - account-state causality is safer when balance/position are treated as query-backed snapshots
+
+Suggested Python module split:
+
+- `oanda_client.py`
+  - auth, REST client construction, environment URL handling
+- `oanda_stream.py`
+  - transaction/pricing stream reader, reconnect, queue feed
+- `oanda_normalize.py`
+  - OANDA payloads -> gateway-facing dicts / protobuf bytes
+- `gw.py`
+  - `OandaGatewayAdaptor` orchestration, polling tasks, queue management
 
 Adaptor-owned responsibilities:
 
@@ -144,6 +213,28 @@ Implementation path:
 
 - Python adaptor through the shared bridge
 
+Python adaptor implementation requirements:
+
+- implement async class `OandaRtmdAdaptor`
+- constructor signature:
+  - `__init__(self, config: dict)`
+- required async methods:
+  - `connect()`
+  - `subscribe(req: dict)`
+  - `unsubscribe(req: dict)`
+  - `snapshot_active() -> list[dict]`
+  - `query_current_tick(instrument_id: str) -> bytes | dict`
+  - `query_current_orderbook(instrument_id: str, depth: int | None = None) -> bytes | dict`
+  - `query_current_funding(instrument_id: str) -> bytes | dict`
+  - `query_klines(...) -> list[bytes] | list[dict]`
+  - `next_event() -> dict`
+
+Bridge/runtime constraints:
+
+- keep subscription state on the persistent event loop
+- drive live stream events into an internal queue consumed by `next_event()`
+- use protobuf bytes for RTMD event payloads where the bridge expects proto-backed events
+
 Recommended capabilities:
 
 - `tick`
@@ -189,6 +280,33 @@ Host:
 Implementation path:
 
 - Python loader through the shared bridge
+- loaded from the OANDA venue manifest `refdata` capability and validated against
+  `schemas/refdata_config.schema.json`
+
+Python loader implementation requirements:
+
+- implement async class `OandaRefdataLoader`
+- constructor signature:
+  - `__init__(self, config: dict)`
+- required async methods:
+  - `load_instruments() -> list[dict]`
+  - `load_market_sessions() -> list[dict]`
+
+Suggested Python module split:
+
+- `refdata.py`
+  - class entrypoint plus orchestration
+- `oanda_client.py`
+  - instrument fetch requests
+- `oanda_normalize.py`
+  - canonical refdata row shaping for the refdata host
+
+Integration rule:
+
+- the entrypoint should be `python:oanda.refdata:OandaRefdataLoader`
+- the generic refdata host should resolve that entrypoint from `venue-integrations/oanda/manifest.yaml`
+- OANDA-specific refdata logic should not live in a service-local loader registry inside
+  `zk-refdata-svc`
 
 Source material:
 
@@ -213,6 +331,8 @@ Market-session design:
 - OANDA is not a clean TradFi exchange-calendar venue, but it is not pure 24x7 crypto either
 - keep session treatment simple initially
 - implement bounded market-status semantics only where they materially help operator tooling
+- provide any non-trivial session information through `load_market_sessions()` rather than relying
+  on the host to mark OANDA as globally `open`
 
 ### Refdata API mapping
 
@@ -221,8 +341,9 @@ Recommended initial mapping:
 - account instruments endpoint for tradable instrument metadata
 - instrument definitions used to populate canonical trading params
 
-The refdata loader should migrate the existing older OANDA fetcher logic into the `zk-refdata-svc`
-runtime described in
+The refdata loader should migrate the existing older OANDA fetcher logic into the
+`venue-integrations/oanda/oanda/` package and have the generic `zk-refdata-svc` host resolve it
+through the OANDA manifest, as described in
 [14-refdata-service.md](/Users/zzk/workspace/zklab/zkbot/docs/system-redesign-plan/plan/14-refdata-service.md).
 
 ## Venue config
@@ -254,6 +375,13 @@ Recommended refdata config fields:
 Operational note:
 
 - keep credentials in Vault and pass only secret refs into the service config
+
+Bridge-specific config note:
+
+- the Python bridge is enabled in the Rust hosts with the `python-venue` cargo feature
+- `ZK_VENUE_ROOT` must point at `venue-integrations/`
+- `ZK_VENUE_CONFIG` must be valid against `schemas/gw_config.schema.json`,
+  `schemas/rtmd_config.schema.json`, or `schemas/refdata_config.schema.json` as appropriate
 
 ## ID linkage mechanism
 
@@ -335,7 +463,7 @@ OANDA Python modules own:
 
 ## Initial rollout order
 
-1. Port the existing OANDA refdata loader into the new `zk-refdata-svc` shape.
+1. Port the existing OANDA refdata loader into `venue-integrations/oanda/oanda/refdata.py` and wire it through the manifest-driven refdata host path.
 2. Implement Python OANDA gateway adaptor with query-after-action and periodic recovery.
 3. Implement Python OANDA RTMD adaptor with tick and kline support.
 4. Add richer order-type coverage only after the core lifecycle path is stable.
