@@ -80,7 +80,7 @@ pub async fn build_adapter(cfg: &GwSvcConfig) -> anyhow::Result<BuiltVenue> {
             })
         }
         "ibkr" => Err(anyhow::anyhow!(
-            "venue adaptor placeholder exists for ibkr but implementation is not wired yet"
+            "ibkr venue requires manifest-driven loading: set ZK_VENUE_ROOT to the venue-integrations directory"
         )),
         "oanda" => Err(anyhow::anyhow!(
             "venue adaptor placeholder exists for oanda but implementation is not wired yet"
