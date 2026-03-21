@@ -9,6 +9,7 @@ service RefdataService {
   rpc ListInstruments              (ListInstrumentsRequest)          returns (ListInstrumentsResponse);
   rpc QueryRefdataWatermark        (QueryWatermarkRequest)           returns (WatermarkResponse);
   rpc QueryMarketStatus            (QueryMarketStatusRequest)        returns (MarketStatusResponse);
+  rpc QueryMarketCalendar          (QueryMarketCalendarRequest)      returns (QueryMarketCalendarResponse);
 }
 
 enum DisclosureLevel {
@@ -35,7 +36,12 @@ message ListInstrumentsRequest {
   DisclosureLevel level = 3;
 }
 
+// Instrument reference data with progressive disclosure.
+// BASIC (fields 1-10): canonical identity, venue mapping, primary trading params.
+// EXTENDED (fields 11-23): lifecycle, extra properties, market session context.
+// FULL (fields 24-25): provenance / operator fields.
 message InstrumentRefdataResponse {
+  // BASIC fields
   string instrument_id   = 1;
   string venue           = 2;
   string instrument_exch = 3;
@@ -46,6 +52,25 @@ message InstrumentRefdataResponse {
   string base_asset      = 8;
   string quote_asset     = 9;
   int64  updated_at_ms   = 10;
+
+  // EXTENDED fields
+  string lifecycle_status  = 11;  // active | disabled | deprecated
+  string settlement_asset  = 12;
+  double contract_size     = 13;
+  double min_notional      = 14;
+  double max_notional      = 15;
+  double min_order_qty     = 16;
+  double max_order_qty     = 17;
+  double max_mkt_order_qty = 18;
+  int32  price_precision   = 19;
+  int32  qty_precision     = 20;
+  map<string, string> extra_properties = 21;
+  int64  first_seen_at_ms  = 22;
+  int64  last_seen_at_ms   = 23;
+
+  // FULL fields
+  string source_name   = 24;
+  int64  source_run_id = 25;
 }
 
 message ListInstrumentsResponse {
@@ -66,4 +91,25 @@ message MarketStatusResponse {
   string market          = 2;
   string session_state   = 3;  // open | closed | halted | pre_open | special
   int64  effective_at_ms = 4;
+}
+
+message QueryMarketCalendarRequest {
+  string venue      = 1;
+  string market     = 2;
+  string start_date = 3;  // YYYY-MM-DD
+  string end_date   = 4;  // YYYY-MM-DD
+}
+
+message QueryMarketCalendarResponse {
+  repeated MarketCalendarEntry entries = 1;
+}
+
+message MarketCalendarEntry {
+  string venue         = 1;
+  string market        = 2;
+  string date          = 3;  // YYYY-MM-DD
+  string session_state = 4;  // open | closed | halted | pre_open | special
+  int64  open_time_ms  = 5;
+  int64  close_time_ms = 6;
+  string source        = 7;
 }

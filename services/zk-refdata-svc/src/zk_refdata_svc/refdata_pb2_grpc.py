@@ -61,6 +61,11 @@ class RefdataServiceStub(object):
                 request_serializer=refdata__pb2.QueryMarketStatusRequest.SerializeToString,
                 response_deserializer=refdata__pb2.MarketStatusResponse.FromString,
                 _registered_method=True)
+        self.QueryMarketCalendar = channel.unary_unary(
+                '/zk.refdata.v1.RefdataService/QueryMarketCalendar',
+                request_serializer=refdata__pb2.QueryMarketCalendarRequest.SerializeToString,
+                response_deserializer=refdata__pb2.QueryMarketCalendarResponse.FromString,
+                _registered_method=True)
 
 
 class RefdataServiceServicer(object):
@@ -98,6 +103,12 @@ class RefdataServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def QueryMarketCalendar(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RefdataServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -125,6 +136,11 @@ def add_RefdataServiceServicer_to_server(servicer, server):
                     servicer.QueryMarketStatus,
                     request_deserializer=refdata__pb2.QueryMarketStatusRequest.FromString,
                     response_serializer=refdata__pb2.MarketStatusResponse.SerializeToString,
+            ),
+            'QueryMarketCalendar': grpc.unary_unary_rpc_method_handler(
+                    servicer.QueryMarketCalendar,
+                    request_deserializer=refdata__pb2.QueryMarketCalendarRequest.FromString,
+                    response_serializer=refdata__pb2.QueryMarketCalendarResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -264,6 +280,33 @@ class RefdataService(object):
             '/zk.refdata.v1.RefdataService/QueryMarketStatus',
             refdata__pb2.QueryMarketStatusRequest.SerializeToString,
             refdata__pb2.MarketStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def QueryMarketCalendar(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zk.refdata.v1.RefdataService/QueryMarketCalendar',
+            refdata__pb2.QueryMarketCalendarRequest.SerializeToString,
+            refdata__pb2.QueryMarketCalendarResponse.FromString,
             options,
             channel_credentials,
             insecure,

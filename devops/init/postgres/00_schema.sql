@@ -74,11 +74,67 @@ create table cfg.instrument_refdata (
   qty_precision      int,
   disabled           boolean not null default false,
   extra_properties   jsonb not null default '{}'::jsonb,
+  lifecycle_status   text not null default 'active',
+  first_seen_at      timestamptz,
+  last_seen_at       timestamptz,
+  source_name        text,
+  source_run_id      bigint,
   updated_at         timestamptz not null default now()
 );
 
 create index idx_instrument_refdata_venue_exch
   on cfg.instrument_refdata(venue, instrument_exch);
+
+create table cfg.refdata_refresh_run (
+  run_id               bigserial primary key,
+  source_name          text not null,
+  venue                text not null,
+  started_at           timestamptz not null default now(),
+  ended_at             timestamptz,
+  status               text not null default 'running',
+  instruments_added    int not null default 0,
+  instruments_updated  int not null default 0,
+  instruments_disabled int not null default 0,
+  instruments_deprecated int not null default 0,
+  error_detail         text
+);
+
+create table cfg.refdata_change_event (
+  event_id       bigserial primary key,
+  run_id         bigint references cfg.refdata_refresh_run(run_id),
+  instrument_id  text not null,
+  venue          text not null,
+  change_class   text not null,
+  watermark_ms   bigint not null,
+  created_at     timestamptz not null default now()
+);
+
+create index idx_refdata_change_event_run
+  on cfg.refdata_change_event(run_id);
+
+create table cfg.market_session_state (
+  venue          text not null,
+  market         text not null,
+  session_state  text not null,
+  effective_at   timestamptz not null,
+  updated_at     timestamptz not null default now(),
+  primary key (venue, market)
+);
+
+create table cfg.market_session_calendar (
+  calendar_id    bigserial primary key,
+  venue          text not null,
+  market         text not null,
+  date           date not null,
+  session_state  text not null,
+  open_time      timestamptz,
+  close_time     timestamptz,
+  source         text,
+  updated_at     timestamptz not null default now()
+);
+
+create index idx_market_session_calendar_venue_date
+  on cfg.market_session_calendar(venue, market, date);
 
 create table cfg.account_instrument_config (
   account_id          bigint not null references cfg.account(account_id),

@@ -360,14 +360,14 @@ Exit condition:
 
 ## Exit Criteria
 
-- [ ] `zk-refdata-svc` runs as a Python service with scheduled jobs enabled
-- [ ] MongoDB is no longer required for the refdata runtime path
-- [ ] full refdata gRPC API is implemented, including `QueryMarketCalendar`
-- [ ] service discovery registration works through the shared KV mechanism
-- [ ] a reusable Python registry helper exists for Python services
+- [x] `zk-refdata-svc` runs as a Python service with scheduled jobs enabled
+- [x] MongoDB is no longer required for the refdata runtime path
+- [x] full refdata gRPC API is implemented, including `QueryMarketCalendar`
+- [x] service discovery registration works through the shared KV mechanism
+- [x] a reusable Python registry helper exists for Python services
 - [ ] a minimal Python discovery helper exists for `svc.refdata.*` lookup
-- [ ] lifecycle-aware refresh updates PostgreSQL without blind overwrite
-- [ ] refdata and market-status invalidation events are published post-commit
+- [x] lifecycle-aware refresh updates PostgreSQL without blind overwrite
+- [x] refdata and market-status invalidation events are published post-commit
 - [ ] Rust SDK discovery and lookup work against the service with no hard-coded endpoint
 
 ## Non-goals
