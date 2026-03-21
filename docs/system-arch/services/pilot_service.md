@@ -78,6 +78,7 @@ service.
 Recommended direction:
 
 - use Java for Pilot if that matches the team's stronger implementation language
+- prefer Java 21 rather than a non-LTS JDK line for the first implementation
 
 Why Java is a good fit:
 
@@ -104,6 +105,53 @@ A sane stack split is:
 - Python for integration scripts and refdata loaders
 - Java for the heavier Pilot control plane
 
+Recommended Java tech stack:
+
+- Java 21
+- Gradle with Kotlin DSL
+- Spring Boot
+- Spring Web
+- Spring Security
+- OAuth2 Resource Server for OIDC/JWT validation
+- Spring Validation
+- Spring Actuator
+- jOOQ or Spring JDBC for PostgreSQL access
+- Flyway for schema migrations
+- PostgreSQL JDBC driver
+- NATS Java client
+- Jackson
+- Micrometer with Prometheus registry
+- Testcontainers
+- JUnit 5
+
+Preferred implementation choices:
+
+- build tool
+  - Gradle with Kotlin DSL
+  - commit the Gradle wrapper
+- persistence
+  - prefer jOOQ if the team wants typed SQL/result mapping
+  - Spring JDBC is an acceptable leaner alternative
+  - avoid making JPA/Hibernate the default unless the team already depends on it heavily
+- auth
+  - validate OIDC-issued JWTs in Pilot through Spring Security resource-server support
+- discovery/runtime integration
+  - use the NATS Java client directly for bootstrap request/reply, KV watch/cache, and control
+    topics
+- metrics
+  - expose Actuator + Micrometer metrics and Prometheus scrape endpoint
+- tests
+  - use JUnit 5 and Testcontainers for PostgreSQL-backed integration tests
+
+Process/orchestration implementation for the current phase:
+
+- local dev/test first
+  - use a small `ProcessBuilder`-backed adaptor behind a `RuntimeOrchestrator` interface
+- local containerized development later
+  - add a Docker-backed adaptor
+- deployed environment later
+  - add a Kubernetes-backed adaptor using a K8s client
+
 Implementation note:
 
 - keep bootstrap and service-discovery contracts language-agnostic
@@ -117,6 +165,56 @@ Caution:
 - refdata service remains the refdata truth
 - OMS remains the trading-state authority
 - Pilot remains the control plane
+
+## Java Service Discovery Note
+
+If Pilot is implemented in Java, it should still maintain a small local service-discovery client
+rather than resolving every downstream target dynamically on each request.
+
+Recommended Java-side shape:
+
+- one startup snapshot load from `zk-svc-registry-v1`
+- one background watch loop that keeps an in-memory cache current
+- request-time resolution from local memory rather than fresh KV lookups on every REST call
+- helper lookups such as:
+  - `findOms(omsId)`
+  - `findGateway(gwId)`
+  - `findMdgw(logicalId)`
+  - `findRefdata()`
+
+Why this is the recommended default:
+
+- Pilot is an aggregator and operator backend, so many REST requests need repeated endpoint
+  resolution
+- per-request KV resolution adds avoidable latency and makes ordinary control-plane requests more
+  dependent on transient NATS timing
+- topology views already need an in-memory picture of current runtime registrations
+
+Minimal useful Java implementation:
+
+- `DiscoveryCache`
+  - holds the latest live `ServiceRegistration` view keyed by `service_type` + `service_id`
+- `DiscoveryWatcher`
+  - loads the initial KV snapshot
+  - applies watch updates in the background
+  - rebuilds state cleanly after reconnect
+- `DiscoveryResolver`
+  - exposes typed lookup helpers for Pilot service classes and controllers
+
+Suggested runtime contract:
+
+1. on startup, Pilot loads the current KV snapshot before serving topology-dependent APIs
+2. Pilot starts a background watch loop for incremental updates
+3. REST handlers and aggregation services read from the in-memory cache
+4. if the cache is not ready or the target is missing, Pilot returns an explicit control-plane
+   error instead of performing ad hoc direct KV scans per request
+
+Dynamic per-request resolution is acceptable only for:
+
+- very low-frequency admin paths
+- temporary scaffolding before the cache exists
+
+It should not be the default architecture for the main Java Pilot service.
 
 ## Target Product Scope
 
@@ -162,6 +260,15 @@ Design note:
 - venue module enablement
 - RTMD policy/defaults
 - service-level runtime config authoring
+
+Design note:
+
+- for gateway and RTMD onboarding, Pilot should load the venue integration manifest and the
+  relevant config schema to discover supported config types, capabilities, and UI form metadata
+- Pilot should use that manifest/schema data to render and validate onboarding/config forms
+- Pilot should persist only the validated chosen configuration into control-plane tables
+- the manifest/schema is the source for config shape; Pilot DB remains the source of truth for the
+  actual configured instances
 
 ### 5. Refdata management
 
@@ -245,15 +352,30 @@ Pilot may use a backend runtime-orchestrator adaptor for bounded runtime operati
 
 Examples:
 
+- local process adaptor
+- local Docker Engine adaptor
 - Kubernetes / k3s API adaptor
-- Docker Engine API adaptor
 
 Important boundary:
 
 - this adaptor is for runtime operations only
+- only bot/engine runtimes should use the orchestration start/stop path in the current design
 - deployment and rollout should still go through the normal DevOps process
 - Pilot should not become the primary deployment system for building, packaging, or releasing
   service workloads
+
+Recommended staging:
+
+- dev/test first: local process adaptor
+- local containerized development later: Docker Engine adaptor
+- deployed environment later: Kubernetes / k3s adaptor through a K8s client
+
+Current scope rule:
+
+- orchestration-backed start/stop is for bot execution runtimes
+- gateways, OMS, and shared RTMD runtimes should not rely on Pilot orchestration start/stop in the
+  current design
+- for those services, Pilot may still expose config, topology, bootstrap-token, and reload flows
 
 Recommended split:
 
@@ -262,7 +384,7 @@ Recommended split:
   - deployment manifests
   - cluster rollout and release process
 - Pilot owns:
-  - start/stop/restart requests within an already deployed runtime environment
+  - bot runtime start/stop/restart requests within an already deployed runtime environment
   - control-plane visibility of runtime status
   - coordination with bootstrap/topology state
 
@@ -278,8 +400,6 @@ Config/restart rule:
 - Bootstrap NATS subjects:
   - `zk.bootstrap.register`
   - `zk.bootstrap.deregister`
-  - `zk.bootstrap.reissue`
-  - `zk.bootstrap.sessions.query`
 - REST:
   - manual trading and panic actions
   - account views
@@ -290,12 +410,22 @@ Config/restart rule:
 
 The REST surface is the primary Pilot API for UI/backend and ops workflows.
 
+Current bootstrap implementation note:
+
+- phase-1 Pilot currently implements only `zk.bootstrap.register` and `zk.bootstrap.deregister`
+- the current wire contract still includes compatibility/reserved fields such as `lock_key`
+- the active ownership and fencing mechanism today is CAS on `kv_key`
+- scoped runtime credentials, active `lock_key` enforcement, reissue flows, and session-query
+  subjects remain later hardening topics
+
 ## API Domains
 
-Suggested Pilot REST APIs should be grouped by domain/role.
+Suggested Pilot REST APIs should be grouped by top-level resource area.
 
-### 1. Trading
+### 1. `/v1/manual`
 
+- `POST /v1/manual/orders:preview`
+  - validate route, refdata status, and risk warnings before submit
 - `POST /v1/manual/orders`
   - submit one manual order through the OMS-facing control path
 - `POST /v1/manual/orders:batch`
@@ -310,8 +440,15 @@ Suggested Pilot REST APIs should be grouped by domain/role.
   - inspect manual-order status and downstream execution state
 - `GET /v1/manual/trades`
   - inspect recent manual-trading fills and execution results
+
+### 2. `/v1/accounts`
+
+- `POST /v1/accounts`
+  - create one trading account definition in control-plane storage
 - `GET /v1/accounts`
   - list accounts visible to the operator or UI
+- `PUT /v1/accounts/{account_id}`
+  - update one trading account definition and control-plane metadata
 - `GET /v1/accounts/{account_id}`
   - fetch summary view for one trading account
 - `GET /v1/accounts/{account_id}/balances`
@@ -322,57 +459,141 @@ Suggested Pilot REST APIs should be grouped by domain/role.
   - fetch current open orders for one account
 - `GET /v1/accounts/{account_id}/trades`
   - fetch recent trades/fills for one account
+- `GET /v1/accounts/{account_id}/activities`
+  - fetch mixed paginated account activity feed for UI detail views
+- `GET /v1/accounts/{account_id}/runtime-binding`
+  - fetch OMS/gateway/runtime binding summary for one account
+- `POST /v1/accounts/{account_id}/orders/cancel`
+  - cancel selected open orders for one account
 
-### 2. System Topology / System Ops
+### 3. `/v1/topology`
 
 - `GET /v1/topology`
-  - return current system topology view across services and bindings
+  - return current topology summary, with primary scope anchored on a selected live `oms_id`
 - `PUT /v1/topology/bindings`
   - create or update logical topology bindings
+- `GET /v1/topology/views`
+  - list named topology and runtime views for UI/operator use
+- `GET /v1/topology/views/{view_name}`
+  - fetch one derived topology/runtime dataset, primarily scoped by a selected live `oms_id`
 - `GET /v1/topology/services`
-  - list service instances and current control-plane metadata
+  - list managed service definitions and current control-plane metadata for the selected `oms_id`
+- `GET /v1/topology/services/{service_kind}`
+  - list one service family such as `oms`, `gw`, `mdgw`, or `bot` within the selected `oms_id`
+- `GET /v1/topology/services/{service_kind}/{logical_id}`
+  - fetch one managed service definition and current status
+- `GET /v1/topology/services/{service_kind}/{logical_id}/bindings`
+  - fetch bindings and related topology edges for one service
+- `GET /v1/topology/services/{service_kind}/{logical_id}/audit`
+  - fetch recent operational and control-plane audit items for one service
 - `GET /v1/topology/sessions`
-  - list active bootstrap/runtime sessions known to Pilot
-- `POST /v1/services/{logical_id}/issue-bootstrap-token`
+  - list active bootstrap/runtime sessions for the selected `oms_id`
+- `POST /v1/topology/services/{service_kind}/{logical_id}/issue-bootstrap-token`
   - issue or rotate bootstrap token material for one logical service
-- `POST /v1/services/{logical_id}/reload`
+- `POST /v1/topology/services/{service_kind}/{logical_id}/reload`
   - request a config reload for one logical service
-- `POST /v1/ops/reload`
-  - request a broader reload workflow for a selected system scope
-- `POST /v1/ops/restart`
-  - request a bounded restart workflow for a selected runtime scope
 
 Design note:
 
-- UI commands to runtime backends should go through the runtime-orchestrator adaptor
+- resource endpoints own semantic service actions
+- generic `/v1/ops/*` endpoints own infrastructure-scoped runtime actions
+- direct runtime service calls are used for logical control of already-live services
+- the runtime-orchestrator adaptor is used for process/container/pod start, stop, and restart
 - KV/discovery state remains the runtime truth for live-service presence
+- topology view APIs should return normalized table-like datasets that the UI may render either as
+  tables or as graphs
+- topology inspection should be anchored on a selected live OMS instance, not a global unscoped
+  network map, for the normal operator workflow
 
-### 3. Bot
+Topology view response rule:
 
-- `POST /v1/strategies`
+- topology view endpoints should return structured rows/relations, not presentation-specific graph
+  layout
+- a view payload may include:
+  - `nodes`
+    - one row per service/runtime/group node with stable ids and status metadata
+  - `edges`
+    - one row per logical relationship such as bot -> OMS or OMS -> GW
+  - `groups`
+    - optional collapsed group rows for dense views
+  - `scope`
+    - current filter/scope metadata such as `oms_id`
+- the frontend may render that dataset as:
+  - a graph view
+  - a segmented table view
+  - a detail pane source
+
+Topology scope rule:
+
+- the primary topology scope is a selected live `oms_id`
+- the UI should choose an online OMS instance first, then request topology data for that scope
+- within that scope, Pilot returns the related bots, gateways, MDGW, refdata side authorities, and
+  session/runtime metadata needed by the view
+- unscoped global topology should be treated as a secondary admin/debug mode rather than the default
+  operator topology workflow
+
+Routing split:
+
+- resource-owned semantic actions
+  - examples: `ReloadConfig`, `StopStrategy`, refdata status changes, issue bootstrap token
+  - Pilot validates the target resource type and current state before dispatch
+- generic infra-scoped actions
+  - examples: broader restart workflows, bounded rollout/restart across a selected runtime scope
+  - these go through the runtime-orchestrator adaptor
+- service-directed logical control
+  - when a live runtime already exists and the action is part of that service's logical API,
+    Pilot should call the service control surface directly rather than bouncing the process
+- orchestrator-directed runtime control
+  - when the action is about process lifecycle rather than service semantics, Pilot should use the
+    orchestrator instead of inventing a service-local substitute
+
+Current scope:
+
+- in the current design, orchestration-backed runtime lifecycle applies only to bot/engine
+  executions
+- generic runtime restart should not be treated as the normal start path for gateways, OMS, or
+  shared RTMD runtimes
+
+### 4. `/v1/bot`
+
+- `POST /v1/bot/strategies`
   - create a strategy definition and its baseline runtime config
-- `PUT /v1/strategies/{strategy_key}`
+- `PUT /v1/bot/strategies/{strategy_key}`
   - update strategy config or metadata
-- `GET /v1/strategies`
+- `GET /v1/bot/strategies`
   - list strategy definitions
-- `GET /v1/strategies/{strategy_key}`
+- `GET /v1/bot/strategies/{strategy_key}`
   - fetch one strategy definition and current status summary
-- `POST /v1/strategies/{strategy_key}/validate`
+- `POST /v1/bot/strategies/{strategy_key}/validate`
   - validate strategy config, bindings, and symbol references before activation
-- `POST /v1/strategy-executions/start`
+- `POST /v1/bot/executions/start`
   - request a new live execution claim for a strategy
-- `POST /v1/strategy-executions/stop`
-  - request stop/finalize for a live execution
-- `POST /v1/strategy-executions/{execution_id}/restart`
+- `POST /v1/bot/executions/{execution_id}/stop`
+  - request stop/finalize for one live execution
+- `POST /v1/bot/executions/{execution_id}/pause`
+  - request pause for one live execution
+- `POST /v1/bot/executions/{execution_id}/resume`
+  - request resume for one live execution
+- `POST /v1/bot/executions/{execution_id}/restart`
   - request bounded restart of a strategy execution
-- `GET /v1/strategy-executions/{execution_id}`
+- `GET /v1/bot/executions`
+  - list execution/run history across bots
+- `GET /v1/bot/executions/{execution_id}`
   - fetch runtime status for one execution
-- `GET /v1/strategies/{strategy_key}/executions`
+- `GET /v1/bot/executions/{execution_id}/orders/open`
+  - fetch current open orders for one execution
+- `GET /v1/bot/executions/{execution_id}/activities`
+  - fetch paginated execution activity feed
+- `GET /v1/bot/executions/{execution_id}/lifecycles`
+  - fetch lifecycle/control-state timeline for one execution
+- `GET /v1/bot/executions/{execution_id}/logs`
+  - fetch logs for one execution
+- `GET /v1/bot/strategies/{strategy_key}/executions`
   - list execution history for one strategy
-- `GET /v1/strategies/{strategy_key}/logs`
+- `GET /v1/bot/strategies/{strategy_key}/logs`
   - fetch strategy logs for UI or operator inspection
 
-### 4. Risk / Monitor
+### 5. `/v1/risk`
 
 - `GET /v1/risk/accounts/{account_id}`
   - fetch current risk configuration and risk-state summary for one account
@@ -389,38 +610,14 @@ Design note:
 - `POST /v1/risk/accounts/{account_id}/enable`
   - re-enable account trading after operator review
 
-### 5. Trading Ops
+### 6. `/v1/refdata`
 
-- `POST /v1/gateways`
-  - onboard a trading gateway runtime definition
-- `GET /v1/gateways`
-  - list configured gateway runtimes
-- `GET /v1/gateways/{gw_id}`
-  - fetch one gateway runtime definition and status
-- `POST /v1/gateways/{gw_id}/reload`
-  - request config reload for one gateway
-- `POST /v1/oms`
-  - onboard an OMS runtime definition
-- `GET /v1/oms`
-  - list configured OMS runtimes
-- `GET /v1/oms/{oms_id}`
-  - fetch one OMS runtime definition and status
-- `POST /v1/oms/{oms_id}/reload`
-  - request config reload for one OMS
-- `POST /v1/mdgw`
-  - onboard a shared RTMD gateway runtime definition
-- `GET /v1/mdgw`
-  - list configured RTMD gateway runtimes
-- `GET /v1/mdgw/{logical_id}`
-  - fetch one RTMD gateway runtime definition and status
-- `POST /v1/mdgw/{logical_id}/reload`
-  - request config reload for one RTMD gateway
 - `GET /v1/refdata/instruments`
   - browse instrument refdata from the control-plane view
 - `GET /v1/refdata/instruments/{instrument_id}`
   - fetch one instrument’s canonical refdata and lifecycle state
 - `PATCH /v1/refdata/instruments/{instrument_id}`
-  - update refdata lifecycle state such as block/disable/deprecate
+  - update refdata lifecycle state such as disable/deprecate/reactivate
 - `POST /v1/refdata/instruments/{instrument_id}/refresh`
   - request targeted refresh for one instrument
 - `GET /v1/refdata/markets/{venue}/{market}/status`
@@ -429,12 +626,459 @@ Design note:
   - fetch market calendar and next-session context
 - `POST /v1/refdata/refresh`
   - request broader refdata refresh workflow
-- `GET /v1/audit/registrations`
+
+### 7. `/v1/ops`
+
+- `GET /v1/ops/audit/registrations`
   - inspect registration/bootstrap audit history
-- `GET /v1/audit/reconciliation`
+- `GET /v1/ops/audit/reconciliation`
   - inspect reconciliation/audit outcomes for operational review
 - `POST /v1/ops/reconcile`
   - request a bounded reconciliation workflow across selected scopes
+
+## Common Query Conventions
+
+List-style endpoints should support a consistent query contract where relevant.
+
+Recommended query parameters:
+
+- `limit`
+- `cursor`
+- `sort_by`
+- `sort_order`
+- `search`
+
+Common filters by area:
+
+- accounts
+  - `venue`
+  - `oms_id`
+  - `status`
+  - `risk`
+- topology
+  - `oms_id`
+  - `family`
+  - `service_kind`
+  - `status`
+  - `registration_kind`
+- bot
+  - `status`
+  - `venue`
+  - `oms_id`
+  - `account_id`
+  - `type`
+
+Response-shaping rule:
+
+- table/list endpoints should return compact rows plus pagination metadata
+- detail endpoints should return richer operator-facing aggregates so the UI does not need to fan
+  out into many sub-requests for ordinary page loads
+
+## Domain Data Model Sketches
+
+These are contract-level payload sketches for the main REST domains. They are not full OpenAPI
+schemas, but they define the expected request/response shape closely enough for service
+implementation and UI integration.
+
+References:
+
+- persistent/control-plane tables:
+  [Data Layer](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/data_layer.md)
+- runtime/discovery registration payload:
+  [API Contracts](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/api_contracts.md)
+- bootstrap/session semantics:
+  [Service Discovery](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/service_discovery.md)
+
+### 1. Manual
+
+Primary request sketches:
+
+```json
+{
+  "account_id": "123",
+  "instrument_id": "BTC-USDT.OKX",
+  "side": "BUY",
+  "order_type": "LIMIT",
+  "price": "83420",
+  "qty": "0.75",
+  "time_in_force": "GTC",
+  "note": "manual hedge"
+}
+```
+
+```json
+{
+  "account_id": "123",
+  "order_ids": ["8901221", "8901228"]
+}
+```
+
+Primary response sketches:
+
+```json
+{
+  "preview": {
+    "oms_id": "oms_okx",
+    "gw_id": "gw_okx_123",
+    "account_status": "ACTIVE",
+    "instrument_status": "active",
+    "risk_warnings": ["max_order_qty_near_limit"]
+  }
+}
+```
+
+```json
+{
+  "order_id": "8901221",
+  "client_order_id": "cl-9912",
+  "status": "ACCEPTED",
+  "oms_id": "oms_okx",
+  "gw_id": "gw_okx_123",
+  "accepted_at": "2026-03-21T10:14:01Z"
+}
+```
+
+Reference model:
+
+- request borrows OMS/gateway command semantics from
+  [API Contracts](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/api_contracts.md)
+- response is an operator-facing aggregate, not the canonical OMS internal state model
+
+### 2. Accounts
+
+Primary request sketches:
+
+```json
+{
+  "account_id": "123",
+  "alias": "okx-main-123",
+  "venue": "OKX",
+  "broker_type": "crypto",
+  "account_type": "spot",
+  "status": "ACTIVE",
+  "base_currency": "USD"
+}
+```
+
+```json
+{
+  "account_id": "123",
+  "alias": "okx-main-123",
+  "status": "SUSPENDED"
+}
+```
+
+Primary response sketches:
+
+```json
+{
+  "account_id": "123",
+  "alias": "okx-main-123",
+  "venue": "OKX",
+  "oms_id": "oms_okx",
+  "gw_id": "gw_okx_123",
+  "status": "ACTIVE",
+  "balance_summary": "0.91m",
+  "market_value": "1.24m",
+  "position_count": 4,
+  "open_order_count": 12,
+  "orders_24h": 84,
+  "trades_24h": 31,
+  "risk_state": "WARN"
+}
+```
+
+```json
+{
+  "account_id": "123",
+  "runtime_binding": {
+    "oms_id": "oms_okx",
+    "gw_ids": ["gw_okx_123"],
+    "startup_sync": true,
+    "last_binding_update": "2026-03-21T10:14:22Z"
+  },
+  "balances": [],
+  "positions": [],
+  "open_orders": [],
+  "activities": []
+}
+```
+
+Reference model:
+
+- control-plane account fields map primarily to `cfg.account` and `cfg.account_binding` in
+  [Data Layer](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/data_layer.md)
+- live balances, positions, and orders are Pilot aggregates over OMS/gateway sources
+
+### 3. Topology
+
+Primary request sketches:
+
+```json
+{
+  "oms_id": "oms_okx",
+  "view": "graph",
+  "include_groups": true
+}
+```
+
+```json
+{
+  "src_type": "BOT",
+  "src_id": "mm_btc",
+  "dst_type": "OMS",
+  "dst_id": "oms_okx",
+  "enabled": true,
+  "metadata": {}
+}
+```
+
+Primary response sketches:
+
+```json
+{
+  "scope": {
+    "oms_id": "oms_okx",
+    "as_of": "2026-03-21T10:14:22Z"
+  },
+  "nodes": [
+    {
+      "logical_id": "mm_btc",
+      "service_kind": "bot",
+      "registration_kind": "strategy",
+      "status": "live",
+      "endpoint": "10.0.0.41:5301",
+      "version": "1.3.0",
+      "drift": "NO",
+      "session_id": "sess_eng_101",
+      "desired_enabled": true
+    }
+  ],
+  "edges": [
+    {
+      "edge_type": "bot_to_oms",
+      "src_id": "mm_btc",
+      "dst_id": "oms_okx",
+      "status": "active"
+    }
+  ],
+  "groups": []
+}
+```
+
+```json
+{
+  "logical_id": "gw_okx_123",
+  "service_kind": "gw",
+  "registration_kind": "gw",
+  "desired_enabled": true,
+  "live_status": "degraded",
+  "endpoint": "10.0.0.12:5201",
+  "version": "1.1.7",
+  "last_seen_at": "2026-03-21T10:14:22Z",
+  "config_drift": "YES",
+  "bindings": [],
+  "sessions": []
+}
+```
+
+Reference model:
+
+- control-plane service metadata maps to `cfg.logical_instance` and `cfg.logical_binding`
+- live state/session view maps to discovery KV and `mon.active_session`
+
+### 4. Bot
+
+Primary request sketches:
+
+```json
+{
+  "strategy_key": "mm_btc",
+  "runtime_type": "RUST",
+  "code_ref": "strategies/mm_btc",
+  "oms_id": "oms_okx",
+  "account_scope": ["123", "456"],
+  "venue": "OKX",
+  "config": {}
+}
+```
+
+```json
+{
+  "strategy_key": "mm_btc",
+  "reason": "operator_start",
+  "runtime_params": {}
+}
+```
+
+```json
+{
+  "reason": "operator_pause"
+}
+```
+
+Primary response sketches:
+
+```json
+{
+  "strategy_key": "mm_btc",
+  "status": "RUNNING",
+  "type": "market_making",
+  "venue": "OKX",
+  "oms_id": "oms_okx",
+  "current_execution_id": "exec_101",
+  "account_scope": ["123", "456"],
+  "open_order_count": 12,
+  "last_start_at": "2026-03-21T10:12:11Z",
+  "last_operator_action": "resume"
+}
+```
+
+```json
+{
+  "execution_id": "exec_101",
+  "strategy_key": "mm_btc",
+  "status": "RUNNING",
+  "session_id": "sess_eng_101",
+  "endpoint": "10.0.0.41:5301",
+  "lifecycle": [],
+  "activities": [],
+  "open_orders": []
+}
+```
+
+Reference model:
+
+- control-plane bot definition should align with strategy/execution tables in
+  [Data Layer](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/data_layer.md)
+- live execution state should align with engine registration and runtime/session metadata
+
+### 5. Risk
+
+Primary request sketches:
+
+```json
+{
+  "max_daily_notional": "1000000",
+  "max_net_position": "250000",
+  "max_order_rate_per_s": 30,
+  "panic_on_reject_count": 5,
+  "extra_config": {}
+}
+```
+
+Primary response sketches:
+
+```json
+{
+  "account_id": "123",
+  "oms_id": "oms_okx",
+  "risk_config": {},
+  "risk_state": "WARN",
+  "active_alert_count": 1,
+  "latest_alerts": []
+}
+```
+
+Reference model:
+
+- control-plane risk config maps primarily to `cfg.oms_risk_config`
+- alert/state summaries are Pilot aggregates over monitor/risk sources
+
+### 6. Refdata
+
+Primary request sketches:
+
+```json
+{
+  "status": "disabled",
+  "reason": "operator_disable"
+}
+```
+
+```json
+{
+  "venue": "OKX",
+  "instrument_type": "SPOT",
+  "status": "active"
+}
+```
+
+Primary response sketches:
+
+```json
+{
+  "instrument_id": "BTC-USDT.OKX",
+  "venue": "OKX",
+  "instrument_exch": "BTC-USDT",
+  "instrument_type": "SPOT",
+  "lifecycle_status": "active",
+  "updated_at": "2026-03-21T10:03:11Z"
+}
+```
+
+```json
+{
+  "market": {
+    "venue": "NASDAQ",
+    "market": "us-cash",
+    "status": "OPEN",
+    "updated_at": "2026-03-21T09:31:09Z"
+  }
+}
+```
+
+Reference model:
+
+- canonical refdata fields map to `cfg.instrument_refdata`
+- richer payloads should proxy/aggregate from the refdata service rather than inventing a new
+  Pilot-local source of truth
+
+### 7. Ops
+
+Primary request sketches:
+
+```json
+{
+  "scope": {
+    "oms_id": "oms_okx",
+    "service_kind": "gw"
+  },
+  "reason": "operator_reconcile"
+}
+```
+
+Primary response sketches:
+
+```json
+{
+  "status": "ACCEPTED",
+  "job_id": "job_reconcile_101",
+  "scope": {
+    "oms_id": "oms_okx"
+  }
+}
+```
+
+```json
+{
+  "rows": [
+    {
+      "time": "2026-03-21T10:14:33Z",
+      "actor": "ops_a",
+      "action": "restart",
+      "target": "oms_okx",
+      "result": "OK",
+      "request_id": "req_101"
+    }
+  ]
+}
+```
+
+Reference model:
+
+- ops audit rows map to `mon.registration_audit` plus broader Pilot audit tables as they are added
+- reconcile/job responses should be revisited once the async job model is finalized
 
 ## User-Initiated Workflows
 
@@ -442,18 +1086,71 @@ The following workflows are initiated by an operator or UI through Pilot. Pilot 
 control-plane changes, but the actual runtime services remain responsible for bootstrap, live
 registration, and hot-path behavior.
 
+## Platform Ops Bootstrap Flow
+
+For a new environment or a newly enabled trading scope, platform/bootstrap ops should follow this
+order:
+
+1. create accounts in control-plane storage
+2. onboard service metadata and bindings into control-plane storage
+3. start OMS / GW / other required runtimes so they bootstrap and register live
+4. once live registration is present, topology, manual trading, and live account views become
+   usable
+
+Practical sequence:
+
+### 1. Create accounts
+
+- store account definitions in PostgreSQL control-plane tables
+- include venue/account identity, status, and required bindings metadata
+
+### 2. Onboard services
+
+- store OMS / GW / MDGW / bot logical-instance metadata in PostgreSQL
+- store bindings such as:
+  - account -> OMS
+  - OMS -> GW
+  - bot -> OMS
+- issue bootstrap tokens and required control-plane metadata
+
+### 3. Start runtimes for live registration
+
+- start OMS / GW / other required runtimes through the environment's normal runtime path
+- each runtime performs normal `zk.bootstrap.register`
+- each runtime registers live state in `zk-svc-registry-v1`
+
+### 4. Enable operator workflows
+
+- topology becomes meaningful once live registrations exist
+- manual trading becomes usable once the relevant OMS / GW path is live
+- account live views become usable once OMS state and bindings are available
+
+Readiness rule:
+
+- control-plane rows alone are not enough to treat a trading scope as operational
+- the scope should be considered operator-ready only after the required runtime registrations are
+  live in KV
+
 ### 1. Onboard A Trading Gateway
 
 Goal:
 
 - enable a ready venue integration package/binary as a managed gateway runtime for one account scope
 
+Manifest/config rule:
+
+- Pilot should load the selected venue integration manifest and gateway config schema during
+  onboarding
+- the manifest/schema should drive the rendered config fields, supported capability toggles, and
+  validation rules
+- submitted gateway config should be validated against the same schema before Pilot stores it
+
 Required control-plane endpoints:
 
-- `POST /v1/gateways`
-- `GET /v1/gateways/{gw_id}`
-- `POST /v1/gateways/{gw_id}/reload`
-- `POST /v1/gateways/{gw_id}/issue-bootstrap-token`
+- `POST /v1/topology/services/gw`
+- `GET /v1/topology/services/gw/{gw_id}`
+- `POST /v1/topology/services/gw/{gw_id}/reload`
+- `POST /v1/topology/services/gw/{gw_id}/issue-bootstrap-token`
 
 ```mermaid
 sequenceDiagram
@@ -465,16 +1162,13 @@ sequenceDiagram
     participant GW as zk-gw-svc
     participant KV as NATS KV
 
-    U->>P: POST /v1/gateways
+    U->>P: POST /v1/topology/services/gw
     P->>DB: validate venue/account binding and store cfg.gateway_instance
     P->>DB: store logical instance + binding metadata
     P->>V: record or validate secret_ref metadata
     P-->>U: gw_id + bootstrap token reference
 
-    Note over U,GW: deployment image/manifests already managed by DevOps
-    U->>P: POST /v1/ops/restart {logical_id: gw_id, action: start}
-    P->>R: start gateway runtime
-    R-->>P: runtime start accepted
+    Note over U,GW: deployment image/manifests and process/container startup are managed outside Pilot
     GW->>P: zk.bootstrap.register(token, logical_id, instance_type=gw)
     P->>DB: load effective gw config + metadata
     P-->>GW: registration grant + config + secret_ref
@@ -492,10 +1186,10 @@ Goal:
 
 Required control-plane endpoints:
 
-- `POST /v1/oms`
-- `GET /v1/oms/{oms_id}`
-- `POST /v1/oms/{oms_id}/reload`
-- `POST /v1/oms/{oms_id}/issue-bootstrap-token`
+- `POST /v1/topology/services/oms`
+- `GET /v1/topology/services/oms/{oms_id}`
+- `POST /v1/topology/services/oms/{oms_id}/reload`
+- `POST /v1/topology/services/oms/{oms_id}/issue-bootstrap-token`
 
 ```mermaid
 sequenceDiagram
@@ -506,15 +1200,12 @@ sequenceDiagram
     participant OMS as zk-oms-svc
     participant KV as NATS KV
 
-    U->>P: POST /v1/oms
+    U->>P: POST /v1/topology/services/oms
     P->>DB: create cfg.oms_instance + account bindings
     P->>DB: create logical instance metadata
     P-->>U: oms_id + bootstrap token reference
 
-    Note over U,OMS: deployment image/manifests already managed by DevOps
-    U->>P: POST /v1/ops/restart {logical_id: oms_id, action: start}
-    P->>R: start OMS runtime
-    R-->>P: runtime start accepted
+    Note over U,OMS: deployment image/manifests and process/container startup are managed outside Pilot
     OMS->>P: zk.bootstrap.register(token, logical_id, instance_type=oms)
     P->>DB: load effective oms config and bindings
     P-->>OMS: registration grant + config
@@ -529,12 +1220,20 @@ Goal:
 
 - enable a ready venue RTMD integration as a shared market-data runtime
 
+Manifest/config rule:
+
+- Pilot should load the selected venue integration manifest and RTMD config schema during
+  onboarding
+- the manifest/schema should drive the rendered config fields, supported RTMD channel/profile
+  options, and validation rules
+- submitted RTMD config should be validated against the same schema before Pilot stores it
+
 Required control-plane endpoints:
 
-- `POST /v1/mdgw`
-- `GET /v1/mdgw/{logical_id}`
-- `POST /v1/mdgw/{logical_id}/reload`
-- `POST /v1/mdgw/{logical_id}/issue-bootstrap-token`
+- `POST /v1/topology/services/mdgw`
+- `GET /v1/topology/services/mdgw/{logical_id}`
+- `POST /v1/topology/services/mdgw/{logical_id}/reload`
+- `POST /v1/topology/services/mdgw/{logical_id}/issue-bootstrap-token`
 
 ```mermaid
 sequenceDiagram
@@ -545,14 +1244,11 @@ sequenceDiagram
     participant MDGW as zk-rtmd-gw-svc
     participant KV as NATS KV
 
-    U->>P: POST /v1/mdgw
+    U->>P: POST /v1/topology/services/mdgw
     P->>DB: create logical instance + mdgw policy/default config
     P-->>U: logical_id + bootstrap token reference
 
-    Note over U,MDGW: deployment image/manifests already managed by DevOps
-    U->>P: POST /v1/ops/restart {logical_id: logical_id, action: start}
-    P->>R: start RTMD gateway runtime
-    R-->>P: runtime start accepted
+    Note over U,MDGW: deployment image/manifests and process/container startup are managed outside Pilot
     MDGW->>P: zk.bootstrap.register(token, logical_id, instance_type=mdgw)
     P->>DB: load mdgw runtime config and policy/default profile
     P-->>MDGW: registration grant + config
@@ -569,10 +1265,10 @@ Goal:
 
 Required control-plane endpoints:
 
-- `POST /v1/strategies`
-- `PUT /v1/strategies/{strategy_key}`
-- `GET /v1/strategies/{strategy_key}`
-- `POST /v1/strategies/{strategy_key}/validate`
+- `POST /v1/bot/strategies`
+- `PUT /v1/bot/strategies/{strategy_key}`
+- `GET /v1/bot/strategies/{strategy_key}`
+- `POST /v1/bot/strategies/{strategy_key}/validate`
 
 ```mermaid
 sequenceDiagram
@@ -581,7 +1277,7 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant Ref as Refdata Service
 
-    U->>P: POST /v1/strategies
+    U->>P: POST /v1/bot/strategies
     P->>DB: store strategy definition + runtime config
     P->>DB: store account/OMS bindings and execution policy
     alt symbols configured
@@ -597,12 +1293,36 @@ Goal:
 
 - claim or release a live strategy execution
 
+Execution ownership rule:
+
+- Pilot owns singleton enforcement and `execution_id` allocation
+- runtime orchestration and runtime bootstrap are separate steps
+- regardless of how the process is launched, the engine must perform the normal
+  `zk.bootstrap.register` flow itself
+- bootstrap binds the engine to an already-created execution claim and returns the assigned
+  `execution_id` plus effective runtime config
+
+Startup modes:
+
+- self-bootstrap
+  - an already deployed engine process starts on its own and calls normal bootstrap/register
+- Pilot-initiated bootstrap
+  - Pilot asks the runtime orchestrator to launch the engine process
+  - the launched engine then performs the same normal bootstrap/register flow itself
+
+Boundary rule:
+
+- the runtime orchestrator may start or stop the process/container/pod
+- the runtime orchestrator does not replace service bootstrap or service registration
+- the engine remains responsible for authenticating to Pilot, fetching config, and registering
+  itself in KV
+
 Required control-plane endpoints:
 
-- `POST /v1/strategy-executions/start`
-- `POST /v1/strategy-executions/stop`
-- `GET /v1/strategy-executions/{execution_id}`
-- `GET /v1/strategies/{strategy_key}/executions`
+- `POST /v1/bot/executions/start`
+- `POST /v1/bot/executions/{execution_id}/stop`
+- `GET /v1/bot/executions/{execution_id}`
+- `GET /v1/bot/strategies/{strategy_key}/executions`
 
 ```mermaid
 sequenceDiagram
@@ -613,25 +1333,28 @@ sequenceDiagram
     participant E as zk-engine-svc
     participant KV as NATS KV
 
-    U->>P: POST /v1/strategy-executions/start
+    U->>P: POST /v1/bot/executions/start
     P->>DB: validate strategy enabled and singleton policy
     P->>DB: allocate execution_id and runtime profile
-    P->>R: start engine runtime for strategy binding
-    R-->>P: runtime start accepted
+    opt Pilot-initiated startup
+        P->>R: start engine runtime for strategy binding
+        R-->>P: runtime start accepted
+    end
     P-->>U: execution claim accepted
 
-    E->>P: start/claim bootstrap + runtime config fetch
+    Note over E,P: engine may have been launched by Pilot/orchestrator or may self-bootstrap
+    E->>P: zk.bootstrap.register(token, logical_id, instance_type=engine, pending execution claim)
+    P->>DB: bind bootstrap to pre-created execution claim
     P-->>E: execution_id + config + registration grant
     E->>KV: register svc.engine.<strategy_key>
     P->>KV: observe live registration
     P-->>U: execution running
 
-    U->>P: POST /v1/strategy-executions/stop
-    P->>E: StopStrategy or finalize workflow
-    E->>KV: delete svc.engine.<strategy_key>
-    E->>P: finalize execution stop
+    U->>P: POST /v1/bot/executions/{execution_id}/stop
+    P->>DB: resolve execution_id to runtime/logical binding
+    P->>R: stop engine runtime for execution_id
+    R-->>P: runtime stop accepted
     P->>DB: mark execution stopped
-    P->>R: stop engine runtime if needed
     P-->>U: execution stopped
 ```
 
@@ -639,7 +1362,7 @@ sequenceDiagram
 
 Goal:
 
-- change refdata lifecycle state, for example block/disable an instrument
+- change refdata lifecycle state, for example disable an instrument
 
 Required control-plane endpoints:
 
@@ -656,7 +1379,7 @@ sequenceDiagram
     participant N as NATS
     participant C as SDK/Consumers
 
-    U->>P: PATCH /v1/refdata/instruments/{instrument_id} {status: blocked}
+    U->>P: PATCH /v1/refdata/instruments/{instrument_id} {status: disabled}
     P->>Ref: apply refdata status change
     Ref->>DB: update canonical lifecycle state
     Ref->>N: publish zk.control.refdata.updated
@@ -740,21 +1463,30 @@ Pilot should not be required on the hot path when a client subscribes a new symb
 
 Recommended split:
 
-- clients publish live subscription interest directly into a dedicated KV space such as `zk.rtmd.subs.v1`
+- clients publish live subscription interest directly into a dedicated KV space such as `zk-rtmd-subs-v1`
 - RTMD gateways watch that live interest and react quickly
 - Pilot watches the same live interest for observability and policy enforcement
 
 Pilot responsibilities:
 
-- maintain defaults / allowlists / disables
+- materialize `cfg.mdgw_subscription` policy/default rows into Pilot-owned RTMD interest where
+  operator policy wants baseline subscriptions
 - inspect current RTMD subscription topology
-- publish control overrides or reloads when operator policy changes
+- adjust or withdraw Pilot-owned RTMD interest when operator policy changes
 - expose admin APIs for subscription inspection and management
+
+Normal-source rule:
+
+- Pilot should behave as a normal source of RTMD subscription interest
+- Pilot may create, refresh, or remove its own interest records
+- Pilot should not directly delete or unsubscribe another runtime client’s live interest record
+- effective upstream unsubscribe should happen only when the last active interest for that stream is
+  gone
 
 Separation rule:
 
-- `zk.svc.registry.v1` remains the service discovery/liveness bucket
-- `zk.rtmd.subs.v1` is used for live RTMD subscription leases
+- `zk-svc-registry-v1` remains the service discovery/liveness bucket
+- `zk-rtmd-subs-v1` is used for live RTMD subscription leases
 
 Pilot triggers reconciliation through:
 

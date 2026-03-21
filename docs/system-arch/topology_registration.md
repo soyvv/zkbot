@@ -82,18 +82,24 @@ Claims:
 Token properties:
 
 - signed by Pilot key (JWT/PASETO)
-- short lifetime recommended
+- normal expiry and rotation policy
 - revocable in Pilot DB
 
-Bootstrap output (issued by Pilot on first registration):
+Current bootstrap output:
 
 - `registration_grant`:
-  - scoped NATS credential for one KV key (or strict key prefix)
   - `kv_key` (e.g. `svc.gw.<gw_id>`)
-  - `lock_key` (e.g. `lock.gw.<gw_id>`)
+  - `lock_key` (currently returned as reserved/compatibility metadata)
   - `owner_session_id`
   - `lease_ttl_ms`
-  - `grant_expiry_ms`
+  - `instance_id` (engines only)
+
+Simplification rule for now:
+
+- the current contract does not depend on scoped per-key runtime credentials
+- `lock_key` may still be present on the wire, but it is not the active ownership mechanism today
+- duplicate ownership is enforced by Pilot session checks plus CAS updates on `kv_key`
+- stronger credential scoping and extra ownership keys are later hardening topics
 
 ## 4. Registration Flow
 
@@ -108,7 +114,7 @@ Bootstrap output (issued by Pilot on first registration):
    - topology constraints and bindings
    - duplicate policy for active session
 4. Pilot returns:
-   - `registration_grant` (scoped KV write credential + lock/session metadata)
+   - `registration_grant` (`kv_key` + session metadata, with reserved compatibility fields)
    - any type-specific runtime config required for startup
 5. Instance writes registry entry directly to KV and starts direct heartbeat loop.
 
@@ -141,21 +147,22 @@ For strategies, this should be interpreted as:
 Duplicate checks happen at two levels:
 
 - bootstrap time (Pilot): reject duplicate active topology session
-- runtime KV updates: enforce ownership with `lock_key` + CAS
+- runtime KV updates: enforce ownership with CAS on `kv_key`
 
 Optional controlled takeover:
 
 - requires explicit `takeover=true` + privileged claim or operator action
 - old session is fenced and expires
 
-This provides immediate detection of duplicate token usage and lock-level fencing during runtime.
+This provides immediate detection of duplicate token usage and runtime fencing without requiring a
+second ownership key.
 
 ## 6. Heartbeat + Lease (Direct KV)
 
 After registration:
 
-- instance renews `lock_key` and service `kv_key` directly in NATS KV
-- updates use CAS and must carry matching `owner_session_id`
+- instance renews the service `kv_key` directly in NATS KV
+- updates use CAS and must carry matching session ownership metadata
 - if CAS fails, instance is fenced and must re-bootstrap with Pilot
 - stale sessions expire automatically on lease timeout
 
@@ -163,21 +170,19 @@ Registry entries are valid only while lease is active.
 
 ## 7. Registry Integration
 
-Two implementation options:
+Current implementation direction:
 
-- Option A (preferred): Pilot bootstrap + direct KV writes by instance using scoped grant.
-- Option B: Pilot bootstrap + registrar-managed writes.
+- Pilot bootstrap + direct KV writes by instance
+- CAS heartbeat on `kv_key`
 
-Option A keeps Pilot out of steady-state and avoids heartbeat SPOF concerns.
+This keeps Pilot out of steady-state and avoids heartbeat SPOF concerns.
 
 ## 8. Bootstrap Contract (NATS Request/Reply)
 
 NATS subjects:
 
 - `zk.bootstrap.register` (required)
-- `zk.bootstrap.reissue` (optional)
 - `zk.bootstrap.deregister` (optional)
-- `zk.bootstrap.sessions.query` (optional admin query)
 
 `zk.bootstrap.register` request fields:
 
@@ -192,11 +197,18 @@ NATS subjects:
 - `kv_key`
 - `lock_key`
 - `lease_ttl_ms`
-- `scoped_runtime_credential`
+- `instance_id`
 - `server_time_ms`
 - `status` / `error`
 
 All bootstrap operations are NATS request/reply so runtime instances only need `ZK_NATS_URL` to start.
+
+Later hardening topics:
+
+- `zk.bootstrap.reissue`
+- `zk.bootstrap.sessions.query`
+- scoped runtime credentials
+- active `lock_key` ownership path
 
 ## 9. Data Model Additions
 
@@ -222,7 +234,8 @@ Audit records should include:
 - never log full token values
 - store only token hash or `jti` for audit/revocation
 - enforce strict clock sync (NTP) for exp/iat validation
-- scope runtime KV credentials to exact `kv_key`/`lock_key` subjects only
+- if stricter runtime KV credentials are introduced later, scope them to exact `kv_key`/`lock_key`
+  subjects only
 
 ## 11. Operational Simplicity
 
@@ -231,8 +244,8 @@ Operator workflow:
 1. define topology in Pilot UI/API
 2. issue token per logical instance
 3. first start: service bootstraps with Pilot and obtains registration grant
-4. subsequent restarts/relocations: service reuses grant to register/heartbeat directly in KV
-5. duplicates are blocked by bootstrap policy and KV lock fencing
+4. service registers and heartbeats directly in KV using the granted `kv_key`
+5. duplicates are blocked by bootstrap policy and KV CAS fencing
 
 This keeps onboarding and restart workflows simple while preserving strict control.
 

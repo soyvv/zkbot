@@ -40,8 +40,8 @@ Query semantics:
 
 Dynamic interest state:
 
-- live service discovery stays in `zk.svc.registry.v1`
-- live RTMD subscription leases live in `zk.rtmd.subs.v1`
+- live service discovery stays in `zk-svc-registry-v1`
+- live RTMD subscription leases live in `zk-rtmd-subs-v1`
 
 TODO checklist:
 
@@ -279,8 +279,9 @@ create table cfg.instance_token (
 
 create index idx_instance_token_logical on cfg.instance_token(logical_id, status);
 
--- MDGW subscription management — written by Pilot admin UI
--- MDGW reads this table on startup and on zk.control.mdgw.<venue>.reload
+-- MDGW subscription management — Pilot-owned baseline interest / defaults
+-- Pilot may materialize these rows into Pilot-owned leases in zk-rtmd-subs-v1
+-- MDGW should treat them as Pilot's own interest source, not as authority to delete other leases
 create table cfg.mdgw_subscription (
   subscription_id  bigserial primary key,
   venue            text not null,

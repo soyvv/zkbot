@@ -1,5 +1,53 @@
 # Architecture Design Decisions — zkbot
 
+## Pilot / Engine execution bootstrap (2026-03-21)
+
+### Strategy startup supports both self-bootstrap and Pilot-initiated launch
+
+For strategy execution runtimes, two startup modes are valid:
+
+- self-bootstrap
+  - an already deployed engine process starts by itself and calls the normal
+    `zk.bootstrap.register` flow
+- Pilot-initiated launch
+  - Pilot asks the runtime orchestrator to start the process/container/pod
+  - the launched engine still calls the same normal `zk.bootstrap.register` flow itself
+
+The runtime orchestrator may start or stop the runtime, but it does not replace service bootstrap.
+The engine remains responsible for authenticating to Pilot, fetching config, and registering itself
+in KV.
+
+### `execution_id` remains Pilot-owned
+
+For strategy executions, Pilot owns singleton enforcement and `execution_id` allocation.
+
+Rule:
+
+- `POST /v1/strategy-executions/start` creates the pending execution claim
+- engine bootstrap must bind to that pre-created claim
+- bootstrap returns the already assigned `execution_id` and effective runtime config
+- the engine must not allocate or negotiate a fresh independent execution during bootstrap
+
+## Bootstrap hardening scope (2026-03-21)
+
+### Phase-1 bootstrap stays minimal
+
+For the current design and implementation phase, bootstrap is intentionally limited to:
+
+- token validation
+- Pilot authorization of the logical instance
+- return of `owner_session_id`, `kv_key`, `lease_ttl_ms`, and effective runtime config
+- direct runtime registration plus CAS heartbeat on `kv_key`
+
+The current contract does not require:
+
+- scoped runtime credentials
+- a separate `lock_key`
+- `zk.bootstrap.reissue`
+- `zk.bootstrap.sessions.query`
+
+Those remain later hardening topics and should not shape phase-1 Pilot or service implementations.
+
 ## zk-trading-sdk-rs (Phase 7)
 
 ### service_type case: case-insensitive matching with lowercase contract
@@ -108,7 +156,7 @@ the stack. Key decisions:
 ### RTMD interest lease: not yet wired (gap)
 
 `TradingClient::subscribe_ticks/klines/funding/orderbook` subscribe to the correct NATS subjects
-but do NOT publish leases to `zk.rtmd.subs.v1`. `RtmdInterestManager` is implemented in
+but do NOT publish leases to `zk-rtmd-subs-v1`. `RtmdInterestManager` is implemented in
 `rtmd_sub.rs` and correct. The wiring from `TradingClient` to `RtmdInterestManager` is deferred;
 without it, the RTMD gateway will not maintain the upstream venue subscription unless another
 client has already registered a lease. This is an architectural deviation to be addressed before

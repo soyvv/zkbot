@@ -7,12 +7,12 @@ Purpose:
 - let runtime clients express market-data interest quickly
 - let RTMD gateways derive effective venue subscriptions
 - let SDKs deterministically map market-data interests to NATS subjects
-- let Pilot observe and manage policy without becoming the runtime hub
+- let Pilot observe and optionally publish its own interest without becoming the runtime hub
 
 ## Separation From Service Discovery
 
-- `zk.svc.registry.v1` is for service discovery and liveness
-- `zk.rtmd.subs.v1` is for dynamic RTMD subscription leases
+- `zk-svc-registry-v1` is for service discovery and liveness
+- `zk-rtmd-subs-v1` is for dynamic RTMD subscription leases
 
 The RTMD subscription protocol does not resolve service endpoints. It only expresses market-data
 interest and maps that interest to deterministic RTMD topics.
@@ -51,7 +51,7 @@ Each interest record should contain:
 
 Suggested KV bucket:
 
-- `zk.rtmd.subs.v1`
+- `zk-rtmd-subs-v1`
 
 Suggested KV key shape:
 
@@ -84,6 +84,7 @@ Reference-count rule:
 
 - effective upstream subscription exists while at least one unexpired lease remains for the aggregation key
 - upstream unsubscription happens only when the last lease for that key expires or is removed
+- one subscriber, including Pilot, must not directly cancel another subscriber's lease
 
 This gives:
 
@@ -107,7 +108,7 @@ This gives the SDK a direct path:
 
 1. build an RTMD interest spec using `instrument_id`
 2. resolve `instrument_id -> (venue, instrument_exch)` from refdata
-3. publish or refresh the lease in `zk.rtmd.subs.v1`
+3. publish or refresh the lease in `zk-rtmd-subs-v1`
 4. subscribe to the deterministic NATS subject for delivery
 
 Recommended helper model:
@@ -121,7 +122,7 @@ Recommended helper model:
 
 - typed RTMD interest builders
 - subject-builder helpers
-- lease create/refresh/drop helpers for `zk.rtmd.subs.v1`
+- lease create/refresh/drop helpers for `zk-rtmd-subs-v1`
 - direct NATS subscribe helpers for the mapped subject
 
 Suggested helper surface:
@@ -144,7 +145,7 @@ drop_rtmd_interest(lease: RtmdInterestLease) -> Result<()>
 
 ## RTMD Gateway Responsibilities
 
-The RTMD gateway watches `zk.rtmd.subs.v1` for its scope and:
+The RTMD gateway watches `zk-rtmd-subs-v1` for its scope and:
 
 1. groups active leases by aggregation key
 2. builds the live union of effective stream interests
@@ -158,12 +159,19 @@ Pilot is not required for these steady-state runtime updates.
 
 Pilot may:
 
-- observe `zk.rtmd.subs.v1`
+- observe `zk-rtmd-subs-v1`
 - expose topology/debug APIs over current RTMD interest
-- apply policy/default overlays
-- trigger control reloads when policy changes
+- publish and refresh Pilot-owned leases for baseline subscriptions
+- remove Pilot-owned leases when that baseline interest is no longer desired
+- trigger control reloads when related config changes
 
 Pilot should not be required for every runtime interest add/remove.
+
+Normal-source rule:
+
+- Pilot is a normal lease producer when it wants RTMD baseline subscriptions
+- Pilot may not directly delete another subscriber's live lease
+- effective unsubscribe occurs only when the aggregated lease set for that stream reaches zero
 
 ## Sequence Diagrams
 
@@ -173,7 +181,7 @@ Pilot should not be required for every runtime interest add/remove.
 sequenceDiagram
     participant TC as TradingClient
     participant RF as Refdata cache
-    participant SUBKV as zk.rtmd.subs.v1
+    participant SUBKV as zk-rtmd-subs-v1
     participant MDGW as RTMD gateway
     participant VENUE as Venue SDK / exchange
     participant NATS as NATS subjects
@@ -199,7 +207,7 @@ sequenceDiagram
 sequenceDiagram
     participant C1 as Client A
     participant C2 as Client B
-    participant SUBKV as zk.rtmd.subs.v1
+    participant SUBKV as zk-rtmd-subs-v1
     participant MDGW as RTMD gateway
     participant VENUE as Venue SDK / exchange
 
@@ -229,7 +237,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant TC as TradingClient
-    participant SUBKV as zk.rtmd.subs.v1
+    participant SUBKV as zk-rtmd-subs-v1
     participant MDGW1 as Old RTMD gateway
     participant MDGW2 as Restarted RTMD gateway
     participant VENUE as Venue SDK / exchange
@@ -253,7 +261,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant TC as TradingClient
-    participant SUBKV as zk.rtmd.subs.v1
+    participant SUBKV as zk-rtmd-subs-v1
     participant MDGW as RTMD gateway
     participant P as Pilot
 
@@ -269,10 +277,10 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant SUBKV as zk.rtmd.subs.v1
+    participant SUBKV as zk-rtmd-subs-v1
     participant A as Active RTMD gateway
     participant S as Standby RTMD gateway
-    participant REG as zk.svc.registry.v1
+    participant REG as zk-svc-registry-v1
     participant VENUE as Venue SDK / exchange
     participant NATS as NATS subjects
 

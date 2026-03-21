@@ -48,8 +48,9 @@ Pilot should not be the steady-state hub for RTMD subscription changes.
 
 The runtime model should be split into:
 
-- live subscription interest: direct, fast-moving, runtime-path state
-- Pilot policy/defaults: control-plane state for bootstrap, override, inspection, and governance
+- live subscription interest: direct, fast-moving, runtime-path state from all subscribers,
+  including Pilot when it wants baseline subscriptions
+- Pilot-owned slower control-plane state for bootstrap defaults, inspection, and governance
 
 ### Live Subscription Interest
 
@@ -59,7 +60,7 @@ not through synchronous Pilot mediation.
 Recommended shape:
 
 - per-client or per-session subscription lease records in a dedicated RTMD subscription KV bucket
-- recommended bucket: `zk.rtmd.subs.v1`
+- recommended bucket: `zk-rtmd-subs-v1`
 - each interest record carries:
   - subscriber identity
   - venue
@@ -70,8 +71,8 @@ Recommended shape:
 
 This KV space should be separate from the service registry bucket:
 
-- `zk.svc.registry.v1` for service discovery and liveness
-- `zk.rtmd.subs.v1` for dynamic RTMD subscription leases
+- `zk-svc-registry-v1` for service discovery and liveness
+- `zk-rtmd-subs-v1` for dynamic RTMD subscription leases
 
 Suggested key shape:
 
@@ -119,28 +120,37 @@ ten NATS consumers, not ten venue subscriptions.
 
 ### Pilot Role
 
-Pilot remains important, but as a control-plane authority and observer:
+Pilot remains important, but as a control-plane authority, observer, and optional subscription
+source:
 
 - bootstrap and topology authority
-- optional default subscription policy
-- admission / override / disable controls
+- optional baseline/default subscription source
 - global monitoring and inspection of current RTMD topology
 
-Pilot may watch the same `zk.rtmd.subs.v1` bucket and derive a global view,
-but the RTMD gateway must not depend on Pilot to notice each runtime subscription change.
+Pilot may watch the same `zk-rtmd-subs-v1` bucket and derive a global view, and it may also
+materialize Pilot-managed baseline/default rows into Pilot-owned leases in that bucket.
+
+Normal-source rule:
+
+- Pilot should use the same lease model as other subscribers for its own RTMD interests
+- Pilot may add or remove Pilot-owned leases
+- Pilot should not directly remove another subscriber's lease
+- the RTMD gateway computes the effective subscription set as the union of all active leases plus
+  local capability constraints
+- the RTMD gateway must not depend on Pilot to notice each runtime subscription change
 
 ### Effective Subscription Rule
 
 The RTMD gateway computes its effective subscription set from:
 
-1. live subscription interest for its scope
-2. Pilot-managed policy/default rows
-3. local runtime capability constraints
+1. all live subscription interest for its scope, including any Pilot-owned leases
+2. local runtime capability constraints
 
 Recommended semantics:
 
 - live subscription interest drives fast adds/removes
-- Pilot policy may force allow/deny/default behavior
+- Pilot contributes baseline/default subscriptions through its own leases rather than by directly
+  deleting or overriding other clients' leases
 - standalone RTMD gateways usually aggregate a venue-scoped union
 - embedded RTMD runtimes usually aggregate a logical-instance-scoped union
 - loss of Pilot should not prevent already-running RTMD gateways from adapting to new live subscription interest
@@ -198,10 +208,13 @@ pub trait RtmdVenueAdapter: Send + Sync {
 
 Python implementations should follow the same logical contract even if the concrete async API differs.
 
-`SubscriptionManager` should therefore merge two inputs:
+`SubscriptionManager` should therefore operate from one active runtime source:
 
-- a fast live-interest watcher
-- a slower Pilot policy/default loader
+- the live-interest watcher over `zk-rtmd-subs-v1`
+
+Pilot-managed baseline/default rows should be materialized into Pilot-owned leases before they reach
+the runtime subscription manager. The main RTMD runtime contract should not depend on a second
+independent subscription source inside the gateway.
 
 ## Query API
 
@@ -306,7 +319,7 @@ Initial goal:
 Failure behavior:
 
 - if the RTMD gateway fails, the stream pauses until a replacement starts
-- subscribers keep their `zk.rtmd.subs.v1` leases alive
+- subscribers keep their `zk-rtmd-subs-v1` leases alive
 - the replacement gateway rebuilds the effective interest set from KV and resubscribes upstream
 
 This is the minimum correct model.
@@ -323,7 +336,7 @@ Takeover model:
 
 - active gateway owns `svc.mdgw.<logical_id>`
 - standby does not publish RTMD payloads while passive
-- on active loss, standby claims ownership, rebuilds upstream subscriptions from `zk.rtmd.subs.v1`, and starts publishing
+- on active loss, standby claims ownership, rebuilds upstream subscriptions from `zk-rtmd-subs-v1`, and starts publishing
 
 This improves recovery time without introducing duplicate publishers in normal operation.
 

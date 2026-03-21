@@ -44,6 +44,12 @@ Pilot subscribes to:
 7. If engine: allocate `instance_id`.
 8. Return `owner_session_id`, `kv_key`, `lock_key`, `lease_ttl_ms`, and optional `instance_id`.
 
+Current enforcement note:
+
+- `lock_key` is still returned on the wire and stored in Pilot DB for compatibility
+- the active ownership/fencing mechanism today is CAS heartbeat on `kv_key`
+- the current implementation does not use a separate live `lock_key` update path
+
 `handle_deregister` currently:
 
 1. Looks up session metadata by `owner_session_id`.
@@ -173,6 +179,7 @@ sequenceDiagram
     end
     P->>DB: insert mon.active_session(status='active')
     P-->>S: grant(owner_session_id, kv_key, lock_key, lease_ttl_ms, instance_id)
+    Note over P,S: `lock_key` is currently reserved metadata; CAS heartbeat uses `kv_key`
 
     S->>KV: put(kv_key, registration)
     KV-->>R: Put(kv_key)

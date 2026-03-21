@@ -247,9 +247,7 @@ Bootstrap registration is NATS request/reply, so instances only need `ZK_NATS_UR
 | Subject | Request | Response |
 |---|---|---|
 | `zk.bootstrap.register` | `BootstrapRegisterRequest` | `BootstrapRegisterResponse` |
-| `zk.bootstrap.reissue` | `BootstrapReissueRequest` | `BootstrapRegisterResponse` |
 | `zk.bootstrap.deregister` | `BootstrapDeregisterRequest` | `CommandAck` |
-| `zk.bootstrap.sessions.query` | `BootstrapSessionsQueryRequest` | `BootstrapSessionsQueryResponse` |
 
 `zk.bootstrap.register` request fields:
 - `token`
@@ -262,14 +260,18 @@ Bootstrap registration is NATS request/reply, so instances only need `ZK_NATS_UR
 - `kv_key`
 - `lock_key`
 - `lease_ttl_ms`
+- `instance_id` (engines only)
 - `server_time_ms`
 - `status` / `error`
 
 Implementation note:
 
-- the current implementation returns ownership/session metadata and does not depend on a
-  scoped runtime credential
-- stricter per-key runtime credentials remain a possible later hardening step
+- the current implementation returns `lock_key` and `instance_id` on the wire
+- `lock_key` is currently compatibility/reserved metadata; active ownership/fencing is enforced by
+  CAS heartbeat on `kv_key`
+- the current design does not depend on scoped runtime credentials
+- reissue flows, admin session-query subjects, stricter runtime credential scoping, and active
+  `lock_key` enforcement remain later hardening topics
 
 ## 3. NATS Topics
 

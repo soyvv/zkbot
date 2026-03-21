@@ -39,10 +39,10 @@ Each service instance uses a scoped NATS identity (JWT/NKey or equivalent accoun
 Workload services:
 - `PUB`: normal event subjects
 - `SUB`: event streams they consume
-- `SUB`: `$KV.zk.svc.registry.v1.>` (watch/read only)
+- `SUB`: `$KV.zk-svc-registry-v1.>` (watch/read only)
 - runtime registration grant allows `PUB` only to:
-  - `$KV.zk.svc.registry.v1.<kv_key>`
-  - `$KV.zk.svc.registry.v1.<lock_key>`
+  - `$KV.zk-svc-registry-v1.<kv_key>`
+  - `$KV.zk-svc-registry-v1.<lock_key>`
 
 Pilot/bootstrap service:
 - validates topology token

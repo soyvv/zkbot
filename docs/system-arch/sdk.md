@@ -123,7 +123,7 @@ For RTMD:
 1. accept a client RTMD interest in terms of `instrument_id`
 2. resolve `instrument_id -> (venue, instrument_exch)` from refdata
 3. build the deterministic RTMD subject from the resolved transport fields
-4. publish or refresh an RTMD interest lease in `zk.rtmd.subs.v1`
+4. publish or refresh an RTMD interest lease in `zk-rtmd-subs-v1`
 5. subscribe directly to the deterministic `zk.rtmd.*` subject
 
 No Pilot lookup or service-discovery lookup is needed for subject construction.
