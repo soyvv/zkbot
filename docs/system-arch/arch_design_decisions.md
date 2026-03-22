@@ -1,5 +1,21 @@
 # Architecture Design Decisions — zkbot
 
+## KvReconciler: periodic sweep for TTL-expired keys (2026-03-22)
+
+NATS KV `max_age` TTL expiry does not emit DELETE/PURGE watch events to KV watchers.
+This means `KvReconciler.isKvLive()` returns stale `true` for keys that expired via TTL
+(e.g. after an ungraceful shutdown where the heartbeat stops but no explicit delete is sent).
+
+Fix: added a periodic sweep (every 15s) that iterates the `live` set and calls `kv.get(key)`
+for each entry. If the key no longer exists, it is removed from `live` and `onKvLost()` is
+called to fence the corresponding session.
+
+Without this sweep, a crashed service's session stays `active` in `mon.active_session`
+indefinitely, blocking re-registration (Pilot returns `DUPLICATE`).
+
+Detection timeline for ungraceful shutdown: KV TTL expiry (max_age=45s) + sweep interval
+(15s) = ~60s worst case.
+
 ## Pilot / Engine execution bootstrap (2026-03-21)
 
 ### Strategy startup supports both self-bootstrap and Pilot-initiated launch
@@ -47,6 +63,29 @@ The current contract does not require:
 - `zk.bootstrap.sessions.query`
 
 Those remain later hardening topics and should not shape phase-1 Pilot or service implementations.
+
+## Manifest-driven config management and runtime introspection (2026-03-22)
+
+For bootstrap-managed services, desired config should be managed through manifest/schema contracts
+and live config should be inspectable from the runtime.
+
+Rule:
+
+- venue-backed services such as GW and MDGW use the venue integration manifest/schema
+- non-venue bootstrap-managed services such as OMS and engine use an equivalent service-kind
+  manifest/schema contract
+- Pilot validates desired config against that contract before persistence
+- the manifest/schema contract also classifies reloadable vs restart-required fields
+- every bootstrap-managed runtime exposes a default `GetCurrentConfig` style query returning the
+  effective config currently loaded by the process
+- `GetCurrentConfig` must redact raw secret material
+
+Pilot uses this combination to:
+
+- render config-authoring forms
+- compare desired config vs live effective config
+- surface drift
+- decide whether reload or restart is required
 
 ## zk-trading-sdk-rs (Phase 7)
 

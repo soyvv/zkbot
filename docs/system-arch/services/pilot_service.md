@@ -263,12 +263,18 @@ Design note:
 
 Design note:
 
-- for gateway and RTMD onboarding, Pilot should load the venue integration manifest and the
-  relevant config schema to discover supported config types, capabilities, and UI form metadata
+- for every bootstrap-managed runtime, Pilot should load the manifest/schema contract for that
+  service kind to discover supported config types, capabilities, reload/restart hints, and UI form
+  metadata
+- venue-backed services such as gateway and RTMD should use the venue integration manifest and the
+  relevant config schema
+- non-venue services such as OMS and bot/engine should use a service-kind manifest/schema contract
 - Pilot should use that manifest/schema data to render and validate onboarding/config forms
 - Pilot should persist only the validated chosen configuration into control-plane tables
 - the manifest/schema is the source for config shape; Pilot DB remains the source of truth for the
   actual configured instances
+- every bootstrap-managed runtime should expose a default `GetCurrentConfig` query so Pilot can
+  inspect live effective config, show drift, and decide whether reload or restart is needed
 
 ### 5. Refdata management
 
@@ -391,7 +397,10 @@ Recommended split:
 Config/restart rule:
 
 - config changes are written to DB-backed control-plane state
+- Pilot should compare DB desired state to runtime-reported effective config through a standard
+  `GetCurrentConfig` path
 - running services may detect drift between in-memory runtime config and DB desired state
+- reload vs restart should be classified from manifest/schema metadata for the service kind
 - the operator decides when to issue reload or restart
 - config management and restart operations should remain separate concerns
 
@@ -1326,6 +1335,8 @@ Manifest/config rule:
 - the manifest/schema should drive the rendered config fields, supported capability toggles, and
   validation rules
 - submitted gateway config should be validated against the same schema before Pilot stores it
+- gateway should expose `GetCurrentConfig` so Pilot can compare desired config to the currently
+  loaded effective config and classify reload vs restart
 
 Required control-plane endpoints:
 
@@ -1365,6 +1376,15 @@ sequenceDiagram
 Goal:
 
 - create and enable an OMS runtime with account bindings and gateway topology
+
+Manifest/config rule:
+
+- Pilot should load the OMS manifest/schema contract during onboarding and config editing
+- the manifest/schema should drive rendered config fields, validation, and reload vs restart
+  classification
+- submitted OMS config should be validated against the same schema before Pilot stores it
+- OMS should expose `GetCurrentConfig` so Pilot can compare desired config to the currently loaded
+  effective config and show drift
 
 Required control-plane endpoints:
 
@@ -1409,6 +1429,8 @@ Manifest/config rule:
 - the manifest/schema should drive the rendered config fields, supported RTMD channel/profile
   options, and validation rules
 - submitted RTMD config should be validated against the same schema before Pilot stores it
+- MDGW should expose `GetCurrentConfig` so Pilot can compare desired config to the currently loaded
+  effective config and classify reload vs restart
 
 Required control-plane endpoints:
 
@@ -1444,6 +1466,16 @@ sequenceDiagram
 Goal:
 
 - create a strategy definition and the control-plane config needed for future executions
+
+Manifest/config rule:
+
+- Pilot should load the bot/engine manifest/schema contract during strategy authoring and config
+  editing
+- the manifest/schema should define config shape, capability flags, and reload vs restart
+  constraints for the runtime
+- submitted bot/engine config should be validated against the same schema before Pilot stores it
+- the engine runtime should expose `GetCurrentConfig` so Pilot can compare desired execution/runtime
+  config to the live effective config before recommending reload or restart
 
 Required control-plane endpoints:
 

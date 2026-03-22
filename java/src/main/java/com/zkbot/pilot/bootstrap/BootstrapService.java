@@ -164,6 +164,9 @@ public class BootstrapService implements SmartLifecycle {
             log.info("bootstrap: registered logical_id='{}' session={} kv_key='{}' instance_id={}",
                     req.getLogicalId(), sessionId, kvKey, instanceId);
 
+            // 6. Load runtime config from DB
+            String runtimeConfig = repository.getRuntimeConfig(req.getLogicalId());
+
             reply(msg, BootstrapRegisterResponse.newBuilder()
                     .setOwnerSessionId(sessionId)
                     .setKvKey(kvKey)
@@ -172,6 +175,8 @@ public class BootstrapService implements SmartLifecycle {
                     .setInstanceId(instanceId)
                     .setScopedCredential("")
                     .setStatus("OK")
+                    .setRuntimeConfig(runtimeConfig != null ? runtimeConfig : "{}")
+                    .setServerTimeMs(System.currentTimeMillis())
                     .build());
 
         } catch (Exception e) {

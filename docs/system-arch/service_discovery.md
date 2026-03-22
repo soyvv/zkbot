@@ -137,6 +137,21 @@ Recommended split:
 - the runtime service retrieves secret material directly from Vault using its workload identity
 - Vault remains the source of truth for credentials and API secrets
 
+Manifest/config contract:
+
+- the service-specific config payload returned by bootstrap should already have been validated by
+  Pilot against the manifest/schema contract for that service kind
+- venue-backed services use the venue integration manifest/schema
+- other bootstrap-managed services such as OMS and engine should use an equivalent service manifest
+  or schema contract
+- Pilot stores the desired config; the runtime receives and applies the effective config
+
+Runtime introspection contract:
+
+- every bootstrap-managed runtime should expose a default `GetCurrentConfig` style query
+- Pilot uses that to compare desired config against the currently loaded effective config
+- the introspection payload must redact secret material
+
 This keeps service discovery generic while preventing Pilot from becoming a secret-distribution hub.
 
 Configuration policy:
@@ -151,6 +166,8 @@ Practical consequence for bootstrap:
 - a successful registration response may include effective config and secret references
 - the service should not proceed to live registration until required Vault-backed secrets have been fetched
 - failure to read required secrets should fail startup before the service becomes live in KV
+- later reload/restart decisions should be based on manifest/schema metadata plus runtime
+  `GetCurrentConfig`, not on bootstrap request fields alone
 
 ## Sequence Diagrams
 

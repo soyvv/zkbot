@@ -198,6 +198,7 @@ create table cfg.logical_instance (
   tenant           text,
   enabled          boolean not null default true,
   metadata         jsonb not null default '{}'::jsonb,
+  runtime_config   jsonb not null default '{}'::jsonb,
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now()
 );

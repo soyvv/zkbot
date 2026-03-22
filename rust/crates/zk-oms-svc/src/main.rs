@@ -384,14 +384,33 @@ async fn main() -> anyhow::Result<()> {
     );
     let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg_proto);
 
-    let mut registration = ServiceRegistration::register_direct(
-        &js,
-        kv_key,
-        kv_value,
-        Duration::from_secs(cfg.kv_heartbeat_secs),
-    )
-    .await
-    .expect("failed to register in NATS KV");
+    let mut registration = if cfg.bootstrap_token.is_empty() {
+        ServiceRegistration::register_direct(
+            &js,
+            kv_key,
+            kv_value,
+            Duration::from_secs(cfg.kv_heartbeat_secs),
+        )
+        .await
+        .expect("failed to register in NATS KV")
+    } else {
+        info!("registering via Pilot bootstrap");
+        let mut runtime_info = std::collections::HashMap::new();
+        runtime_info.insert("grpc_address".into(), grpc_address.clone());
+        ServiceRegistration::register_with_pilot(
+            &nats_client,
+            &js,
+            &cfg.bootstrap_token,
+            &cfg.oms_id,
+            &cfg.instance_type,
+            &cfg.env,
+            runtime_info,
+            kv_value,
+            Duration::from_secs(cfg.kv_heartbeat_secs),
+        )
+        .await
+        .expect("Pilot registration failed — is Pilot running?")
+    };
     info!(
         kv_key = registration.grant().kv_key,
         session_id = registration.grant().owner_session_id,

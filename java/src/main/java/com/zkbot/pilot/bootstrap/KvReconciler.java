@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,6 +23,7 @@ public class KvReconciler implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(KvReconciler.class);
     private static final String REGISTRY_BUCKET = "zk-svc-registry-v1";
+    private static final long SWEEP_INTERVAL_MS = 15_000;
 
     private final Connection natsConnection;
     private final BootstrapRepository repository;
@@ -131,10 +133,18 @@ public class KvReconciler implements SmartLifecycle {
 
                 subscription = kv.watchAll(watcher);
 
-                // Block until thread is interrupted or connection drops
+                // Periodic sweep: detect keys that expired via max_age TTL
+                // (TTL expiry does not emit watch events in NATS JetStream)
+                long lastSweep = System.currentTimeMillis();
                 while (running && natsConnection.getStatus() == Connection.Status.CONNECTED) {
                     //noinspection BusyWait
                     Thread.sleep(1000);
+
+                    long now = System.currentTimeMillis();
+                    if (now - lastSweep >= SWEEP_INTERVAL_MS && snapshotDone[0]) {
+                        lastSweep = now;
+                        sweepExpiredKeys(kv);
+                    }
                 }
 
             } catch (InterruptedException e) {
@@ -156,6 +166,22 @@ public class KvReconciler implements SmartLifecycle {
                     } catch (Exception ignored) {
                     }
                 }
+            }
+        }
+    }
+
+    private void sweepExpiredKeys(KeyValue kv) {
+        List<String> snapshot = List.copyOf(live);
+        for (String key : snapshot) {
+            try {
+                KeyValueEntry entry = kv.get(key);
+                if (entry == null) {
+                    live.remove(key);
+                    log.info("reconciler: sweep detected expired key '{}'", key);
+                    onKvLost(key);
+                }
+            } catch (Exception e) {
+                log.warn("reconciler: sweep error checking '{}': {}", key, e.getMessage());
             }
         }
     }

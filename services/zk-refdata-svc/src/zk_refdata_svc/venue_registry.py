@@ -2,7 +2,7 @@
 
 Resolves refdata loaders from venue-integrations manifests instead of
 hardcoded class imports. Falls back gracefully when a venue has no
-manifest (FileNotFoundError) or no refdata capability (ValueError).
+manifest (FileNotFoundError) or no refdata capability (VenueCapabilityNotFound).
 """
 
 from __future__ import annotations
@@ -17,6 +17,10 @@ import yaml
 from loguru import logger
 
 _DEFAULT_INTEGRATIONS_DIR: pathlib.Path | None = None
+
+
+class VenueCapabilityNotFound(Exception):
+    """Venue manifest exists but does not declare the requested capability."""
 
 
 def _integrations_dir() -> pathlib.Path:
@@ -73,7 +77,8 @@ def resolve_refdata_loader(venue: str, config: dict | None = None) -> Any:
 
     Raises:
         FileNotFoundError: no manifest for this venue
-        ValueError: missing/invalid refdata capability or bad entrypoint format
+        VenueCapabilityNotFound: manifest exists but has no refdata capability
+        ValueError: invalid refdata capability config (wrong language, bad entrypoint, etc.)
         jsonschema.ValidationError: config fails schema validation
     """
     manifest = load_manifest(venue)
@@ -82,7 +87,7 @@ def resolve_refdata_loader(venue: str, config: dict | None = None) -> Any:
     capabilities = manifest.get("capabilities", {})
     refdata_cap = capabilities.get("refdata")
     if refdata_cap is None:
-        raise ValueError(f"venue {venue!r} manifest has no 'refdata' capability")
+        raise VenueCapabilityNotFound(f"venue {venue!r} manifest has no 'refdata' capability")
 
     language = refdata_cap.get("language", "")
     if language != "python":

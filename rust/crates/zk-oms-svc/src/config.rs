@@ -73,6 +73,19 @@ pub struct OmsSvcConfig {
     #[serde(default = "default_gw_kv_prefix")]
     pub gateway_kv_prefix: String,
 
+    // ── Pilot bootstrap ─────────────────────────────────────────────────
+    /// Bootstrap token for Pilot registration. Empty = direct mode (default).
+    #[serde(default)]
+    pub bootstrap_token: String,
+
+    /// Instance type for Pilot registration (default "OMS").
+    #[serde(default = "default_instance_type_oms")]
+    pub instance_type: String,
+
+    /// Environment tag for Pilot registration (default "dev").
+    #[serde(default = "default_env")]
+    pub env: String,
+
     // ── Periodic task intervals ────────────────────────────────────────────
     /// Order resync interval in seconds (default 60).
     #[serde(default = "default_resync_interval_secs")]
@@ -140,6 +153,12 @@ fn default_kv_heartbeat_secs() -> u64 {
 }
 fn default_gw_kv_prefix() -> String {
     "svc.gw".into()
+}
+fn default_instance_type_oms() -> String {
+    "OMS".into()
+}
+fn default_env() -> String {
+    "dev".into()
 }
 fn default_resync_interval_secs() -> u64 {
     60

@@ -35,7 +35,7 @@ class BootstrapServiceTest {
 
     @BeforeEach
     void setUp() {
-        props = new PilotProperties("nats://localhost:4222", "test", "pilot_test", 60);
+        props = new PilotProperties("nats://localhost:4222", "test", "pilot_test", 60, null);
         service = new BootstrapService(natsConnection, repository, tokenService, kvReconciler, props);
     }
 

@@ -25,3 +25,16 @@ values (
   now() + interval '365 days'
 )
 on conflict (token_jti) do nothing;
+
+-- Dev bootstrap token for gw_sim_1 (plaintext token = "dev-gw-token-1").
+-- Token hash: sha256("dev-gw-token-1") — verified by Pilot on registration.
+insert into cfg.instance_token (token_jti, logical_id, instance_type, token_hash, status, expires_at)
+values (
+  'dev-gw-token-jti-1',
+  'gw_sim_1',
+  'GW',
+  encode(sha256('dev-gw-token-1'::bytea), 'hex'),
+  'active',
+  now() + interval '365 days'
+)
+on conflict (token_jti) do nothing;

@@ -24,6 +24,7 @@ pilot:
   env: ${ZK_ENV:dev}
   pilot-id: ${ZK_PILOT_ID:pilot_dev_1}
   lease-ttl-minutes: 60
+  venue-integrations-root: ${ZK_VENUE_INTEGRATIONS_ROOT:}
 
 management:
   endpoints:

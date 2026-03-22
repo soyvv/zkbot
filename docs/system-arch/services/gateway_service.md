@@ -420,6 +420,14 @@ The effective config should contain:
 
 It should also contain adaptor-specific runtime config.
 
+Manifest/config rule:
+
+- the adaptor-specific desired config should be validated by Pilot against the venue manifest's
+  `gw_config.schema.json`
+- the manifest should also classify reloadable vs restart-required fields for the gateway runtime
+- Pilot remains the source of truth for desired config; the gateway applies the effective config it
+  was given at bootstrap or reload time
+
 Adaptor-specific runtime config covers:
 
 - venue REST/WS endpoints
@@ -495,6 +503,23 @@ Preferred model:
 - dev: bootstrap or seed scripts populate that same schema
 
 This keeps the runtime path consistent while still allowing lightweight developer setup.
+
+### Runtime Config Introspection
+
+The gateway should expose a default `GetCurrentConfig` style query.
+
+Purpose:
+
+- let Pilot retrieve the currently loaded effective gateway config
+- compare desired config in Pilot against the live effective config
+- surface operator-visible drift
+- support reload vs restart decisions
+
+Response guidance:
+
+- return normalized effective config plus metadata such as `loaded_at`, config revision, and
+  optional config hash
+- return secret references if needed, but never raw secret material
 
 ## Registration
 

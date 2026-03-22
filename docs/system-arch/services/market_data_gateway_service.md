@@ -19,6 +19,22 @@ Responsibilities:
 The bootstrap flow should follow the shared contract in
 [Bootstrap And Runtime Config](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/bootstrap_and_runtime_config.md).
 
+Manifest/config rule:
+
+- the desired MDGW config should be validated by Pilot against the venue manifest's
+  `rtmd_config.schema.json`
+- the manifest/schema should also classify reloadable vs restart-required fields
+- Pilot remains the source of truth for desired config; the runtime applies the effective config
+  received at bootstrap or reload time
+
+Runtime introspection rule:
+
+- MDGW should expose a default `GetCurrentConfig` style query
+- the response should return the normalized effective runtime config currently loaded by the process
+- Pilot uses that to compare desired vs live config, surface drift, and decide whether reload or
+  restart is needed
+- raw secret values must not be returned
+
 ## Registration
 
 RTMD gateways use the generic registry contract. The service-specific meaning is carried in Pilot

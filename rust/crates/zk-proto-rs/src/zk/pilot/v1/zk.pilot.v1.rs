@@ -52,6 +52,12 @@ pub struct BootstrapRegisterResponse {
     pub status: ::prost::alloc::string::String,
     #[prost(string, tag="8")]
     pub error_message: ::prost::alloc::string::String,
+    /// JSON-encoded service-specific config (venue_config for GW/MDGW, account bindings for OMS, etc.)
+    #[prost(string, tag="9")]
+    pub runtime_config: ::prost::alloc::string::String,
+    /// server timestamp for clock-skew detection
+    #[prost(int64, tag="10")]
+    pub server_time_ms: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct BootstrapDeregisterRequest {

@@ -89,7 +89,7 @@ cloning of the full OMS state.
 
 OMS startup should:
 
-1. load config from PostgreSQL
+1. bootstrap with Pilot and receive effective runtime config
 2. warm-load order, balance, and position state from Redis
 3. discover bound gateways from KV
 4. reconcile gateway state through query calls
@@ -99,6 +99,26 @@ OMS startup should:
 
 Warm start plus reconcile is required so OMS can recover fast from process restarts without treating
 Redis as the final authority.
+
+## Config Management
+
+OMS should follow the same manifest-driven config management model as other bootstrap-managed
+services.
+
+Rules:
+
+- Pilot owns the desired OMS config
+- the desired config should be validated against an OMS manifest/schema contract before persistence
+- the manifest/schema should define config shape, capability flags, and reloadable vs
+  restart-required fields
+- OMS applies the effective config returned by Pilot during bootstrap or reload
+
+Runtime introspection rule:
+
+- OMS should expose a default `GetCurrentConfig` style query
+- the response should return the normalized effective runtime config currently loaded by the process
+- Pilot uses that to compare desired vs live config and decide whether reload or restart is needed
+- secret material must be redacted
 
 ## State And Event Flow
 
@@ -138,6 +158,11 @@ OMS notes:
 - NATS topics for order, balance, position, and system events
 - Redis for fast operational state
 - PostgreSQL for config lookup
+
+Recommended control/query addition:
+
+- `GetCurrentConfig`
+  - returns current effective OMS config plus config metadata for Pilot drift inspection
 
 ## Registration
 

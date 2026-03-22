@@ -14,6 +14,14 @@ Bootstrap is the control-plane step that:
 
 This rule applies across gateway, OMS, engine, market data gateway, and other managed services.
 
+All bootstrap-managed services should also follow one shared config-management contract:
+
+- Pilot owns the desired runtime config
+- the desired config is validated against a manifest/schema contract for that service kind
+- the runtime applies that desired config as its effective config after bootstrap or reload
+- the runtime exposes a default `GetCurrentConfig` style query so Pilot can inspect the live effective
+  config
+
 ## Rationale
 
 Using one bootstrap model reduces service-specific startup logic and keeps the control-plane
@@ -67,6 +75,58 @@ It may include:
 - `secret_ref`
 
 The service should switch to this config as its effective runtime configuration after bootstrap.
+
+### 3. Manifest-Driven Desired Config
+
+The desired config shape should be defined by a manifest/schema contract, not by ad hoc UI forms or
+service-local environment variables.
+
+Recommended rule:
+
+- every bootstrap-managed service kind should declare a config manifest
+- venue-backed services such as `gw`, `mdgw`, and refdata should use the venue integration manifest
+- non-venue services such as `oms`, `engine`, and other managed runtimes should use a service-kind
+  manifest/schema contract with the same logical purpose
+
+The manifest/schema contract should define:
+
+- supported config fields and their types
+- defaults and enum values where appropriate
+- capability flags
+- which fields are reloadable vs restart-required
+- which fields are secret references vs ordinary config
+
+Pilot should use this manifest/schema contract to:
+
+- render config authoring forms
+- validate desired config before persistence
+- classify drift and change impact
+- decide whether a change can be applied by reload or requires restart
+
+### 4. Runtime Config Introspection
+
+Every bootstrap-managed runtime should expose a default `GetCurrentConfig` style query.
+
+Purpose:
+
+- let Pilot inspect the currently loaded effective runtime config
+- compare desired config in control-plane storage against live effective config
+- expose operator-visible drift information
+- support reload/restart decisions
+
+Recommended response contents:
+
+- normalized effective config payload
+- service/runtime config revision or version if available
+- `loaded_at`
+- `config_source`
+- reloadability metadata if the runtime knows it
+- optional config hash
+
+Security rule:
+
+- `GetCurrentConfig` must redact secret material
+- secret references may be returned, but raw secret values must not be returned
 
 ## Bootstrap Token Decision
 
@@ -146,6 +206,23 @@ The recommended shutdown sequence is:
 
 Hard shutdown is handled by KV lease loss and Pilot reconciliation, not by a special service-local
 contract.
+
+## Drift And Restart Policy
+
+Pilot should compare:
+
+- desired config from control-plane storage
+- current effective config from the runtime `GetCurrentConfig` query
+
+Decision rule:
+
+- if there is no material diff, Pilot should not trigger change
+- if the diff is within fields marked reloadable by the manifest/schema contract, Pilot may issue
+  reload
+- if the diff touches restart-required fields, Pilot should surface restart-required state and let
+  the operator trigger restart explicitly
+
+Pilot should not infer reload vs restart from UI heuristics alone.
 
 ## Notes
 

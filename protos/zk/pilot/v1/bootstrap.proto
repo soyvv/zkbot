@@ -28,6 +28,8 @@ message BootstrapRegisterResponse {
     string scoped_credential = 6;  // NATS cred string; empty in dev/direct mode
     string status            = 7;  // "OK" | "TOKEN_EXPIRED" | "DUPLICATE" | "NO_INSTANCE_ID_AVAILABLE" | "ERROR"
     string error_message     = 8;
+    string runtime_config    = 9;  // JSON-encoded service-specific config (venue_config for GW/MDGW, account bindings for OMS, etc.)
+    int64  server_time_ms    = 10; // server timestamp for clock-skew detection
 }
 
 message BootstrapDeregisterRequest {

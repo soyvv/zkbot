@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from zk_refdata_svc.venue_registry import (
+    VenueCapabilityNotFound,
     load_manifest,
     manifest_supports_sessions,
     resolve_refdata_loader,
@@ -87,7 +88,7 @@ def test_resolve_loader_missing_refdata_capability(tmp_path: pathlib.Path):
     (venue_dir / "manifest.yaml").write_text(yaml.dump(manifest))
 
     set_integrations_dir(tmp_path)
-    with pytest.raises(ValueError, match="no 'refdata' capability"):
+    with pytest.raises(VenueCapabilityNotFound, match="no 'refdata' capability"):
         resolve_refdata_loader("test_venue")
 
 
@@ -242,3 +243,57 @@ def test_resolve_loader_schema_validated_when_config_is_none(tmp_path: pathlib.P
     # config=None should still be validated against schema as {}
     with pytest.raises(jsonschema.ValidationError):
         resolve_refdata_loader("test_venue")
+
+
+# ---------------------------------------------------------------------------
+# _resolve_loader fallback behavior
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_loader_fallback_only_on_missing_manifest_or_capability(tmp_path: pathlib.Path):
+    """Broken manifest (bad entrypoint) must NOT fall back to legacy loaders."""
+    from zk_refdata_svc.jobs.refresh_refdata import _resolve_loader
+
+    # Create a venue with a manifest that has a broken entrypoint
+    venue_dir = tmp_path / "test_venue"
+    venue_dir.mkdir()
+    manifest = {
+        "venue": "test_venue",
+        "version": 1,
+        "capabilities": {
+            "refdata": {
+                "language": "python",
+                "entrypoint": "python:nonexistent.module:Loader",
+            }
+        },
+    }
+    (venue_dir / "manifest.yaml").write_text(yaml.dump(manifest))
+
+    set_integrations_dir(tmp_path)
+    # Should raise ValueError (broken entrypoint), not silently fall back
+    with pytest.raises(ValueError, match="could not import module"):
+        _resolve_loader("test_venue")
+
+
+def test_resolve_loader_falls_back_when_no_manifest():
+    """Venues without manifests should fall back to legacy VENUE_LOADERS."""
+    from zk_refdata_svc.jobs.refresh_refdata import _resolve_loader
+
+    # "no_such_venue" has no manifest and no legacy loader → returns None
+    result = _resolve_loader("no_such_venue")
+    assert result is None
+
+
+def test_resolve_loader_falls_back_when_no_refdata_capability(tmp_path: pathlib.Path):
+    """Venues with manifest but no refdata capability should fall back."""
+    from zk_refdata_svc.jobs.refresh_refdata import _resolve_loader
+
+    venue_dir = tmp_path / "test_venue"
+    venue_dir.mkdir()
+    manifest = {"venue": "test_venue", "version": 1, "capabilities": {"gw": {}}}
+    (venue_dir / "manifest.yaml").write_text(yaml.dump(manifest))
+
+    set_integrations_dir(tmp_path)
+    # No refdata capability, no legacy loader either → returns None (fell back)
+    result = _resolve_loader("test_venue")
+    assert result is None

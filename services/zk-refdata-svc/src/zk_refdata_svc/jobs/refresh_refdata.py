@@ -38,10 +38,10 @@ async def refresh_refdata(
 def _resolve_loader(venue_name: str, config: dict | None = None):
     """Try manifest-driven resolution first, then fall back to old registry."""
     try:
-        from zk_refdata_svc.venue_registry import resolve_refdata_loader
+        from zk_refdata_svc.venue_registry import resolve_refdata_loader, VenueCapabilityNotFound
 
         return resolve_refdata_loader(venue_name, config)
-    except (FileNotFoundError, ValueError) as e:
+    except (FileNotFoundError, VenueCapabilityNotFound) as e:
         logger.debug(f"manifest resolution failed for {venue_name!r}: {e}, trying legacy registry")
     # Fall back to hardcoded VENUE_LOADERS for venues not yet in venue-integrations.
     from zk_refdata_svc.loaders import VENUE_LOADERS

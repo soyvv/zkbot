@@ -164,6 +164,23 @@ The engine should follow the common config split:
 
 The engine should not treat local env/file settings as the authoritative strategy runtime config.
 
+Manifest/config rule:
+
+- Pilot should validate desired engine/bot config against a bot/engine manifest/schema contract
+- that contract should define runtime config shape, capability flags, and reloadable vs
+  restart-required fields
+- the engine should apply the effective config received from Pilot rather than treating local
+  runtime files/env as the source of truth
+
+Runtime introspection rule:
+
+- the engine should expose a default `GetCurrentConfig` style query
+- the response should return the normalized effective runtime config currently loaded by the
+  execution process, plus metadata such as `loaded_at` and config revision if available
+- Pilot uses that response to compare desired vs live config and to classify drift before reload or
+  restart
+- raw secret values must not be returned
+
 ## Startup Model
 
 1. claim execution from Pilot
@@ -309,6 +326,11 @@ Primary use cases:
 - queue depth, lag, and degraded reasons
 - pause/resume state
 - recent control-plane timestamps such as startup, last reconnect, and last successful OMS sync
+
+Recommended default query:
+
+- `GetCurrentConfig`
+  - returns the effective runtime config currently loaded by the engine for Pilot drift inspection
 
 Design rule:
 

@@ -164,15 +164,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg_proto);
 
-        let reg = zk_infra_rs::service_registry::ServiceRegistration::register_direct(
-            &js,
-            kv_key.clone(),
-            kv_value,
-            std::time::Duration::from_secs(15),
-        )
-        .await
-        .expect("failed to register in NATS KV");
-        info!(kv_key, "registered in NATS KV");
+        let reg = if cfg.bootstrap_token.is_empty() {
+            let r = zk_infra_rs::service_registry::ServiceRegistration::register_direct(
+                &js,
+                kv_key.clone(),
+                kv_value,
+                std::time::Duration::from_secs(15),
+            )
+            .await
+            .expect("failed to register in NATS KV");
+            info!(kv_key, "registered in NATS KV (direct)");
+            r
+        } else {
+            info!("registering via Pilot bootstrap");
+            let mut runtime_info = std::collections::HashMap::new();
+            runtime_info.insert("grpc_address".into(), grpc_address);
+            runtime_info.insert("venue".into(), cfg.venue.clone());
+            let r = zk_infra_rs::service_registry::ServiceRegistration::register_with_pilot(
+                nats,
+                &js,
+                &cfg.bootstrap_token,
+                &cfg.gw_id,
+                &cfg.instance_type,
+                &cfg.env,
+                runtime_info,
+                kv_value,
+                std::time::Duration::from_secs(15),
+            )
+            .await
+            .expect("Pilot registration failed — is Pilot running?");
+            info!(
+                kv_key = r.grant().kv_key,
+                session_id = r.grant().owner_session_id,
+                "registered via Pilot"
+            );
+            r
+        };
         Some(reg)
     } else {
         None

@@ -5,6 +5,12 @@
 The recorder service consumes OMS, strategy, and RTMD events and writes durable history and
 analytical state.
 
+Implementation direction:
+
+- service: `zk-recorder-svc`
+- stack: `Rust`
+- role: stateless high-throughput ingest
+
 ## Design Role
 
 Responsibilities:
@@ -12,8 +18,14 @@ Responsibilities:
 - Postgres-first persistence for OMS orders, fills, balances, positions, and strategy execution data
 - append-only recording for trades and strategy events
 - current-state upserts for OMS orders and execution status
-- reconciliation jobs against exchange trade history
 - optional raw event/log archival in MongoDB for debugging and short retention
+
+Non-responsibilities:
+
+- reconciliation scheduling
+- backfill orchestration
+- operator-triggered repair workflows
+- ad hoc post-trade exception handling
 
 ## Data Ownership
 
@@ -24,6 +36,9 @@ Recorder writes:
 
 It consumes NATS event streams and is not part of service discovery routing decisions beyond its
 own optional runtime registration.
+
+The recorder is the canonical hot-path writer. It should persist facts first and leave later repair
+and workflow logic to the post-trade service.
 
 ## Current Reference Implementation
 
@@ -52,7 +67,7 @@ This split is workable but creates three structural problems:
 
 ## Proposed Direction
 
-Use Postgres as the canonical store for recorder and reconciliation state.
+Use Postgres as the canonical store for recorder and post-trade state.
 
 - OMS orders and trades live in Postgres.
 - Strategy executions, strategy orders, lifecycle events, and derived execution activity live in
@@ -64,7 +79,19 @@ This keeps the query path for Pilot, account views, and recon in one durable sto
 the existing Java test schema in [`V1__schema.sql`](/Users/zzk/workspace/zklab/zkbot/java/src/test/resources/db/migration-test/V1__schema.sql)
 and execution APIs in [`ExecutionRepository.java`](/Users/zzk/workspace/zklab/zkbot/java/src/main/java/com/zkbot/pilot/bot/ExecutionRepository.java).
 
-## Service Split
+## Service Boundary
+
+The recorder is one side of the post-trade architecture, not the whole domain.
+
+Target split:
+
+- recorder service:
+  Rust, queue-consumer, canonical writer
+- post-trade service:
+  Java, scheduler/operator workflows, recon, repair, and backfill orchestration
+
+The recorder must emit or persist enough canonical state that the post-trade service never needs to
+reconstruct truth from Mongo or Redis.
 
 ### 1. OMS Recorder
 
@@ -102,17 +129,8 @@ Input streams:
 - `tq.strategy.lifecycle.*`
 - `tq.strategy.log.*`
 
-### 3. Recon Service
-
-Runs periodically and validates canonical OMS order/trade state against gateway truth.
-
-Responsibilities:
-
-- find terminal orders where order filled quantity does not match recorded fills
-- detect missing fills for orders with non-zero fill quantity
-- query gateway order trades by `exch_order_ref` and venue instrument
-- insert or repair missing fills idempotently
-- write recon outcomes, status, and backfill provenance
+Recon is intentionally not part of this service. See
+[Post-Trade Service](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/post_trade_service.md).
 
 ## Storage Model
 
@@ -149,6 +167,15 @@ Recommended additions:
 - `bot.source_binding`
   Maps `source_id` to `strategy_id`, `execution_id`, and `oms_id`. This is the join point between
   strategy-originated orders and OMS-executed fills.
+
+Recorder write ownership:
+
+- `trd.order_oms`
+- `trd.trade_oms`
+- `trd.balance_snapshot`
+- `trd.position_snapshot`
+- strategy event tables
+- `bot.source_binding`
 
 ### Why Two Shapes
 
@@ -219,51 +246,38 @@ Each fill row should include:
 - raw event jsonb or original payload jsonb when useful
 - `is_backfilled` or equivalent provenance metadata
 
-## Reconciliation Design
+## Handoff To Post-Trade Service
 
-The current recon logic compares terminal orders against aggregated Mongo trades and then replaces
-trade rows using gateway query results. Keep the same business logic, but make Postgres canonical.
+The recorder must persist enough canonical state for the Java post-trade service to operate without
+using Mongo or Redis as truth.
 
-### Recon Loop
+Required handoff fields:
 
-1. Scan recent terminal rows in `trd.order_oms`.
-2. Aggregate fills from `trd.trade_oms` by `order_id`.
-3. Compare aggregated `filled_qty` against order `filled_qty`.
-4. For mismatches or missing fills, query gateway trades using `exch_order_ref` and
-   `instrument_exch`.
-5. Upsert backfilled fills into `trd.trade_oms`.
-6. Record the outcome into `trd.trade_recon` and update order-level recon status fields.
+- terminal order status and `filled_qty`
+- `ext_order_ref`
+- `instrument_id` and `instrument_exch`
+- `account_id`, `oms_id`
+- `source_id`, `strategy_id`, `execution_id`
+- raw order snapshot jsonb for compatibility gaps
 
-### Recon Status
+The recorder may set an initial recon marker on terminal orders, but it should not own scan,
+repair, or backfill workflows.
 
-Recommended order-level fields:
+## HA And Scaling
 
-- `trade_recon_status`
-- `trade_recon_reason`
-- `last_reconciled_at`
-- `last_recon_run_id`
+Recorder HA is based on stateless replicas and idempotent writes.
 
-Recommended statuses:
+- multiple replicas consume via NATS queue groups
+- duplicate delivery is expected and must be harmless
+- unique keys and `upsert` semantics prevent duplicate trades/orders
+- Postgres is canonical; in-memory caches are advisory only
+- Redis may be used temporarily for enrichment compatibility, not truth
 
-- `PENDING`
-- `MATCHED`
-- `MISSING_FILL`
-- `QTY_MISMATCH`
-- `BACKFILLED`
-- `FAILED`
+Failure model:
 
-### Backfill Write Rules
-
-Do not delete and replace canonical trade history by default.
-
-Instead:
-
-- insert missing fills idempotently
-- mark repaired rows with provenance metadata
-- only hard-replace a venue's fill set for an order when the venue semantics make duplicate or
-  mutable trade IDs unavoidable, and record that replacement explicitly
-
-This avoids making recon destructive.
+- if a replica crashes mid-message, replay must not create duplicate fills
+- if enrichment metadata is unavailable, persist the core fact and mark enrichment partial rather
+  than dropping the event
 
 ## Mongo Usage
 
@@ -312,6 +326,7 @@ Those endpoints can be backed by Postgres instead of the current Mongo-only reco
 ### Phase 3
 
 - port recon scans and gateway backfill to Postgres
+- hand recon ownership to the Java post-trade service
 - mark Postgres as the canonical source for order/trade consistency checks
 - switch account and execution history APIs to Postgres
 
@@ -333,3 +348,4 @@ Those endpoints can be backed by Postgres instead of the current Mongo-only reco
 
 - [Data Layer](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/data_layer.md)
 - [API Contracts](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/api_contracts.md)
+- [Post-Trade Service](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/post_trade_service.md)

@@ -5,7 +5,8 @@
         gw-check gw-build gw-test gw-run gw-okx-demo \
         rtmd-sim-run rtmd-okx-demo \
         refdata-run pilot-run engine-run \
-        pilot-java-build pilot-java-test pilot-java-run
+        pilot-java-build pilot-java-test pilot-java-run \
+        oms-run-pilot gw-run-pilot
 
 gen:
 	buf generate protos
@@ -119,6 +120,20 @@ oms-run-release: ## Run OMS locally (release build; requires dev stack up: make 
 	           RUST_LOG=zk_oms_svc=debug,info \
 	           cargo run --release -p zk-oms-svc
 
+oms-run-pilot: ## Run OMS with Pilot bootstrap (requires: make dev-up + make pilot-java-run)
+	cd rust && ZK_OMS_ID=oms_dev_1 \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_REDIS_URL=redis://localhost:6379 \
+	           ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
+	           ZK_GRPC_PORT=50051 \
+	           ZK_GATEWAY_KV_PREFIX=svc.gw \
+	           ZK_RISK_CHECK_ENABLED=false \
+	           ZK_BOOTSTRAP_TOKEN=dev-oms-token-1 \
+	           ZK_INSTANCE_TYPE=OMS \
+	           ZK_ENV=dev \
+	           RUST_LOG=zk_oms_svc=debug,zk_infra_rs=debug,info \
+	           cargo run -p zk-oms-svc
+
 oms-redis-clear: ## Delete all oms:{OMS_ID}:* keys from dev Redis (OMS_ID default: oms_dev_1)
 	./scripts/clear_oms_redis.sh
 
@@ -143,6 +158,22 @@ gw-run: ## Run gateway simulator locally (requires NATS: make dev-up)
 	           ZK_ADMIN_GRPC_PORT=51052 \
 	           ZK_ENABLE_ADMIN_CONTROLS=true \
 	           RUST_LOG=zk_gw_svc=debug,info \
+	           cargo run -p zk-gw-svc
+
+gw-run-pilot: ## Run gateway simulator with Pilot bootstrap (requires: make dev-up + make pilot-java-run)
+	cd rust && ZK_GW_ID=gw_sim_1 \
+	           ZK_VENUE=simulator \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_ACCOUNT_ID=9001 \
+	           ZK_MATCH_POLICY=fcfs \
+	           ZK_MOCK_BALANCES="BTC:10,USDT:100000,ETH:50" \
+	           ZK_GRPC_PORT=51051 \
+	           ZK_ADMIN_GRPC_PORT=51052 \
+	           ZK_ENABLE_ADMIN_CONTROLS=true \
+	           ZK_BOOTSTRAP_TOKEN=dev-gw-token-1 \
+	           ZK_INSTANCE_TYPE=GW \
+	           ZK_ENV=dev \
+	           RUST_LOG=zk_gw_svc=debug,zk_infra_rs=debug,info \
 	           cargo run -p zk-gw-svc
 
 gw-okx-demo: ## Run OKX gateway against demo account (requires NATS: make dev-up)

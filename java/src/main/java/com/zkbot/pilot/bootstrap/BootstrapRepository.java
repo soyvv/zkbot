@@ -203,6 +203,21 @@ public class BootstrapRepository {
                 logicalId);
     }
 
+    // ── Runtime config ─────────────────────────────────────────────────────
+
+    public String getRuntimeConfig(String logicalId) {
+        return jdbc.query(
+                "SELECT runtime_config::text FROM cfg.logical_instance WHERE logical_id = ?",
+                rs -> rs.next() ? rs.getString(1) : null,
+                logicalId);
+    }
+
+    public void setRuntimeConfig(String logicalId, String configJson) {
+        jdbc.update(
+                "UPDATE cfg.logical_instance SET runtime_config = ?::jsonb, updated_at = now() WHERE logical_id = ?",
+                configJson, logicalId);
+    }
+
     // ── Registration audit ─────────────────────────────────────────────────
 
     public void recordAudit(String tokenJti, String logicalId, String instanceType,

@@ -37,6 +37,14 @@ pub struct GwSvcConfig {
     pub admin_grpc_port: u16,
     /// Whether admin controls are enabled.
     pub enable_admin_controls: bool,
+
+    // ── Pilot bootstrap ────────────────────────────────────────────────
+    /// Bootstrap token for Pilot registration. Empty = direct mode (default).
+    pub bootstrap_token: String,
+    /// Instance type for Pilot registration (default "GW").
+    pub instance_type: String,
+    /// Environment tag for Pilot registration (default "dev").
+    pub env: String,
 }
 
 impl GwSvcConfig {
@@ -93,6 +101,10 @@ impl GwSvcConfig {
             enable_admin_controls: std::env::var("ZK_ENABLE_ADMIN_CONTROLS")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
+            bootstrap_token: std::env::var("ZK_BOOTSTRAP_TOKEN").unwrap_or_default(),
+            instance_type: std::env::var("ZK_INSTANCE_TYPE")
+                .unwrap_or_else(|_| "GW".into()),
+            env: std::env::var("ZK_ENV").unwrap_or_else(|_| "dev".into()),
         }
     }
 
