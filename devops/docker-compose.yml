@@ -158,6 +158,32 @@ services:
       gw-sim:
         condition: service_started
 
+  pilot-java:
+    profiles: ["java"]   # started by 'make pilot-java-run' or 'docker compose --profile java up'
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile.pilot-java
+    image: zk-pilot-java:dev
+    ports:
+      - "8091:8090"     # 8091 to avoid conflict with Python pilot on 8090
+    environment:
+      ZK_NATS_URL: "nats://nats:4222"
+      ZK_PG_URL: "jdbc:postgresql://postgres:5432/zkbot"
+      ZK_PG_USER: "zk"
+      ZK_PG_PASS: "zk"
+      ZK_REDIS_URL: "redis://redis:6379"
+      ZK_ENV: "dev"
+      ZK_PILOT_ID: "pilot_dev_1"
+      ZK_HTTP_PORT: "8090"
+      SPRING_PROFILES_ACTIVE: "dev"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   refdata-svc:
     build:
       context: ..

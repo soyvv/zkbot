@@ -1,0 +1,32 @@
+server:
+  port: ${ZK_HTTP_PORT:8090}
+
+spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  datasource:
+    url: ${ZK_PG_URL:jdbc:postgresql://localhost:5432/zkbot}
+    username: ${ZK_PG_USER:zk}
+    password: ${ZK_PG_PASS:zk}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  data:
+    redis:
+      url: ${ZK_REDIS_URL:redis://localhost:6379}
+
+pilot:
+  nats-url: ${ZK_NATS_URL:nats://localhost:4222}
+  env: ${ZK_ENV:dev}
+  pilot-id: ${ZK_PILOT_ID:pilot_dev_1}
+  lease-ttl-minutes: 60
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

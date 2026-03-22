@@ -1,0 +1,18 @@
+spring:
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    locations: classpath:db/migration-test
+  data:
+    redis:
+      url: redis://localhost:6379
+  security:
+    user:
+      name: admin
+      password: admin
+
+pilot:
+  nats-url: nats://localhost:4222
+  env: test
+  pilot-id: pilot_test_1
+  lease-ttl-minutes: 60

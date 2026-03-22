@@ -422,6 +422,40 @@ Current bootstrap implementation note:
 
 Suggested Pilot REST APIs should be grouped by top-level resource area.
 
+### 0. `/v1/meta`
+
+- `GET /v1/meta`
+  - return UI-facing metadata needed to render common dropdowns, filters, and form option lists
+- `GET /v1/meta?domains=manual,accounts,topology,bot`
+  - return only metadata subsets needed by the requested UI domains
+
+Metadata response rule:
+
+- the metadata API is a UI-support surface, not a new business authority
+- it should return dropdown-ready option rows with `value` and `label`, plus small UI-relevant
+  attributes such as `disabled`, `live`, `enabled`, `venue`, `oms_id`, or `tags`
+- stable option sets should be grouped under `enums`
+- control-plane or runtime-derived selectable references should be grouped under `refs`
+- Pilot should aggregate and shape these lists so the UI does not need to fan out into many
+  resource endpoints just to render filter bars and form selects
+
+Recommended metadata contents:
+
+- `enums`
+  - order sides and order types
+  - account, bot, service, alert, and instrument lifecycle statuses
+  - service families and topology view modes
+  - risk states and alert severities/categories
+- `refs`
+  - OMS options
+  - venue options
+  - account options
+  - gateway options
+  - MDGW options
+  - bot/strategy options
+  - instrument options
+  - market options
+
 ### 1. `/v1/manual`
 
 - `POST /v1/manual/orders:preview`
@@ -688,6 +722,154 @@ References:
   [API Contracts](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/api_contracts.md)
 - bootstrap/session semantics:
   [Service Discovery](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/service_discovery.md)
+
+### 0. Meta
+
+Primary request sketches:
+
+```json
+{
+  "domains": ["manual", "accounts", "topology", "bot"]
+}
+```
+
+Primary response sketches:
+
+```json
+{
+  "as_of": "2026-03-21T10:14:22Z",
+  "env": "dev",
+  "enums": {
+    "service_families": [
+      { "value": "bot", "label": "Bot" },
+      { "value": "oms", "label": "OMS" },
+      { "value": "gw", "label": "Gateway" },
+      { "value": "mdgw", "label": "MDGW" },
+      { "value": "refdata", "label": "Refdata" }
+    ],
+    "topology_views": [
+      { "value": "graph", "label": "Graph" },
+      { "value": "table", "label": "Table" }
+    ],
+    "account_statuses": [
+      { "value": "active", "label": "Active" },
+      { "value": "disabled", "label": "Disabled" }
+    ],
+    "bot_statuses": [
+      { "value": "running", "label": "Running" },
+      { "value": "paused", "label": "Paused" },
+      { "value": "fenced", "label": "Fenced" },
+      { "value": "stopped", "label": "Stopped" }
+    ],
+    "order_sides": [
+      { "value": "BUY", "label": "Buy" },
+      { "value": "SELL", "label": "Sell" }
+    ],
+    "order_types": [
+      { "value": "MARKET", "label": "Market" },
+      { "value": "LIMIT", "label": "Limit" },
+      { "value": "POST_ONLY", "label": "Post Only" }
+    ],
+    "risk_states": [
+      { "value": "ok", "label": "OK" },
+      { "value": "warn", "label": "Warn" },
+      { "value": "danger", "label": "Danger" }
+    ],
+    "alert_severities": [
+      { "value": "LOW", "label": "Low" },
+      { "value": "MED", "label": "Medium" },
+      { "value": "HIGH", "label": "High" }
+    ],
+    "instrument_statuses": [
+      { "value": "active", "label": "Active" },
+      { "value": "disabled", "label": "Disabled" },
+      { "value": "deprecated", "label": "Deprecated" }
+    ]
+  },
+  "refs": {
+    "oms": [
+      {
+        "value": "oms_okx",
+        "label": "oms_okx",
+        "live": true,
+        "enabled": true,
+        "venue": "OKX"
+      }
+    ],
+    "venues": [
+      { "value": "OKX", "label": "OKX" },
+      { "value": "BINANCE", "label": "Binance" }
+    ],
+    "accounts": [
+      {
+        "value": "123",
+        "label": "123 / okx-main-123",
+        "venue": "OKX",
+        "oms_id": "oms_okx",
+        "gw_id": "gw_okx_123",
+        "status": "active",
+        "risk": "warn"
+      }
+    ],
+    "gateways": [
+      {
+        "value": "gw_okx_123",
+        "label": "gw_okx_123",
+        "venue": "OKX",
+        "oms_id": "oms_okx",
+        "live": true,
+        "enabled": true
+      }
+    ],
+    "mdgws": [
+      {
+        "value": "mdgw_okx",
+        "label": "mdgw_okx",
+        "venue": "OKX",
+        "live": true,
+        "enabled": true
+      }
+    ],
+    "bots": [
+      {
+        "value": "mm_btc",
+        "label": "mm_btc",
+        "strategy_key": "mm_btc",
+        "oms_id": "oms_okx",
+        "venue": "OKX",
+        "status": "running",
+        "type": "market_making"
+      }
+    ],
+    "instruments": [
+      {
+        "value": "BTC-USDT.OKX",
+        "label": "BTC-USDT / OKX",
+        "symbol": "BTC-USDT",
+        "venue": "OKX",
+        "type": "SPOT",
+        "status": "active",
+        "market": "crypto/24x7"
+      }
+    ],
+    "markets": [
+      {
+        "value": "OKX:crypto/24x7",
+        "label": "OKX / crypto/24x7",
+        "venue": "OKX"
+      }
+    ]
+  }
+}
+```
+
+Reference model:
+
+- `enums` are Pilot-owned API constants and UI-facing controlled vocabularies
+- `refs` are aggregated from control-plane tables and live discovery/runtime state
+- the metadata API should return dropdown-ready labels rather than raw DB rows
+- the UI should use this endpoint for filter bars and select controls instead of hardcoding lists or
+  joining multiple domain endpoints for basic form rendering
 
 ### 1. Manual
 

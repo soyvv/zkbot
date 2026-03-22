@@ -4,7 +4,8 @@
         oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-run-release oms-redis-clear \
         gw-check gw-build gw-test gw-run gw-okx-demo \
         rtmd-sim-run rtmd-okx-demo \
-        refdata-run pilot-run engine-run
+        refdata-run pilot-run engine-run \
+        pilot-java-build pilot-java-test pilot-java-run
 
 gen:
 	buf generate protos
@@ -191,6 +192,25 @@ pilot-run: ## Run pilot locally (requires NATS+PG: make dev-up)
 	ZK_PILOT_ID=pilot_dev_1 \
 	ZK_HTTP_PORT=8090 \
 	uv run python -m zk_pilot.main
+
+# ── Pilot Java service ───────────────────────────────────────────────────────
+pilot-java-build: ## Build Java Pilot (Gradle)
+	cd java && ./gradlew build -x test
+
+pilot-java-test: ## Run Java Pilot tests
+	cd java && ./gradlew test
+
+pilot-java-run: ## Run Java Pilot locally (requires NATS+PG+Redis: make dev-up)
+	cd java && ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_PG_URL=jdbc:postgresql://localhost:5432/zkbot \
+	           ZK_PG_USER=zk \
+	           ZK_PG_PASS=zk \
+	           ZK_REDIS_URL=redis://localhost:6379 \
+	           ZK_ENV=dev \
+	           ZK_PILOT_ID=pilot_dev_1 \
+	           ZK_HTTP_PORT=8090 \
+	           SPRING_PROFILES_ACTIVE=dev \
+	           ./gradlew bootRun
 
 # ── Engine service ────────────────────────────────────────────────────────────
 engine-run: ## Run engine-svc locally (requires NATS+PG: make dev-up)

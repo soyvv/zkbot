@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/zkbot
+    username: zk
+    password: zk
+  data:
+    redis:
+      url: redis://localhost:6379
+
+pilot:
+  nats-url: nats://localhost:4222
+  env: dev
+  pilot-id: pilot_dev_1
