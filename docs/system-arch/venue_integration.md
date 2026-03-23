@@ -216,6 +216,15 @@ Each venue module should provide a manifest with:
 - config schema references
 - optional notes or operational caveats
 
+Authority rule:
+
+- the manifest and referenced schemas bundled under `venue-integrations/<venue>/` are the
+  authoritative contract for that venue capability
+- runtime hosts and Pilot operational schema workflows should derive from this bundled contract
+  rather than maintaining an unrelated second manifest source
+- if an operational registry copy in Pilot does not match the bundled manifest/schema version or
+  content hash, that should be treated as an error requiring sync or deployment correction
+
 Suggested manifest shape:
 
 ```yaml
@@ -281,6 +290,14 @@ pub trait VenueIntegrationRegistry {
     fn load_refdata(&self, venue: &str, cfg: serde_json::Value) -> Result<Box<dyn RefdataLoader>>;
 }
 ```
+
+Pilot integration note:
+
+- Pilot may persist an operational mirror of manifest metadata for UI, version listing, and
+  validation support
+- that operational mirror should be imported or synchronized from the bundled venue manifests
+- `/v1/schema` style APIs should be treated as the operational read surface, not the primary schema
+  authoring source for venue capabilities
 
 The important design point is not the exact Rust trait, but that all three service families resolve
 their venue-specific implementation through the same facade.

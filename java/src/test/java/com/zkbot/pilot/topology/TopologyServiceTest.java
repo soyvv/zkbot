@@ -1,6 +1,7 @@
 package com.zkbot.pilot.topology;
 
 import com.zkbot.pilot.bootstrap.TokenService;
+import com.zkbot.pilot.config.ConfigDriftService;
 import com.zkbot.pilot.config.PilotProperties;
 import com.zkbot.pilot.discovery.DiscoveryCache;
 import com.zkbot.pilot.topology.dto.ServiceNode;
@@ -32,12 +33,14 @@ class TopologyServiceTest {
     @Mock TokenService tokenService;
     @Mock PilotProperties props;
     @Mock Connection natsConnection;
+    @Mock ConfigDriftService configDriftService;
 
     TopologyService service;
 
     @BeforeEach
     void setUp() {
-        service = new TopologyService(repository, discoveryCache, tokenService, props, natsConnection);
+        service = new TopologyService(repository, discoveryCache, tokenService, props,
+                natsConnection, configDriftService);
     }
 
     // ── Workspace scoping ─────────────────────────────────────────────────
@@ -294,7 +297,7 @@ class TopologyServiceTest {
             // Use lowercase in path — stored type should be used for subject
             var result = service.reloadService("gw", "gw_1");
 
-            assertThat(result.get("subject")).isEqualTo("zk.control.GW.gw_1.reload");
+            assertThat(result.subject()).isEqualTo("zk.control.GW.gw_1.reload");
             verify(natsConnection).publish(eq("zk.control.GW.gw_1.reload"), any(byte[].class));
         }
 

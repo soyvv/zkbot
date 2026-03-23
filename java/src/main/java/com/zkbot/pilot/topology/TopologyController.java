@@ -1,12 +1,12 @@
 package com.zkbot.pilot.topology;
 
+import com.zkbot.pilot.ops.dto.RegistrationAuditEntry;
 import com.zkbot.pilot.topology.dto.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/v1/topology")
@@ -24,11 +24,11 @@ public class TopologyController {
     }
 
     @PutMapping("/bindings")
-    public Map<String, Object> upsertBinding(@RequestBody BindingRequest request) {
+    public TopologyActionResponse upsertBinding(@RequestBody BindingRequest request) {
         service.upsertBinding(request.srcType(), request.srcId(),
                 request.dstType(), request.dstId(),
                 request.enabled(), request.metadata());
-        return Map.of("status", "ok");
+        return new TopologyActionResponse("ok");
     }
 
     @GetMapping("/views")
@@ -46,6 +46,12 @@ public class TopologyController {
     public List<ServiceNode> listServices(@RequestParam(required = false) String oms_id,
                                           @RequestParam(required = false) String service_kind) {
         return service.listServices(oms_id, service_kind);
+    }
+
+    @PostMapping("/services/{serviceKind}")
+    public CreateServiceResponse createService(@PathVariable String serviceKind,
+                                                @RequestBody CreateServiceRequest request) {
+        return service.createService(serviceKind, request);
     }
 
     @GetMapping("/services/{serviceKind}")
@@ -66,32 +72,32 @@ public class TopologyController {
     }
 
     @GetMapping("/services/{serviceKind}/{logicalId}/bindings")
-    public List<Map<String, Object>> getServiceBindings(@PathVariable String serviceKind,
-                                                         @PathVariable String logicalId) {
+    public List<BindingEntry> getServiceBindings(@PathVariable String serviceKind,
+                                                  @PathVariable String logicalId) {
         return service.getServiceBindings(logicalId);
     }
 
     @GetMapping("/services/{serviceKind}/{logicalId}/audit")
-    public List<Map<String, Object>> getServiceAudit(@PathVariable String serviceKind,
-                                                      @PathVariable String logicalId,
-                                                      @RequestParam(defaultValue = "50") int limit) {
+    public List<RegistrationAuditEntry> getServiceAudit(@PathVariable String serviceKind,
+                                                        @PathVariable String logicalId,
+                                                        @RequestParam(defaultValue = "50") int limit) {
         return service.getServiceAudit(logicalId, limit);
     }
 
     @PostMapping("/services/{serviceKind}/{logicalId}/issue-bootstrap-token")
-    public Map<String, Object> issueBootstrapToken(@PathVariable String serviceKind,
-                                                    @PathVariable String logicalId) {
+    public BootstrapTokenResponse issueBootstrapToken(@PathVariable String serviceKind,
+                                                       @PathVariable String logicalId) {
         return service.issueBootstrapToken(serviceKind, logicalId);
     }
 
     @PostMapping("/services/{serviceKind}/{logicalId}/reload")
-    public Map<String, String> reloadService(@PathVariable String serviceKind,
+    public TopologyActionResponse reloadService(@PathVariable String serviceKind,
                                               @PathVariable String logicalId) {
         return service.reloadService(serviceKind, logicalId);
     }
 
     @GetMapping("/sessions")
-    public List<Map<String, Object>> listSessions(@RequestParam(required = false) String oms_id) {
+    public List<SessionResponse> listSessions(@RequestParam(required = false) String oms_id) {
         return service.listSessions(oms_id);
     }
 }

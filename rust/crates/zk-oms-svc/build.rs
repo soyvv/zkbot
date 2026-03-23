@@ -18,7 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .extern_path(".zk.oms.v1", "::zk_proto_rs::zk::oms::v1")
         .extern_path(".zk.exch_gw.v1", "::zk_proto_rs::zk::exch_gw::v1")
         .extern_path(".zk.gateway.v1", "::zk_proto_rs::zk::gateway::v1")
-        // ── Generate server stubs for OMSService ────────────────────────────
+        .extern_path(".zk.config.v1", "::zk_proto_rs::zk::config::v1")
+        // ── Generate server stubs for OMSService + ConfigIntrospectionService
         .build_server(true)
         // ── Generate client stubs for GatewayService ────────────────────────
         .build_client(true)
@@ -27,11 +28,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &format!("{proto_dir_str}/zk/oms/v1/oms_service.proto"),
                 &format!("{proto_dir_str}/zk/gateway/v1/gateway_service.proto"),
                 &format!("{proto_dir_str}/zk/gateway/v1/gateway_simulator_admin.proto"),
+                &format!("{proto_dir_str}/zk/config/v1/config.proto"),
             ],
             &[proto_dir_str],
         )?;
 
     println!("cargo:rerun-if-changed={proto_dir_str}/zk/oms");
     println!("cargo:rerun-if-changed={proto_dir_str}/zk/gateway");
+    println!("cargo:rerun-if-changed={proto_dir_str}/zk/config");
     Ok(())
 }

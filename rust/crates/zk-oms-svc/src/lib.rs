@@ -3,6 +3,7 @@
 /// The binary modules are exposed here so that `tests/` can import them
 /// without duplicating code.  This is the only purpose of this lib target.
 pub mod config;
+pub mod config_introspection;
 pub mod db;
 pub mod executor;
 pub mod grpc_handler;

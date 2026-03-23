@@ -1,7 +1,8 @@
 package com.zkbot.pilot.manual;
 
+import com.zkbot.pilot.common.SnowflakeIdGen;
 import com.zkbot.pilot.grpc.OmsGrpcClient;
-import com.zkbot.pilot.manual.dto.OrderRequest;
+import com.zkbot.pilot.manual.dto.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,7 +12,6 @@ import zk.oms.v1.Oms;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -24,15 +24,14 @@ public class ManualService {
 
     private final OmsGrpcClient omsClient;
     private final JdbcTemplate jdbc;
+    private final SnowflakeIdGen idGen;
 
-    public ManualService(OmsGrpcClient omsClient, JdbcTemplate jdbc) {
+    public ManualService(OmsGrpcClient omsClient, JdbcTemplate jdbc, SnowflakeIdGen idGen) {
         this.omsClient = omsClient;
         this.jdbc = jdbc;
+        this.idGen = idGen;
     }
 
-    /**
-     * Resolve which OMS handles a given account by querying cfg.account_binding.
-     */
     public String resolveOmsForAccount(long accountId) {
         List<String> results = jdbc.queryForList(
                 "SELECT oms_id FROM cfg.account_binding WHERE account_id = ? LIMIT 1",
@@ -43,28 +42,18 @@ public class ManualService {
         return results.get(0);
     }
 
-    /**
-     * Validate order params against instrument refdata and account config.
-     * Returns a preview map with warnings (if any).
-     */
-    public Map<String, Object> previewOrder(OrderRequest request) {
-        Map<String, Object> result = new LinkedHashMap<>();
+    public OrderPreviewResponse previewOrder(OrderRequest request) {
         List<String> warnings = new ArrayList<>();
 
-        // Look up instrument refdata
         List<Map<String, Object>> refdata = jdbc.queryForList(
                 "SELECT * FROM cfg.instrument_refdata WHERE instrument_id = ? LIMIT 1",
                 request.instrumentId());
 
         if (refdata.isEmpty()) {
-            result.put("valid", false);
-            result.put("error", "Unknown instrument: " + request.instrumentId());
-            return result;
+            return new OrderPreviewResponse(false, "Unknown instrument: " + request.instrumentId(),
+                    null, null, null, null, null, null, null, null);
         }
 
-        Map<String, Object> inst = refdata.get(0);
-
-        // Look up account-level instrument config
         List<Map<String, Object>> accountCfg = jdbc.queryForList(
                 "SELECT * FROM cfg.account_instrument_config WHERE account_id = ? AND instrument_id = ? LIMIT 1",
                 request.accountId(), request.instrumentId());
@@ -73,37 +62,23 @@ public class ManualService {
             warnings.add("No account-level instrument config found; using defaults");
         }
 
-        // Basic validations
         if (request.qty() == null || request.qty().isBlank()) {
-            result.put("valid", false);
-            result.put("error", "qty is required");
-            return result;
+            return new OrderPreviewResponse(false, "qty is required",
+                    null, null, null, null, null, null, null, null);
         }
         if ("LIMIT".equalsIgnoreCase(request.orderType()) &&
                 (request.price() == null || request.price().isBlank())) {
-            result.put("valid", false);
-            result.put("error", "price is required for LIMIT orders");
-            return result;
+            return new OrderPreviewResponse(false, "price is required for LIMIT orders",
+                    null, null, null, null, null, null, null, null);
         }
 
-        result.put("valid", true);
-        result.put("accountId", request.accountId());
-        result.put("instrumentId", request.instrumentId());
-        result.put("side", request.side());
-        result.put("orderType", request.orderType());
-        result.put("price", request.price());
-        result.put("qty", request.qty());
-        result.put("timeInForce", request.timeInForce());
-        if (!warnings.isEmpty()) {
-            result.put("warnings", warnings);
-        }
-        return result;
+        return new OrderPreviewResponse(true, null,
+                request.accountId(), request.instrumentId(), request.side(),
+                request.orderType(), request.price(), request.qty(),
+                request.timeInForce(), warnings.isEmpty() ? null : warnings);
     }
 
-    /**
-     * Build a PlaceOrderRequest proto and send to the resolved OMS.
-     */
-    public Map<String, Object> submitOrder(OrderRequest request) {
+    public OmsActionResponse submitOrder(OrderRequest request) {
         String omsId = resolveOmsForAccount(request.accountId());
         Oms.PlaceOrderRequest proto = buildPlaceOrderRequest(request);
 
@@ -111,14 +86,10 @@ public class ManualService {
                 request.accountId(), request.instrumentId(), omsId);
 
         Oms.OMSResponse resp = omsClient.placeOrder(omsId, proto);
-        return omsResponseToMap(resp, omsId);
+        return toOmsActionResponse(resp, omsId);
     }
 
-    /**
-     * Build a BatchPlaceOrdersRequest and send to the resolved OMS.
-     * All requests must belong to the same account.
-     */
-    public List<Map<String, Object>> submitBatchOrders(List<OrderRequest> requests) {
+    public List<OmsActionResponse> submitBatchOrders(List<OrderRequest> requests) {
         if (requests.isEmpty()) {
             return List.of();
         }
@@ -136,17 +107,15 @@ public class ManualService {
                 requests.size(), accountId, omsId);
 
         Oms.OMSResponse resp = omsClient.batchPlaceOrders(omsId, batch.build());
-        return List.of(omsResponseToMap(resp, omsId));
+        return List.of(toOmsActionResponse(resp, omsId));
     }
 
-    /**
-     * Cancel one or more orders for an account.
-     */
-    public Map<String, Object> cancelOrders(long accountId, List<Long> orderIds) {
+    public CancelOrdersResponse cancelOrders(long accountId, List<String> orderIds) {
         String omsId = resolveOmsForAccount(accountId);
-        List<Map<String, Object>> results = new ArrayList<>();
+        List<CancelOrdersResponse.CancelResult> results = new ArrayList<>();
 
-        for (long orderId : orderIds) {
+        for (String orderIdStr : orderIds) {
+            long orderId = Long.parseLong(orderIdStr);
             Oms.CancelOrderRequest proto = Oms.CancelOrderRequest.newBuilder()
                     .setOrderCancelRequest(Oms.OrderCancelRequest.newBuilder()
                             .setOrderId(orderId)
@@ -158,16 +127,13 @@ public class ManualService {
                     .build();
 
             Oms.OMSResponse resp = omsClient.cancelOrder(omsId, proto);
-            results.add(Map.of("orderId", orderId, "response", omsResponseToMap(resp, omsId)));
+            results.add(new CancelOrdersResponse.CancelResult(orderId, toOmsActionResponse(resp, omsId)));
         }
 
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("omsId", omsId);
-        out.put("results", results);
-        return out;
+        return new CancelOrdersResponse(omsId, results);
     }
 
-    public Map<String, Object> triggerPanic(long accountId, String omsId) {
+    public OmsActionResponse triggerPanic(long accountId, String omsId) {
         if (omsId == null || omsId.isBlank()) {
             omsId = resolveOmsForAccount(accountId);
         }
@@ -179,10 +145,10 @@ public class ManualService {
 
         log.warn("PANIC triggered for account={} via OMS={}", accountId, omsId);
         Oms.OMSResponse resp = omsClient.panic(omsId, proto);
-        return omsResponseToMap(resp, omsId);
+        return toOmsActionResponse(resp, omsId);
     }
 
-    public Map<String, Object> clearPanic(long accountId, String omsId) {
+    public OmsActionResponse clearPanic(long accountId, String omsId) {
         if (omsId == null || omsId.isBlank()) {
             omsId = resolveOmsForAccount(accountId);
         }
@@ -192,27 +158,24 @@ public class ManualService {
 
         log.info("Panic cleared for account={} via OMS={}", accountId, omsId);
         Oms.OMSResponse resp = omsClient.dontPanic(omsId, proto);
-        return omsResponseToMap(resp, omsId);
+        return toOmsActionResponse(resp, omsId);
     }
 
-    public Map<String, Object> queryOrder(long orderId, String omsId) {
+    public OrderQueryResponse queryOrder(long orderId, String omsId) {
         Oms.QueryOrderDetailRequest proto = Oms.QueryOrderDetailRequest.newBuilder()
                 .addOrderRefs(String.valueOf(orderId))
                 .build();
 
         Oms.OrderDetailResponse resp = omsClient.queryOrderDetails(omsId, proto);
-        List<Map<String, Object>> orders = new ArrayList<>();
+        List<OrderDetailEntry> orders = new ArrayList<>();
         for (Oms.Order o : resp.getOrdersList()) {
-            orders.add(orderToMap(o));
+            orders.add(toOrderDetailEntry(o));
         }
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("omsId", omsId);
-        result.put("orders", orders);
-        return result;
+        return new OrderQueryResponse(omsId, orders);
     }
 
-    public List<Map<String, Object>> queryTrades(long accountId, String omsId, int limit) {
+    public List<ManualTradeEntry> queryTrades(long accountId, String omsId, int limit) {
         if (omsId == null || omsId.isBlank()) {
             omsId = resolveOmsForAccount(accountId);
         }
@@ -224,17 +187,11 @@ public class ManualService {
                 .build();
 
         Oms.TradeDetailResponse resp = omsClient.queryTradeDetails(omsId, proto);
-        List<Map<String, Object>> trades = new ArrayList<>();
+        List<ManualTradeEntry> trades = new ArrayList<>();
         for (Oms.Trade t : resp.getTradesList()) {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("orderId", t.getOrderId());
-            m.put("instrument", t.getInstrument());
-            m.put("side", t.getBuySellType().name());
-            m.put("filledQty", t.getFilledQty());
-            m.put("filledPrice", t.getFilledPrice());
-            m.put("filledTs", t.getFilledTs());
-            m.put("accountId", t.getAccountId());
-            trades.add(m);
+            trades.add(new ManualTradeEntry(
+                    t.getOrderId(), t.getInstrument(), t.getBuySellType().name(),
+                    t.getFilledQty(), t.getFilledPrice(), t.getFilledTs(), t.getAccountId()));
         }
         return trades;
     }
@@ -251,6 +208,7 @@ public class ManualService {
 
     private Oms.OrderRequest buildOrderRequest(OrderRequest request) {
         Oms.OrderRequest.Builder builder = Oms.OrderRequest.newBuilder()
+                .setOrderId(idGen.nextId())
                 .setAccountId(request.accountId())
                 .setInstrumentCode(request.instrumentId())
                 .setBuySellType(parseSide(request.side()))
@@ -301,36 +259,19 @@ public class ManualService {
         };
     }
 
-    private static Map<String, Object> omsResponseToMap(Oms.OMSResponse resp, String omsId) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("omsId", omsId);
-        m.put("status", resp.getStatus().name());
-        m.put("timestamp", resp.getTimestamp());
-        if (!resp.getMessage().isEmpty()) {
-            m.put("message", resp.getMessage());
-        }
-        if (resp.getErrorType() != Oms.OMSErrorType.OMS_ERR_TYPE_UNSPECIFIED) {
-            m.put("errorType", resp.getErrorType().name());
-        }
-        return m;
+    private static OmsActionResponse toOmsActionResponse(Oms.OMSResponse resp, String omsId) {
+        String message = resp.getMessage().isEmpty() ? null : resp.getMessage();
+        String errorType = resp.getErrorType() != Oms.OMSErrorType.OMS_ERR_TYPE_UNSPECIFIED
+                ? resp.getErrorType().name() : null;
+        return new OmsActionResponse(omsId, resp.getStatus().name(), resp.getTimestamp(), message, errorType);
     }
 
-    private static Map<String, Object> orderToMap(Oms.Order o) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("orderId", o.getOrderId());
-        m.put("instrument", o.getInstrument());
-        m.put("side", o.getBuySellType().name());
-        m.put("status", o.getOrderStatus().name());
-        m.put("price", o.getPrice());
-        m.put("qty", o.getQty());
-        m.put("filledQty", o.getFilledQty());
-        m.put("filledAvgPrice", o.getFilledAvgPrice());
-        m.put("accountId", o.getAccountId());
-        m.put("createdAt", o.getCreatedAt());
-        m.put("updatedAt", o.getUpdatedAt());
-        if (!o.getErrorMsg().isEmpty()) {
-            m.put("errorMsg", o.getErrorMsg());
-        }
-        return m;
+    private static OrderDetailEntry toOrderDetailEntry(Oms.Order o) {
+        String errorMsg = o.getErrorMsg().isEmpty() ? null : o.getErrorMsg();
+        return new OrderDetailEntry(
+                o.getOrderId(), o.getInstrument(), o.getBuySellType().name(),
+                o.getOrderStatus().name(), o.getPrice(), o.getQty(),
+                o.getFilledQty(), o.getFilledAvgPrice(), o.getAccountId(),
+                o.getCreatedAt(), o.getUpdatedAt(), errorMsg);
     }
 }

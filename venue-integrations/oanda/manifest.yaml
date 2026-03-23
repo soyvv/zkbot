@@ -1,14 +1,31 @@
 venue: oanda
-version: 1
+schema_id: venue/oanda
+version: 2
 capabilities:
   gw:
     language: python
     entrypoint: python:oanda.gw:OandaGatewayAdaptor
     config_schema: schemas/gw_config.schema.json
+    field_descriptors:
+      - path: /secret_ref
+        secret_ref: true
+        reloadable: false
+      - path: /environment
+        reloadable: false
+      - path: /account_id
+        reloadable: false
+      - path: /api_base_url
+        reloadable: false
+      - path: /stream_base_url
+        reloadable: false
   rtmd:
     language: python
     entrypoint: python:oanda.rtmd:OandaRtmdAdaptor
     config_schema: schemas/rtmd_config.schema.json
+    field_descriptors:
+      - path: /secret_ref
+        secret_ref: true
+        reloadable: false
   refdata:
     language: python
     entrypoint: python:oanda.refdata:OandaRefdataLoader

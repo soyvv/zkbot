@@ -17,7 +17,8 @@
       "type": "string"
     },
     "secret_ref": {
-      "type": "string"
+      "type": "string",
+      "x-zk-secret-ref": true
     }
   },
   "required": ["environment", "account_id", "secret_ref"],

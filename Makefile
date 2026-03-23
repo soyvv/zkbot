@@ -1,8 +1,8 @@
 .PHONY: gen lint test build publish \
-        dev-up dev-up-full dev-down dev-reset dev-logs dev-ps dev-health dev-reset-redis dev-reset-pg \
+        dev-up dev-up-full dev-down dev-reset dev-logs dev-logs-save dev-ps dev-health dev-reset-redis dev-reset-pg \
         test-unit test-integration test-parity \
-        oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-run-release oms-redis-clear \
-        gw-check gw-build gw-test gw-run gw-okx-demo \
+        oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-run-log oms-run-release oms-redis-clear \
+        gw-check gw-build gw-test gw-run gw-run-log gw-okx-demo \
         rtmd-sim-run rtmd-okx-demo \
         refdata-run pilot-run engine-run \
         pilot-java-build pilot-java-test pilot-java-run \
@@ -34,6 +34,7 @@ publish:
 #   make dev-up-full  → start everything including oms-svc container
 #
 COMPOSE := docker compose -f devops/docker-compose.yml
+DEV_LOG_DIR ?= $(CURDIR)/devops/logs
 
 dev-up: ## Start infra only (NATS, Redis, PG, Vault, gw-sim); run OMS locally with make oms-run
 	$(COMPOSE) up -d --build
@@ -54,6 +55,9 @@ dev-reset: ## Wipe volumes (Redis/PG/NATS) and restart clean
 
 dev-logs:
 	$(COMPOSE) logs -f
+
+dev-logs-save:
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh docker-dev $(COMPOSE) logs -f --timestamps
 
 dev-ps:
 	$(COMPOSE) ps
@@ -109,6 +113,17 @@ oms-run: ## Run OMS locally (debug build; requires dev stack up: make dev-up)
 	           RUST_LOG=zk_oms_svc=debug,info \
 	           cargo run -p zk-oms-svc
 
+oms-run-log: ## Run OMS locally and persist stdout/stderr to devops/logs/oms
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh oms zsh -lc 'cd rust && ZK_OMS_ID=oms_dev_1 \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_REDIS_URL=redis://localhost:6379 \
+	           ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
+	           ZK_GRPC_PORT=50051 \
+	           ZK_GATEWAY_KV_PREFIX=svc.gw \
+	           ZK_RISK_CHECK_ENABLED=false \
+	           RUST_LOG=zk_oms_svc=debug,info \
+	           cargo run -p zk-oms-svc'
+
 oms-run-release: ## Run OMS locally (release build; requires dev stack up: make dev-up)
 	cd rust && ZK_OMS_ID=oms_dev_1 \
 	           ZK_NATS_URL=nats://localhost:4222 \
@@ -159,6 +174,19 @@ gw-run: ## Run gateway simulator locally (requires NATS: make dev-up)
 	           ZK_ENABLE_ADMIN_CONTROLS=true \
 	           RUST_LOG=zk_gw_svc=debug,info \
 	           cargo run -p zk-gw-svc
+
+gw-run-log: ## Run gateway simulator locally and persist stdout/stderr to devops/logs/gw
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh gw zsh -lc 'cd rust && ZK_GW_ID=gw_sim_1 \
+	           ZK_VENUE=simulator \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_ACCOUNT_ID=9001 \
+	           ZK_MATCH_POLICY=fcfs \
+	           ZK_MOCK_BALANCES="BTC:10,USDT:100000,ETH:50" \
+	           ZK_GRPC_PORT=51051 \
+	           ZK_ADMIN_GRPC_PORT=51052 \
+	           ZK_ENABLE_ADMIN_CONTROLS=true \
+	           RUST_LOG=zk_gw_svc=debug,info \
+	           cargo run -p zk-gw-svc'
 
 gw-run-pilot: ## Run gateway simulator with Pilot bootstrap (requires: make dev-up + make pilot-java-run)
 	cd rust && ZK_GW_ID=gw_sim_1 \

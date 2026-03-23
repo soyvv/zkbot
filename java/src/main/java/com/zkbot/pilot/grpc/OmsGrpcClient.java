@@ -89,6 +89,10 @@ public class OmsGrpcClient implements DisposableBean {
         return getStub(omsId).queryTradeDetails(request);
     }
 
+    public Oms.PositionResponse queryPosition(String omsId, Oms.QueryPositionRequest request) {
+        return getStub(omsId).queryPosition(request);
+    }
+
     public Oms.QueryBalancesResponse queryBalances(String omsId, Oms.QueryBalancesRequest request) {
         return getStub(omsId).queryBalances(request);
     }

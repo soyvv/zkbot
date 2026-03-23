@@ -176,13 +176,13 @@ impl VenueAdapter for OkxVenueAdapter {
             "sell"
         };
 
-        let ord_type =
-            if req.order_type == zk_proto_rs::zk::common::v1::BasicOrderType::OrdertypeLimit as i32
-            {
-                "limit"
-            } else {
-                "market"
-            };
+        let ord_type = if req.order_type
+            == zk_proto_rs::zk::common::v1::BasicOrderType::OrdertypeLimit as i32
+        {
+            "limit"
+        } else {
+            "market"
+        };
 
         let sz = format!("{}", req.qty);
         let px = if ord_type == "limit" {
@@ -230,9 +230,7 @@ impl VenueAdapter for OkxVenueAdapter {
             .ord_to_inst
             .get(ord_id)
             .map(|r| r.value().clone())
-            .ok_or_else(|| {
-                anyhow::anyhow!("cannot cancel: instId not found for ordId={ord_id}")
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("cannot cancel: instId not found for ordId={ord_id}"))?;
 
         match self.rest_client.cancel_order(&inst_id, ord_id).await {
             Ok(_data) => Ok(VenueCommandAck {

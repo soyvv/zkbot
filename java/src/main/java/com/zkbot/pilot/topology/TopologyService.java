@@ -1,8 +1,10 @@
 package com.zkbot.pilot.topology;
 
 import com.zkbot.pilot.bootstrap.TokenService;
+import com.zkbot.pilot.config.ConfigDriftService;
 import com.zkbot.pilot.config.PilotProperties;
 import com.zkbot.pilot.discovery.DiscoveryCache;
+import com.zkbot.pilot.ops.dto.RegistrationAuditEntry;
 import com.zkbot.pilot.topology.dto.*;
 import io.nats.client.Connection;
 import org.slf4j.Logger;
@@ -23,7 +25,6 @@ public class TopologyService {
     private static final Logger log = LoggerFactory.getLogger(TopologyService.class);
     private static final List<String> VIEW_NAMES = List.of("full", "services", "connections");
 
-    // Service families that form the OMS workspace scope
     private static final Set<String> OMS_WORKSPACE_TYPES = Set.of("OMS", "GW", "ENGINE", "REFDATA");
     private static final String TYPE_MDGW = "MDGW";
 
@@ -32,17 +33,20 @@ public class TopologyService {
     private final TokenService tokenService;
     private final PilotProperties props;
     private final Connection natsConnection;
+    private final ConfigDriftService configDriftService;
 
     public TopologyService(TopologyRepository repository,
                            DiscoveryCache discoveryCache,
                            TokenService tokenService,
                            PilotProperties props,
-                           Connection natsConnection) {
+                           Connection natsConnection,
+                           ConfigDriftService configDriftService) {
         this.repository = repository;
         this.discoveryCache = discoveryCache;
         this.tokenService = tokenService;
         this.props = props;
         this.natsConnection = natsConnection;
+        this.configDriftService = configDriftService;
     }
 
     public TopologyView getTopology(String omsId) {
@@ -64,7 +68,6 @@ public class TopologyService {
                 .map(i -> toServiceNode(i, liveState))
                 .toList();
 
-        // Only emit edges where both endpoints are in the scoped set
         List<Edge> edges = bindings.stream()
                 .filter(b -> scopedIds.contains(b.get("src_id")) && scopedIds.contains(b.get("dst_id")))
                 .map(this::toEdge)
@@ -87,7 +90,6 @@ public class TopologyService {
     }
 
     public List<ServiceNode> listServices(String omsId, String serviceKind) {
-        // Normalize to uppercase to match DB convention (OMS, GW, ENGINE, etc.)
         String normalizedKind = serviceKind != null ? serviceKind.toUpperCase() : null;
         var instances = repository.listLogicalInstances(props.env(), normalizedKind);
         var liveState = discoveryCache.getAll();
@@ -112,10 +114,9 @@ public class TopologyService {
             return null;
         }
 
-        // Validate service kind matches stored instance_type
         String storedType = (String) instance.get("instance_type");
         if (!serviceKind.equalsIgnoreCase(storedType)) {
-            return null; // controller will map to 404
+            return null;
         }
 
         boolean desiredEnabled = Boolean.TRUE.equals(instance.get("enabled"));
@@ -132,6 +133,14 @@ public class TopologyService {
         String version = reg != null ? reg.getAttrsOrDefault("version", null) : null;
         Instant lastSeenAt = reg != null ? Instant.ofEpochMilli(reg.getUpdatedAtMs()) : null;
 
+        String configDrift = null;
+        if ("online".equals(liveStatus)) {
+            var drift = configDriftService.computeDrift(logicalId, storedType);
+            if (drift != null) {
+                configDrift = drift.overallStatus();
+            }
+        }
+
         return new ServiceDetail(
                 logicalId,
                 storedType,
@@ -141,40 +150,41 @@ public class TopologyService {
                 endpoint,
                 version,
                 lastSeenAt,
-                null,
+                configDrift,
                 bindings,
                 sessions
         );
     }
 
-    public List<Map<String, Object>> getServiceBindings(String logicalId) {
-        return repository.getBindingsForService(logicalId);
+    public List<BindingEntry> getServiceBindings(String logicalId) {
+        return repository.getBindingsForService(logicalId).stream()
+                .map(TopologyService::toBindingEntry)
+                .toList();
     }
 
-    public List<Map<String, Object>> getServiceAudit(String logicalId, int limit) {
-        return repository.listRegistrationAudit(logicalId, limit);
+    public List<RegistrationAuditEntry> getServiceAudit(String logicalId, int limit) {
+        return repository.listRegistrationAudit(logicalId, limit).stream()
+                .map(TopologyService::toAuditEntry)
+                .toList();
     }
 
-    public Map<String, Object> issueBootstrapToken(String serviceKind, String logicalId) {
+    public BootstrapTokenResponse issueBootstrapToken(String serviceKind, String logicalId) {
         return tokenService.generateToken(logicalId, serviceKind, props.env(), 30);
     }
 
-    public Map<String, String> reloadService(String serviceKind, String logicalId) {
-        // Validate service exists
+    public TopologyActionResponse reloadService(String serviceKind, String logicalId) {
         var instance = repository.getLogicalInstance(logicalId);
         if (instance == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "Service not found: " + logicalId);
         }
 
-        // Validate service kind matches stored instance_type
         String storedType = (String) instance.get("instance_type");
         if (!serviceKind.equalsIgnoreCase(storedType)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "Service not found: " + serviceKind + "/" + logicalId);
         }
 
-        // Validate service is online
         var liveState = discoveryCache.getAll();
         ServiceRegistration reg = findLiveRegistration(logicalId, liveState);
         if (reg == null) {
@@ -182,43 +192,62 @@ public class TopologyService {
                     "Service is offline, cannot reload: " + logicalId);
         }
 
-        // Use stored type for NATS subject to ensure correct casing
         String subject = "zk.control." + storedType + "." + logicalId + ".reload";
         natsConnection.publish(subject, "reload".getBytes(StandardCharsets.UTF_8));
         log.info("Published reload command to subject={}", subject);
-        return Map.of(
-                "status", "dispatched",
-                "subject", subject,
-                "note", "Reload dispatched to live runtime; completion is not guaranteed");
+        return new TopologyActionResponse(
+                "dispatched",
+                subject,
+                "Reload dispatched to live runtime; completion is not guaranteed");
     }
 
-    public List<Map<String, Object>> listSessions(String omsId) {
+    public List<SessionResponse> listSessions(String omsId) {
         var sessions = repository.listActiveSessions();
         var liveState = discoveryCache.getAll();
 
-        // If OMS-scoped, derive the scoped logical service set first
         Set<String> scopedLogicalIds;
         if (omsId != null && !omsId.isBlank()) {
             var instances = repository.listLogicalInstances(props.env(), null);
             var bindings = repository.listBindings(null, null);
             scopedLogicalIds = buildOmsWorkspaceScope(omsId, instances, bindings);
         } else {
-            scopedLogicalIds = null; // no filter
+            scopedLogicalIds = null;
         }
 
         return sessions.stream()
-                .map(s -> {
-                    Map<String, Object> enriched = new LinkedHashMap<>(s);
-                    String logicalId = (String) s.get("logical_id");
-                    ServiceRegistration reg = findLiveRegistration(logicalId, liveState);
-                    enriched.put("kv_live", reg != null);
-                    return enriched;
-                })
                 .filter(s -> {
                     if (scopedLogicalIds == null) return true;
                     return scopedLogicalIds.contains(s.get("logical_id"));
                 })
+                .map(s -> {
+                    String logicalId = (String) s.get("logical_id");
+                    ServiceRegistration reg = findLiveRegistration(logicalId, liveState);
+                    return toSessionResponse(s, reg != null);
+                })
                 .toList();
+    }
+
+    private SessionResponse toSessionResponse(Map<String, Object> s, boolean kvLive) {
+        return new SessionResponse(
+                (String) s.get("owner_session_id"),
+                (String) s.get("logical_id"),
+                (String) s.get("instance_type"),
+                (String) s.get("kv_key"),
+                (String) s.get("lock_key"),
+                (String) s.get("status"),
+                toInstant(s.get("last_seen_at")),
+                toInstant(s.get("expires_at")),
+                s.get("lease_ttl_ms") != null ? ((Number) s.get("lease_ttl_ms")).longValue() : 0,
+                kvLive
+        );
+    }
+
+    private static Instant toInstant(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof Instant i) return i;
+        if (obj instanceof java.sql.Timestamp ts) return ts.toInstant();
+        if (obj instanceof java.time.OffsetDateTime odt) return odt.toInstant();
+        return null;
     }
 
     public void upsertBinding(String srcType, String srcId, String dstType, String dstId,
@@ -226,27 +255,77 @@ public class TopologyService {
         repository.upsertBinding(srcType, srcId, dstType, dstId, enabled, metadata);
     }
 
+    // --- Service onboarding ---
+
+    private static final Set<String> KNOWN_SERVICE_KINDS = Set.of("OMS", "GW", "MDGW", "ENGINE", "REFDATA");
+
+    public CreateServiceResponse createService(String serviceKind, CreateServiceRequest request) {
+        String normalizedKind = serviceKind.toUpperCase();
+        if (!KNOWN_SERVICE_KINDS.contains(normalizedKind)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Unknown service kind: " + serviceKind + ". Known: " + KNOWN_SERVICE_KINDS);
+        }
+
+        String logicalId = request.logicalId();
+        if (logicalId == null || logicalId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "logicalId is required");
+        }
+
+        if (repository.getLogicalInstance(logicalId) != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Logical instance already exists: " + logicalId);
+        }
+
+        repository.createLogicalInstance(logicalId, normalizedKind, props.env(),
+                request.metadata(), request.runtimeConfig(), request.enabled());
+
+        switch (normalizedKind) {
+            case "OMS" -> repository.createOmsInstance(logicalId);
+            case "GW" -> {
+                String venue = extractVenue(request.runtimeConfig());
+                repository.createGatewayInstance(logicalId, venue);
+            }
+            case "MDGW" -> {
+                String venue = extractVenue(request.runtimeConfig());
+                repository.createMdgwInstance(logicalId, venue);
+            }
+            case "ENGINE" -> repository.createEngineInstance(logicalId);
+        }
+
+        if (request.bindings() != null) {
+            for (var bindingSpec : request.bindings()) {
+                repository.upsertBinding(normalizedKind, logicalId,
+                        bindingSpec.dstType(), bindingSpec.dstId(),
+                        bindingSpec.enabled(), Map.of());
+            }
+        }
+
+        BootstrapTokenResponse token = tokenService.generateToken(
+                logicalId, normalizedKind, props.env(), 30);
+
+        return new CreateServiceResponse("created", logicalId, normalizedKind, token);
+    }
+
+    private static String extractVenue(Map<String, Object> runtimeConfig) {
+        if (runtimeConfig != null && runtimeConfig.containsKey("venue")) {
+            return runtimeConfig.get("venue").toString();
+        }
+        return "unknown";
+    }
+
     // --- OMS workspace scope builder ---
 
-    /**
-     * Build the OMS-scoped workspace: the selected OMS + bound GWs + bound bots +
-     * refdata services + MDGW only if subscribed/used by scoped services.
-     */
     private Set<String> buildOmsWorkspaceScope(String omsId,
                                                 List<Map<String, Object>> allInstances,
                                                 List<Map<String, Object>> allBindings) {
         Set<String> scopedIds = new LinkedHashSet<>();
-
-        // Always include the selected OMS
         scopedIds.add(omsId);
 
-        // Build a lookup: logicalId -> instanceType
         Map<String, String> typeByLogicalId = new HashMap<>();
         for (var inst : allInstances) {
             typeByLogicalId.put((String) inst.get("logical_id"), (String) inst.get("instance_type"));
         }
 
-        // Collect direct bindings of the OMS
         Set<String> directNeighbors = new HashSet<>();
         for (var binding : allBindings) {
             String srcId = (String) binding.get("src_id");
@@ -255,7 +334,6 @@ public class TopologyService {
             if (omsId.equals(dstId)) directNeighbors.add(srcId);
         }
 
-        // Include bound GWs, ENGINEs (bots), and REFDATA from direct neighbors
         for (String neighborId : directNeighbors) {
             String type = typeByLogicalId.get(neighborId);
             if (type != null && OMS_WORKSPACE_TYPES.contains(type)) {
@@ -263,18 +341,12 @@ public class TopologyService {
             }
         }
 
-        // Also include all REFDATA services in this env (always part of the workspace)
         for (var inst : allInstances) {
             if ("REFDATA".equalsIgnoreCase((String) inst.get("instance_type"))) {
                 scopedIds.add((String) inst.get("logical_id"));
             }
         }
 
-        // Include MDGW only if it is bound to any already-scoped service.
-        // NOTE: This uses binding topology as a proxy for "actively subscribed/used".
-        // True live subscription state (which GWs are actively consuming RTMD feeds)
-        // is not queryable from pilot today. When MDGW publishes subscription interest
-        // to the KV registry, this can be tightened to check live state instead.
         for (var binding : allBindings) {
             String srcId = (String) binding.get("src_id");
             String dstId = (String) binding.get("dst_id");
@@ -330,5 +402,32 @@ public class TopologyService {
             }
         }
         return null;
+    }
+
+    private static RegistrationAuditEntry toAuditEntry(Map<String, Object> row) {
+        return new RegistrationAuditEntry(
+                (String) row.get("token_jti"),
+                (String) row.get("logical_id"),
+                (String) row.get("instance_type"),
+                (String) row.get("owner_session_id"),
+                (String) row.get("decision"),
+                (String) row.get("reason"),
+                toInstant(row.get("observed_at"))
+        );
+    }
+
+    private static BindingEntry toBindingEntry(Map<String, Object> row) {
+        long bindingId = row.get("binding_id") != null ? ((Number) row.get("binding_id")).longValue()
+                : (row.get("audit_id") != null ? ((Number) row.get("audit_id")).longValue() : 0);
+        return new BindingEntry(
+                bindingId,
+                (String) row.get("src_type"),
+                (String) row.get("src_id"),
+                (String) row.get("dst_type"),
+                (String) row.get("dst_id"),
+                Boolean.TRUE.equals(row.get("enabled")),
+                toInstant(row.get("created_at")),
+                toInstant(row.get("updated_at"))
+        );
     }
 }

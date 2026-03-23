@@ -5,7 +5,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/v1/bot")
@@ -21,18 +20,18 @@ public class BotController {
 
     @PostMapping("/strategies")
     @ResponseStatus(HttpStatus.CREATED)
-    public Map<String, Object> createStrategy(@RequestBody CreateStrategyRequest request) {
+    public StrategyResponse createStrategy(@RequestBody CreateStrategyRequest request) {
         return service.createStrategy(request);
     }
 
     @PutMapping("/strategies/{strategyKey}")
-    public Map<String, Object> updateStrategy(@PathVariable String strategyKey,
-                                               @RequestBody UpdateStrategyRequest request) {
+    public StrategyResponse updateStrategy(@PathVariable String strategyKey,
+                                            @RequestBody UpdateStrategyRequest request) {
         return service.updateStrategy(strategyKey, request);
     }
 
     @GetMapping("/strategies")
-    public List<Map<String, Object>> listStrategies(
+    public List<StrategyResponse> listStrategies(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String venue,
             @RequestParam(required = false) String omsId,
@@ -42,24 +41,24 @@ public class BotController {
     }
 
     @GetMapping("/strategies/{strategyKey}")
-    public Map<String, Object> getStrategy(@PathVariable String strategyKey) {
+    public StrategyResponse getStrategy(@PathVariable String strategyKey) {
         return service.getStrategy(strategyKey);
     }
 
     @PostMapping("/strategies/{strategyKey}/validate")
-    public Map<String, Object> validateStrategy(@PathVariable String strategyKey) {
+    public ValidationResult validateStrategy(@PathVariable String strategyKey) {
         return service.validateStrategy(strategyKey);
     }
 
     @GetMapping("/strategies/{strategyKey}/executions")
-    public List<Map<String, Object>> getStrategyExecutions(
+    public List<ExecutionResponse> getStrategyExecutions(
             @PathVariable String strategyKey,
             @RequestParam(defaultValue = "50") int limit) {
         return service.getStrategyExecutions(strategyKey, limit);
     }
 
     @GetMapping("/strategies/{strategyKey}/logs")
-    public List<Map<String, Object>> getStrategyLogs(
+    public List<ExecutionResponse> getStrategyLogs(
             @PathVariable String strategyKey,
             @RequestParam(defaultValue = "100") int limit) {
         return service.getStrategyLogs(strategyKey, limit);
@@ -74,19 +73,19 @@ public class BotController {
     }
 
     @PostMapping("/executions/{executionId}/stop")
-    public Map<String, Object> stopExecution(@PathVariable String executionId,
-                                              @RequestBody(required = false) StopExecutionRequest request) {
+    public ExecutionResponse stopExecution(@PathVariable String executionId,
+                                            @RequestBody(required = false) StopExecutionRequest request) {
         String reason = request != null ? request.reason() : "api-stop";
         return service.stopExecution(executionId, reason);
     }
 
     @PostMapping("/executions/{executionId}/pause")
-    public Map<String, Object> pauseExecution(@PathVariable String executionId) {
+    public ExecutionResponse pauseExecution(@PathVariable String executionId) {
         return service.pauseExecution(executionId);
     }
 
     @PostMapping("/executions/{executionId}/resume")
-    public Map<String, Object> resumeExecution(@PathVariable String executionId) {
+    public ExecutionResponse resumeExecution(@PathVariable String executionId) {
         return service.resumeExecution(executionId);
     }
 
@@ -96,7 +95,7 @@ public class BotController {
     }
 
     @GetMapping("/executions")
-    public List<Map<String, Object>> listExecutions(
+    public List<ExecutionResponse> listExecutions(
             @RequestParam(required = false) String strategyId,
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "50") int limit) {
@@ -104,29 +103,29 @@ public class BotController {
     }
 
     @GetMapping("/executions/{executionId}")
-    public Map<String, Object> getExecution(@PathVariable String executionId) {
+    public ExecutionResponse getExecution(@PathVariable String executionId) {
         return service.getExecution(executionId);
     }
 
     @GetMapping("/executions/{executionId}/orders/open")
-    public List<Map<String, Object>> getExecutionOpenOrders(@PathVariable String executionId) {
+    public List<ExecutionOrderEntry> getExecutionOpenOrders(@PathVariable String executionId) {
         return service.getExecutionOpenOrders(executionId);
     }
 
     @GetMapping("/executions/{executionId}/activities")
-    public List<Map<String, Object>> getExecutionActivities(
+    public List<ExecutionResponse> getExecutionActivities(
             @PathVariable String executionId,
             @RequestParam(defaultValue = "50") int limit) {
         return service.getExecutionActivities(executionId, limit);
     }
 
     @GetMapping("/executions/{executionId}/lifecycles")
-    public List<Map<String, Object>> getExecutionLifecycles(@PathVariable String executionId) {
+    public List<ExecutionResponse> getExecutionLifecycles(@PathVariable String executionId) {
         return service.getExecutionLifecycles(executionId);
     }
 
     @GetMapping("/executions/{executionId}/logs")
-    public List<Map<String, Object>> getExecutionLogs(
+    public List<ExecutionResponse> getExecutionLogs(
             @PathVariable String executionId,
             @RequestParam(defaultValue = "100") int limit) {
         return service.getExecutionLogs(executionId, limit);

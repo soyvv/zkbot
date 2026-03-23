@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
+use tracing::{info, warn};
 
 use zk_proto_rs::zk::{
     common::v1::{DummyRequest, ServiceHealthResponse},
@@ -48,6 +49,7 @@ use crate::{
     proto::oms_svc::oms_service_server::OmsService,
 };
 use zk_oms_rs::utils::gen_timestamp_ms;
+use zk_oms_rs::validation::{validate_cancel_request, validate_order_request};
 
 // ── Handler struct ────────────────────────────────────────────────────────────
 
@@ -72,17 +74,46 @@ impl OmsService for OmsGrpcHandler {
             .order_request
             .ok_or_else(|| Status::invalid_argument("place_order: missing order_request"))?;
 
+        if let Err(msg) = validate_order_request(&order_req) {
+            warn!(
+                oms_id = %self.oms_id,
+                order_id = order_req.order_id,
+                account_id = order_req.account_id,
+                instrument_code = %order_req.instrument_code,
+                qty = order_req.qty,
+                price = order_req.price,
+                "rejecting invalid place_order request: {msg}"
+            );
+            return Err(Status::invalid_argument(msg));
+        }
+
         // Idempotency: reject duplicate order_id without hitting the writer.
         let order_id = order_req.order_id;
         {
             let snap = self.replica.load();
             if snap.orders.contains_key(&order_id) {
+                warn!(
+                    oms_id = %self.oms_id,
+                    order_id,
+                    account_id = order_req.account_id,
+                    "rejecting duplicate order_id in place_order request"
+                );
                 return Ok(Response::new(err_response(
                     OmsErrorType::OmsErrTypeInvalidReq,
                     &format!("duplicate order_id={order_id}"),
                 )));
             }
         }
+
+        info!(
+            oms_id = %self.oms_id,
+            order_id,
+            account_id = order_req.account_id,
+            instrument_code = %order_req.instrument_code,
+            qty = order_req.qty,
+            price = order_req.price,
+            "accepted place_order request for OMS writer dispatch"
+        );
 
         let oms_received_ns = system_time_ns(); // t1: OMS gRPC handler entry
         let resp = send_cmd_await(&self.cmd_tx, |reply| OmsCommand::PlaceOrder {
@@ -99,6 +130,54 @@ impl OmsService for OmsGrpcHandler {
         request: Request<BatchPlaceOrdersRequest>,
     ) -> Result<Response<OmsResponse>, Status> {
         let req = request.into_inner();
+        let mut seen = std::collections::HashSet::new();
+        for (idx, order_req) in req.order_requests.iter().enumerate() {
+            if let Err(msg) = validate_order_request(order_req) {
+                warn!(
+                    oms_id = %self.oms_id,
+                    batch_index = idx,
+                    order_id = order_req.order_id,
+                    account_id = order_req.account_id,
+                    "rejecting invalid batch place_order request: {msg}"
+                );
+                return Err(Status::invalid_argument(msg));
+            }
+            if !seen.insert(order_req.order_id) {
+                let msg = format!(
+                    "batch_place_orders: duplicate order_id={} within request",
+                    order_req.order_id
+                );
+                warn!(
+                    oms_id = %self.oms_id,
+                    batch_index = idx,
+                    order_id = order_req.order_id,
+                    "rejecting duplicate order_id within batch place_order request"
+                );
+                return Err(Status::invalid_argument(msg));
+            }
+        }
+        {
+            let snap = self.replica.load();
+            for (idx, order_req) in req.order_requests.iter().enumerate() {
+                if snap.orders.contains_key(&order_req.order_id) {
+                    warn!(
+                        oms_id = %self.oms_id,
+                        batch_index = idx,
+                        order_id = order_req.order_id,
+                        "rejecting duplicate order_id from existing snapshot in batch place_order request"
+                    );
+                    return Ok(Response::new(err_response(
+                        OmsErrorType::OmsErrTypeInvalidReq,
+                        &format!("duplicate order_id={}", order_req.order_id),
+                    )));
+                }
+            }
+        }
+        info!(
+            oms_id = %self.oms_id,
+            batch_size = req.order_requests.len(),
+            "accepted batch_place_orders request for OMS writer dispatch"
+        );
         let resp = send_cmd_await(&self.cmd_tx, |reply| OmsCommand::BatchPlaceOrders {
             reqs: req.order_requests,
             reply,
@@ -115,6 +194,19 @@ impl OmsService for OmsGrpcHandler {
         let cancel_req = req.order_cancel_request.ok_or_else(|| {
             Status::invalid_argument("cancel_order: missing order_cancel_request")
         })?;
+        if let Err(msg) = validate_cancel_request(&cancel_req) {
+            warn!(
+                oms_id = %self.oms_id,
+                order_id = cancel_req.order_id,
+                "rejecting invalid cancel_order request: {msg}"
+            );
+            return Err(Status::invalid_argument(msg));
+        }
+        info!(
+            oms_id = %self.oms_id,
+            order_id = cancel_req.order_id,
+            "accepted cancel_order request for OMS writer dispatch"
+        );
         let resp = send_cmd_await(&self.cmd_tx, |reply| OmsCommand::CancelOrder {
             req: cancel_req,
             reply,
@@ -128,6 +220,22 @@ impl OmsService for OmsGrpcHandler {
         request: Request<BatchCancelOrdersRequest>,
     ) -> Result<Response<OmsResponse>, Status> {
         let req = request.into_inner();
+        for (idx, cancel_req) in req.order_cancel_requests.iter().enumerate() {
+            if let Err(msg) = validate_cancel_request(cancel_req) {
+                warn!(
+                    oms_id = %self.oms_id,
+                    batch_index = idx,
+                    order_id = cancel_req.order_id,
+                    "rejecting invalid batch cancel_order request: {msg}"
+                );
+                return Err(Status::invalid_argument(msg));
+            }
+        }
+        info!(
+            oms_id = %self.oms_id,
+            batch_size = req.order_cancel_requests.len(),
+            "accepted batch_cancel_orders request for OMS writer dispatch"
+        );
         let resp = send_cmd_await(&self.cmd_tx, |reply| OmsCommand::BatchCancelOrders {
             reqs: req.order_cancel_requests,
             reply,

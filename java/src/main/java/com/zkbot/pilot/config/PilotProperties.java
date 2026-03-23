@@ -8,7 +8,8 @@ public record PilotProperties(
     String env,
     String pilotId,
     int leaseTtlMinutes,
-    String venueIntegrationsRoot
+    String venueIntegrationsRoot,
+    String serviceManifestsRoot
 ) {
     public PilotProperties {
         if (leaseTtlMinutes <= 0) leaseTtlMinutes = 60;

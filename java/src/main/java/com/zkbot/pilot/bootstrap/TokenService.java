@@ -1,12 +1,12 @@
 package com.zkbot.pilot.bootstrap;
 
+import com.zkbot.pilot.topology.dto.BootstrapTokenResponse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.HexFormat;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -32,8 +32,8 @@ public class TokenService {
      * Generate a new token, store its hash, and return the plaintext token once.
      * The plaintext token is NOT stored.
      */
-    public Map<String, Object> generateToken(String logicalId, String instanceType,
-                                              String env, int expiresDays) {
+    public BootstrapTokenResponse generateToken(String logicalId, String instanceType,
+                                                  String env, int expiresDays) {
         byte[] tokenBytes = new byte[32];
         random.nextBytes(tokenBytes);
         String token = HexFormat.of().formatHex(tokenBytes);
@@ -48,10 +48,10 @@ public class TokenService {
                 """, OffsetDateTime.class,
                 jti, logicalId, instanceType, tokenHash, expiresDays);
 
-        return Map.of(
-                "tokenJti", jti,
-                "token", token,
-                "expiresAt", expiresAt != null ? expiresAt.toString() : ""
+        return new BootstrapTokenResponse(
+                jti,
+                token,
+                expiresAt != null ? expiresAt.toInstant() : null
         );
     }
 }

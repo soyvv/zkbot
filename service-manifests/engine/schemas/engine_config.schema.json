@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Engine Service Config",
+  "type": "object",
+  "properties": {
+    "nats_url": { "type": "string" },
+    "env": { "type": "string" },
+    "engine_id": { "type": "string" },
+    "grpc_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "grpc_host": { "type": "string" },
+    "kv_heartbeat_secs": { "type": "integer", "minimum": 1 },
+    "bootstrap_token": { "type": "string" },
+    "account_ids_csv": { "type": "string" },
+    "strategy_key": { "type": "string" },
+    "instruments_csv": { "type": "string" },
+    "discovery_bucket": { "type": "string" },
+    "timer_interval_ms": { "type": "integer", "minimum": 1 },
+    "kline_interval": { "type": "string" }
+  },
+  "required": ["nats_url", "engine_id"],
+  "additionalProperties": true
+}

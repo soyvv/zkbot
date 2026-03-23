@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import zk.oms.v1.Oms;
 
+import java.time.Instant;
 import java.util.*;
 
 @Service
@@ -40,7 +41,7 @@ public class BotService {
 
     // --- Strategy CRUD ---
 
-    public Map<String, Object> createStrategy(CreateStrategyRequest request) {
+    public StrategyResponse createStrategy(CreateStrategyRequest request) {
         if (request.strategyKey() == null || request.strategyKey().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "strategyKey is required");
         }
@@ -59,10 +60,10 @@ public class BotService {
                 request.description(), request.defaultAccounts(), request.defaultSymbols(),
                 request.config());
 
-        return strategyRepo.getStrategy(request.strategyKey());
+        return toStrategyResponse(strategyRepo.getStrategy(request.strategyKey()));
     }
 
-    public Map<String, Object> updateStrategy(String strategyKey, UpdateStrategyRequest request) {
+    public StrategyResponse updateStrategy(String strategyKey, UpdateStrategyRequest request) {
         var existing = strategyRepo.getStrategy(strategyKey);
         if (existing == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -77,24 +78,26 @@ public class BotService {
         if (request.enabled() != null) fields.put("enabled", request.enabled());
 
         strategyRepo.updateStrategy(strategyKey, fields);
-        return strategyRepo.getStrategy(strategyKey);
+        return toStrategyResponse(strategyRepo.getStrategy(strategyKey));
     }
 
-    public Map<String, Object> getStrategy(String strategyKey) {
+    public StrategyResponse getStrategy(String strategyKey) {
         var row = strategyRepo.findStrategyWithCurrentExecution(strategyKey);
         if (row == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "strategy '" + strategyKey + "' not found");
         }
-        return row;
+        return toStrategyResponse(row);
     }
 
-    public List<Map<String, Object>> listStrategies(String status, String venue,
-                                                     String omsId, String type, int limit) {
-        return strategyRepo.listStrategies(status, venue, omsId, type, limit);
+    public List<StrategyResponse> listStrategies(String status, String venue,
+                                                   String omsId, String type, int limit) {
+        return strategyRepo.listStrategies(status, venue, omsId, type, limit).stream()
+                .map(BotService::toStrategyResponse)
+                .toList();
     }
 
-    public Map<String, Object> validateStrategy(String strategyKey) {
+    public ValidationResult validateStrategy(String strategyKey) {
         var strategy = strategyRepo.getStrategy(strategyKey);
         if (strategy == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -110,21 +113,18 @@ public class BotService {
             issues.add("runtime_type is not set");
         }
 
-        boolean valid = issues.isEmpty();
-        return Map.of("valid", valid, "issues", issues, "strategyKey", strategyKey);
+        return new ValidationResult(issues.isEmpty(), issues, strategyKey);
     }
 
     // --- Enriched config builder ---
 
     public Map<String, Object> buildEnrichedConfig(String strategyId) {
-        // Account IDs from account bindings
         var accountRows = jdbc.queryForList(
                 "SELECT DISTINCT account_id FROM cfg.account_binding ORDER BY account_id");
         var accountIds = accountRows.stream()
                 .map(r -> r.get("account_id"))
                 .toList();
 
-        // Instruments for those accounts
         List<Map<String, Object>> instrumentRows;
         if (!accountIds.isEmpty()) {
             instrumentRows = jdbc.queryForList("""
@@ -143,7 +143,6 @@ public class BotService {
                 .map(r -> r.get("instrument_id"))
                 .toList();
 
-        // Fallback to all instruments if no per-account config
         List<?> finalInstruments;
         if (instruments.isEmpty()) {
             var fallback = jdbc.queryForList(
@@ -175,7 +174,6 @@ public class BotService {
                     "strategy '" + request.strategyKey() + "' is not enabled");
         }
 
-        // Singleton check
         var running = executionRepo.findRunningExecutionForStrategy(request.strategyKey());
         if (running != null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -184,18 +182,13 @@ public class BotService {
         }
 
         String executionId = UUID.randomUUID().toString();
-
-        // Resolve target OMS
         String targetOmsId = resolveOmsId(strategy);
 
-        // Insert execution
         executionRepo.createExecution(executionId, request.strategyKey(),
                 targetOmsId, request.runtimeParams());
 
-        // Build enriched config
         var enrichedConfig = buildEnrichedConfig(request.strategyKey());
 
-        // Optionally start orchestrated process
         if (request.orchestrated()) {
             String codeRef = (String) strategy.get("code_ref");
             if (codeRef != null && !codeRef.isBlank()) {
@@ -211,14 +204,13 @@ public class BotService {
             }
         }
 
-        // Update status to RUNNING
         executionRepo.updateExecutionStatus(executionId, "RUNNING", null);
 
         log.info("Started execution {} for strategy {}", executionId, request.strategyKey());
         return new StartExecutionResponse(executionId, request.strategyKey(), "RUNNING", enrichedConfig);
     }
 
-    public Map<String, Object> stopExecution(String executionId, String reason) {
+    public ExecutionResponse stopExecution(String executionId, String reason) {
         var execution = executionRepo.getExecution(executionId);
         if (execution == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -231,7 +223,6 @@ public class BotService {
                     "execution '" + executionId + "' is not in a stoppable state: " + status);
         }
 
-        // Stop orchestrated process if managed
         var orchStatus = orchestrator.status(executionId);
         if (orchStatus.running()) {
             orchestrator.stop(executionId, reason != null ? reason : "api-stop");
@@ -240,10 +231,10 @@ public class BotService {
         executionRepo.updateExecutionStatus(executionId, "STOPPED", reason);
         log.info("Stopped execution {} reason={}", executionId, reason);
 
-        return executionRepo.getExecution(executionId);
+        return toExecutionResponse(executionRepo.getExecution(executionId), null, null);
     }
 
-    public Map<String, Object> pauseExecution(String executionId) {
+    public ExecutionResponse pauseExecution(String executionId) {
         var execution = executionRepo.getExecution(executionId);
         if (execution == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -254,10 +245,10 @@ public class BotService {
                     "execution '" + executionId + "' is not RUNNING");
         }
         executionRepo.updateExecutionStatus(executionId, "PAUSED", null);
-        return executionRepo.getExecution(executionId);
+        return toExecutionResponse(executionRepo.getExecution(executionId), null, null);
     }
 
-    public Map<String, Object> resumeExecution(String executionId) {
+    public ExecutionResponse resumeExecution(String executionId) {
         var execution = executionRepo.getExecution(executionId);
         if (execution == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -268,7 +259,7 @@ public class BotService {
                     "execution '" + executionId + "' is not PAUSED");
         }
         executionRepo.updateExecutionStatus(executionId, "RUNNING", null);
-        return executionRepo.getExecution(executionId);
+        return toExecutionResponse(executionRepo.getExecution(executionId), null, null);
     }
 
     public StartExecutionResponse restartExecution(String executionId) {
@@ -280,13 +271,11 @@ public class BotService {
 
         String strategyId = (String) execution.get("strategy_id");
 
-        // Stop current execution
         String status = (String) execution.get("status");
         if ("RUNNING".equals(status) || "PAUSED".equals(status) || "INITIALIZING".equals(status)) {
             stopExecution(executionId, "restart");
         }
 
-        // Start new execution with same config
         @SuppressWarnings("unchecked")
         var runtimeParams = (Map<String, Object>) execution.get("config_override");
         return startExecution(new StartExecutionRequest(strategyId, "restart", runtimeParams, false));
@@ -294,28 +283,24 @@ public class BotService {
 
     // --- Execution queries ---
 
-    public Map<String, Object> getExecution(String executionId) {
+    public ExecutionResponse getExecution(String executionId) {
         var execution = executionRepo.getExecution(executionId);
         if (execution == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "execution '" + executionId + "' not found");
         }
 
-        // Enrich with live orchestrator status
         var orchStatus = orchestrator.status(executionId);
-        execution.put("process_running", orchStatus.running());
-        if (orchStatus.exitCode() != null) {
-            execution.put("process_exit_code", orchStatus.exitCode());
-        }
-
-        return execution;
+        return toExecutionResponse(execution, orchStatus.running(), orchStatus.exitCode());
     }
 
-    public List<Map<String, Object>> listExecutions(String strategyId, String status, int limit) {
-        return executionRepo.listExecutions(strategyId, status, limit);
+    public List<ExecutionResponse> listExecutions(String strategyId, String status, int limit) {
+        return executionRepo.listExecutions(strategyId, status, limit).stream()
+                .map(row -> toExecutionResponse(row, null, null))
+                .toList();
     }
 
-    public List<Map<String, Object>> getExecutionOpenOrders(String executionId) {
+    public List<ExecutionOrderEntry> getExecutionOpenOrders(String executionId) {
         var execution = executionRepo.getExecution(executionId);
         if (execution == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -330,17 +315,12 @@ public class BotService {
         try {
             var request = Oms.QueryOpenOrderRequest.newBuilder().build();
             var response = omsClient.queryOpenOrders(omsId, request);
-            // Filter and convert to maps — simplified, returns raw order details
-            var orders = new ArrayList<Map<String, Object>>();
+            var orders = new ArrayList<ExecutionOrderEntry>();
             for (var order : response.getOrdersList()) {
-                var m = new HashMap<String, Object>();
-                m.put("order_id", order.getOrderId());
-                m.put("instrument", order.getInstrument());
-                m.put("side", order.getBuySellType().name());
-                m.put("price", order.getPrice());
-                m.put("qty", order.getQty());
-                m.put("status", order.getOrderStatus().name());
-                orders.add(m);
+                orders.add(new ExecutionOrderEntry(
+                        order.getOrderId(), order.getInstrument(),
+                        order.getBuySellType().name(), order.getPrice(),
+                        order.getQty(), order.getOrderStatus().name()));
             }
             return orders;
         } catch (Exception e) {
@@ -349,45 +329,123 @@ public class BotService {
         }
     }
 
-    public List<Map<String, Object>> getExecutionActivities(String executionId, int limit) {
-        // Stub — MongoDB query deferred
+    public List<ExecutionResponse> getExecutionActivities(String executionId, int limit) {
         return List.of();
     }
 
-    public List<Map<String, Object>> getExecutionLifecycles(String executionId) {
-        // Stub — status change history deferred
+    public List<ExecutionResponse> getExecutionLifecycles(String executionId) {
         return List.of();
     }
 
-    public List<Map<String, Object>> getExecutionLogs(String executionId, int limit) {
-        // Stub — MongoDB query deferred
+    public List<ExecutionResponse> getExecutionLogs(String executionId, int limit) {
         return List.of();
     }
 
-    public List<Map<String, Object>> getStrategyExecutions(String strategyKey, int limit) {
-        return executionRepo.listExecutionsForStrategy(strategyKey, limit);
+    public List<ExecutionResponse> getStrategyExecutions(String strategyKey, int limit) {
+        return executionRepo.listExecutionsForStrategy(strategyKey, limit).stream()
+                .map(row -> toExecutionResponse(row, null, null))
+                .toList();
     }
 
-    public List<Map<String, Object>> getStrategyLogs(String strategyKey, int limit) {
-        // Stub — MongoDB query deferred
+    public List<ExecutionResponse> getStrategyLogs(String strategyKey, int limit) {
         return List.of();
     }
 
     // --- Helpers ---
 
     private String resolveOmsId(Map<String, Object> strategy) {
-        // Try strategy config for target_oms_id, otherwise pick default
         Object configObj = strategy.get("config");
         if (configObj instanceof Map<?, ?> config) {
             Object omsId = config.get("target_oms_id");
             if (omsId != null) return omsId.toString();
         }
-        // Fallback: pick first OMS instance
         var rows = jdbc.queryForList("SELECT oms_id FROM cfg.oms_instance LIMIT 1");
         if (rows.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "no OMS instance configured");
         }
         return (String) rows.getFirst().get("oms_id");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static StrategyResponse toStrategyResponse(Map<String, Object> row) {
+        Object configObj = row.get("config_json");
+        Map<String, Object> config = null;
+        if (configObj instanceof Map) {
+            config = (Map<String, Object>) configObj;
+        }
+
+        Object accountsObj = row.get("default_accounts");
+        List<Long> defaultAccounts = null;
+        if (accountsObj instanceof Long[] arr) {
+            defaultAccounts = List.of(arr);
+        } else if (accountsObj instanceof Object[] arr) {
+            defaultAccounts = Arrays.stream(arr)
+                    .filter(Objects::nonNull)
+                    .map(o -> ((Number) o).longValue())
+                    .toList();
+        }
+
+        Object symbolsObj = row.get("default_symbols");
+        List<String> defaultSymbols = null;
+        if (symbolsObj instanceof String[] arr) {
+            defaultSymbols = List.of(arr);
+        } else if (symbolsObj instanceof Object[] arr) {
+            defaultSymbols = Arrays.stream(arr)
+                    .filter(Objects::nonNull)
+                    .map(Object::toString)
+                    .toList();
+        }
+
+        return new StrategyResponse(
+                (String) row.get("strategy_id"),
+                (String) row.get("runtime_type"),
+                (String) row.get("code_ref"),
+                (String) row.get("description"),
+                defaultAccounts,
+                defaultSymbols,
+                config,
+                Boolean.TRUE.equals(row.get("enabled")),
+                toInstant(row.get("created_at")),
+                toInstant(row.get("updated_at")),
+                (String) row.get("execution_id"),
+                (String) row.get("execution_status"),
+                toInstant(row.get("execution_started_at")),
+                toInstant(row.get("execution_ended_at"))
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ExecutionResponse toExecutionResponse(Map<String, Object> row,
+                                                          Boolean processRunning,
+                                                          Integer processExitCode) {
+        Object configObj = row.get("config_override");
+        Map<String, Object> configOverride = null;
+        if (configObj instanceof Map) {
+            configOverride = (Map<String, Object>) configObj;
+        }
+
+        return new ExecutionResponse(
+                (String) row.get("execution_id"),
+                (String) row.get("strategy_id"),
+                (String) row.get("target_oms_id"),
+                (String) row.get("status"),
+                (String) row.get("error_message"),
+                toInstant(row.get("started_at")),
+                toInstant(row.get("ended_at")),
+                configOverride,
+                toInstant(row.get("created_at")),
+                toInstant(row.get("updated_at")),
+                processRunning,
+                processExitCode
+        );
+    }
+
+    private static Instant toInstant(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof Instant i) return i;
+        if (obj instanceof java.sql.Timestamp ts) return ts.toInstant();
+        if (obj instanceof java.time.OffsetDateTime odt) return odt.toInstant();
+        return null;
     }
 }

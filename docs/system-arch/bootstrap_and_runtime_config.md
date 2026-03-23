@@ -87,6 +87,9 @@ Recommended rule:
 - venue-backed services such as `gw`, `mdgw`, and refdata should use the venue integration manifest
 - non-venue services such as `oms`, `engine`, and other managed runtimes should use a service-kind
   manifest/schema contract with the same logical purpose
+- the bundled manifest/schema shipped with the codebase or binary is the authoritative contract
+- any Pilot-stored schema/manifest metadata is an operational mirror/registry of that authoritative
+  contract, not an independent authoring source
 
 The manifest/schema contract should define:
 
@@ -102,6 +105,14 @@ Pilot should use this manifest/schema contract to:
 - validate desired config before persistence
 - classify drift and change impact
 - decide whether a change can be applied by reload or requires restart
+
+Operational registry rule:
+
+- Pilot may persist manifest/schema metadata for version listing, activation state, audit, and UI
+  queries
+- that stored copy should be imported or synchronized from the bundled authoritative manifests
+- if the bundled manifest/schema and the active Pilot registry copy do not match for the same
+  resource, Pilot should fail closed for related config operations rather than silently continuing
 
 ### 4. Runtime Config Introspection
 
@@ -181,6 +192,67 @@ Instead:
 
 This applies to all services that need private credentials, especially trading gateways.
 
+### Runtime secret loading contract
+
+The default runtime contract is:
+
+- Pilot returns only logical secret references in desired/runtime config
+- the runtime host resolves those references before constructing venue/client adaptors
+- adaptors should receive resolved secret fields such as `token`, `api_key`, `secret_key`, or
+  `passphrase`, not Vault client logic
+
+Recommended layering:
+
+- Pilot owns desired config and reference metadata
+- Vault owns secret material
+- the runtime host owns secret resolution
+- venue adaptors own venue protocol logic only
+
+This keeps secret handling consistent across:
+
+- local process orchestration for dev/debug
+- future Kubernetes or k3s orchestration
+- different venue adaptor implementations
+
+### Runtime identity and Vault access
+
+For the current design, the preferred runtime access pattern is:
+
+- Pilot provisions runtime Vault access material as part of an ops workflow
+- the orchestrator injects Vault auth bootstrap inputs into the service
+- the service authenticates to Vault directly at startup
+
+The recommended initial auth mechanism is AppRole with short-lived `secret_id` material.
+
+AppRole deployment rule:
+
+- application code and config schemas should stay environment-agnostic
+- environment-specific Vault address, `role_id`, and `secret_id` are injected by the selected
+  orchestrator backend
+
+Pilot should not return a long-lived generic Vault token in bootstrap responses.
+
+### Secret reference shape
+
+Pilot should persist and return stable logical references rather than raw Vault paths when possible.
+
+Recommended forms:
+
+- logical ref
+  - `oanda/main`
+  - `okx/trading_primary`
+- explicit Vault-backed ref when needed
+  - `vault:kv/zkbot/<env>/venues/<venue>/accounts/<account_id>#token`
+
+The runtime host may expand a logical ref into an environment-specific Vault path using:
+
+- `env`
+- service kind
+- logical instance id
+- venue/account identity from enriched runtime config
+
+This keeps Pilot config portable across local and k3s deployment modes.
+
 ## Unified Startup Contract
 
 The recommended startup sequence for any managed service is:
@@ -188,10 +260,12 @@ The recommended startup sequence for any managed service is:
 1. start with minimal deployment config
 2. authenticate to Pilot using the bootstrap identity/token
 3. receive bootstrap grant plus effective enriched runtime config
-4. fetch required secrets from Vault using `secret_ref`
-5. initialize internal runtime/adaptors/clients
-6. register live endpoint/state in NATS KV
-7. begin serving traffic or publishing data
+4. authenticate to Vault using injected runtime identity
+5. fetch required secrets from Vault using `secret_ref`
+6. resolve adaptor/client config in memory only
+7. initialize internal runtime/adaptors/clients
+8. register live endpoint/state in NATS KV
+9. begin serving traffic or publishing data
 
 If any step before KV registration fails, the service should fail startup without becoming live.
 

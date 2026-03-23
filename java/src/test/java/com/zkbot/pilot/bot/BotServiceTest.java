@@ -245,7 +245,7 @@ class BotServiceTest {
 
         var result = service.getExecution("exec-1");
 
-        assertThat(result.get("process_running")).isEqualTo(true);
+        assertThat(result.processRunning()).isEqualTo(true);
     }
 
     @Test
@@ -258,8 +258,8 @@ class BotServiceTest {
 
         var result = service.getExecution("exec-1");
 
-        assertThat(result.get("process_running")).isEqualTo(false);
-        assertThat(result.get("process_exit_code")).isEqualTo(137);
+        assertThat(result.processRunning()).isEqualTo(false);
+        assertThat(result.processExitCode()).isEqualTo(137);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

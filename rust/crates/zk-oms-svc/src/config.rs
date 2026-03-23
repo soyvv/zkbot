@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Environment-variable-driven config for the OMS service.
 ///
@@ -16,7 +16,7 @@ use serde::Deserialize;
 /// The current config is exposed read-only via `GetConfig` RPC (see
 /// `grpc_handler::OmsGrpcHandler::get_config`). Once the pilot service is
 /// live, `PilotService` will query this to display per-OMS rule summaries.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OmsSvcConfig {
     // ── Connectivity ───────────────────────────────────────────────────────
     #[serde(default = "default_nats_url")]
@@ -184,6 +184,9 @@ fn default_metrics_max_pending() -> usize {
 fn default_metrics_max_complete() -> usize {
     10_000
 }
+
+/// Paths to fields containing resolved secret material — redacted in GetCurrentConfig.
+pub const RESOLVED_SECRET_PATHS: &[&str] = &["/bootstrap_token"];
 
 /// Load config from environment variables.
 pub fn load() -> Result<OmsSvcConfig, envy::Error> {

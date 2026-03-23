@@ -38,16 +38,63 @@ public class TopologyRepository {
     }
 
     public void createLogicalInstance(String logicalId, String instanceType, String env,
-                                      Map<String, Object> metadata) {
+                                      Map<String, Object> metadata, Map<String, Object> runtimeConfig,
+                                      boolean enabled) {
         String metadataJson = toJson(metadata);
+        String configJson = toJson(runtimeConfig);
         jdbc.update("""
-                INSERT INTO cfg.logical_instance (logical_id, instance_type, env, metadata)
-                VALUES (?, ?, ?, ?::jsonb)
+                INSERT INTO cfg.logical_instance (logical_id, instance_type, env, metadata, runtime_config, enabled)
+                VALUES (?, ?, ?, ?::jsonb, ?::jsonb, ?)
                 ON CONFLICT (logical_id) DO UPDATE
                   SET instance_type = EXCLUDED.instance_type,
                       env = EXCLUDED.env,
-                      metadata = EXCLUDED.metadata
-                """, logicalId, instanceType, env, metadataJson);
+                      metadata = EXCLUDED.metadata,
+                      runtime_config = EXCLUDED.runtime_config,
+                      enabled = EXCLUDED.enabled
+                """, logicalId, instanceType, env, metadataJson, configJson, enabled);
+    }
+
+    // --- Service-specific instance rows ---
+
+    public void createOmsInstance(String omsId) {
+        jdbc.update("""
+                INSERT INTO cfg.oms_instance (oms_id, namespace)
+                VALUES (?, ?)
+                ON CONFLICT (oms_id) DO NOTHING
+                """, omsId, omsId);
+    }
+
+    public List<Map<String, Object>> listGatewayInstances() {
+        return jdbc.queryForList("SELECT gw_id, venue, broker_type, account_type FROM cfg.gateway_instance ORDER BY gw_id");
+    }
+
+    public Map<String, Object> getGatewayInstance(String gwId) {
+        var rows = jdbc.queryForList("SELECT gw_id, venue, broker_type, account_type FROM cfg.gateway_instance WHERE gw_id = ?", gwId);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    public void createGatewayInstance(String gwId, String venue) {
+        jdbc.update("""
+                INSERT INTO cfg.gateway_instance (gw_id, venue, broker_type, account_type)
+                VALUES (?, ?, 'default', 'default')
+                ON CONFLICT (gw_id) DO NOTHING
+                """, gwId, venue);
+    }
+
+    public void createEngineInstance(String engineId) {
+        jdbc.update("""
+                INSERT INTO cfg.engine_instance (engine_id)
+                VALUES (?)
+                ON CONFLICT (engine_id) DO NOTHING
+                """, engineId);
+    }
+
+    public void createMdgwInstance(String mdgwId, String venue) {
+        jdbc.update("""
+                INSERT INTO cfg.mdgw_instance (mdgw_id, venue)
+                VALUES (?, ?)
+                ON CONFLICT (mdgw_id) DO NOTHING
+                """, mdgwId, venue);
     }
 
     // --- Logical bindings ---

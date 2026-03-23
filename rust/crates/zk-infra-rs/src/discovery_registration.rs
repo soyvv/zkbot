@@ -87,14 +87,21 @@ pub fn mdgw_registration(
 }
 
 /// Build a GW (exchange gateway) service registration.
+///
+/// When `admin_grpc_port` is provided, it is stored in the `attrs` map so that
+/// Pilot can discover the simulator admin gRPC surface without port conventions.
 pub fn gw_registration(
     gw_id: &str,
     grpc_address: &str,
     venue: &str,
     account_id: i64,
+    admin_grpc_port: Option<u16>,
 ) -> SvcRegProto {
     let mut attrs = HashMap::new();
     attrs.insert("account_id".to_string(), account_id.to_string());
+    if let Some(port) = admin_grpc_port {
+        attrs.insert("admin_grpc_port".to_string(), port.to_string());
+    }
     SvcRegProto {
         service_type: "gw".to_string(),
         service_id: gw_id.to_string(),
@@ -160,7 +167,7 @@ mod tests {
 
     #[test]
     fn gw_registration_roundtrip() {
-        let reg = gw_registration("gw1", "127.0.0.1:51051", "simulator", 9001);
+        let reg = gw_registration("gw1", "127.0.0.1:51051", "simulator", 9001, Some(51052));
         let bytes = encode_registration(&reg);
         let decoded = SvcRegProto::decode(bytes.as_ref()).unwrap();
         assert_eq!(decoded.service_type, "gw");

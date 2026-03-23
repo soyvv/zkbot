@@ -1,0 +1,26 @@
+venue: simulator
+schema_id: venue/simulator
+version: 1
+capabilities:
+  gw:
+    language: rust
+    entrypoint: rust::simulator::gw::SimulatorVenueAdapter
+    config_schema: schemas/gw_config.schema.json
+    field_descriptors:
+      - path: /account_id
+        reloadable: false
+      - path: /mock_balances
+        reloadable: false
+      - path: /fill_delay_ms
+        reloadable: true
+      - path: /match_policy
+        reloadable: true
+      - path: /admin_grpc_port
+        reloadable: false
+      - path: /enable_admin_controls
+        reloadable: false
+metadata:
+  supports_tradfi_sessions: false
+  notes:
+    - Built-in deterministic simulator used for OMS and engine integration workflows.
+    - Simulator-only controls are exposed through the separate GatewaySimulatorAdminService.

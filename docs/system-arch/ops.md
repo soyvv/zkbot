@@ -32,12 +32,52 @@ One Vault access role per venue (or per gateway instance), scoped to only the `a
 ### 1.3 Secret retrieval lifecycle
 
 1. Service bootstraps with Pilot and receives `secret_ref` metadata if needed
-2. Service authenticates to Vault (Kubernetes service account or AppRole)
-3. Service reads the required secret material from Vault
-4. Service caches credentials in-memory and re-reads on rotation or reload
-5. Service uses credentials to establish and maintain its external/session dependency
+2. The selected orchestrator backend injects Vault auth bootstrap inputs into the runtime
+3. Service authenticates to Vault (initial design: AppRole)
+4. Service reads the required secret material from Vault
+5. Service caches credentials in-memory and re-reads on rotation or reload
+6. Service uses credentials to establish and maintain its external/session dependency
 
 Vault path versioning supports credential rotation without gateway restart.
+
+### 1.5 Pilot ops responsibility
+
+Pilot is the control-plane owner for secret provisioning workflows.
+
+Pilot ops responsibilities:
+
+- accept operator/onboarding requests for runtime secrets
+- write or update business secret material in Vault
+- persist only secret metadata and references in Pilot-managed storage
+- create or update Vault access policy and AppRole bindings for managed workloads
+- generate short-lived `secret_id` material for runtime launch
+- hand Vault auth bootstrap inputs to the selected orchestrator backend
+
+Pilot should not act as the steady-state runtime secret proxy.
+
+### 1.6 Orchestrator backend contract
+
+Pilot should hide backend-specific secret injection details behind one orchestration contract.
+
+Required backends:
+
+- local process management for dev/debug
+- k3s later
+
+Shared contract:
+
+- Pilot provisions runtime identity material
+- the backend injects that material into the launched service
+- the runtime service then authenticates to Vault directly
+
+Backend-specific examples:
+
+- local process backend
+  - inject `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`, and `ZK_ENV` as process env vars
+- k3s backend
+  - create/update a Kubernetes Secret or equivalent binding and mount/inject it into the workload
+
+The runtime bootstrap and secret-resolution logic should stay identical across both backends.
 
 ### 1.4 Transport security
 

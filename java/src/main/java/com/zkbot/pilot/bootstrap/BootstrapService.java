@@ -1,6 +1,8 @@
 package com.zkbot.pilot.bootstrap;
 
+import com.zkbot.pilot.config.JsonPointerHelper;
 import com.zkbot.pilot.config.PilotProperties;
+import com.zkbot.pilot.schema.ConfigSchemaLocator;
 import io.nats.client.Connection;
 import io.nats.client.Dispatcher;
 import io.nats.client.Message;
@@ -8,11 +10,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
+import zk.config.v1.Config.ConfigMetadata;
+import zk.config.v1.Config.SecretRef;
 import zk.pilot.v1.Bootstrap.BootstrapDeregisterRequest;
 import zk.pilot.v1.Bootstrap.BootstrapDeregisterResponse;
 import zk.pilot.v1.Bootstrap.BootstrapRegisterRequest;
 import zk.pilot.v1.Bootstrap.BootstrapRegisterResponse;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zkbot.pilot.config.DesiredConfigRepository;
+
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -27,6 +35,9 @@ public class BootstrapService implements SmartLifecycle {
     private final TokenService tokenService;
     private final KvReconciler kvReconciler;
     private final PilotProperties props;
+    private final DesiredConfigRepository desiredConfigRepo;
+    private final ConfigSchemaLocator schemaLocator;
+    private final ObjectMapper objectMapper;
 
     private volatile boolean running;
     private Dispatcher dispatcher;
@@ -35,12 +46,18 @@ public class BootstrapService implements SmartLifecycle {
                             BootstrapRepository repository,
                             TokenService tokenService,
                             KvReconciler kvReconciler,
-                            PilotProperties props) {
+                            PilotProperties props,
+                            DesiredConfigRepository desiredConfigRepo,
+                            ConfigSchemaLocator schemaLocator,
+                            ObjectMapper objectMapper) {
         this.natsConnection = natsConnection;
         this.repository = repository;
         this.tokenService = tokenService;
         this.kvReconciler = kvReconciler;
         this.props = props;
+        this.desiredConfigRepo = desiredConfigRepo;
+        this.schemaLocator = schemaLocator;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -164,8 +181,32 @@ public class BootstrapService implements SmartLifecycle {
             log.info("bootstrap: registered logical_id='{}' session={} kv_key='{}' instance_id={}",
                     req.getLogicalId(), sessionId, kvKey, instanceId);
 
-            // 6. Load runtime config from DB
-            String runtimeConfig = repository.getRuntimeConfig(req.getLogicalId());
+            // 6. Load runtime config from service-specific table (authoritative).
+            //    No legacy fallback — missing config is an explicit error.
+            var desiredConfig = desiredConfigRepo.getDesiredConfig(
+                    req.getLogicalId(), req.getInstanceType());
+            if (desiredConfig == null || desiredConfig.configJson() == null) {
+                reply(msg, BootstrapRegisterResponse.newBuilder()
+                        .setStatus("ERROR")
+                        .setErrorMessage("No desired config found for " + req.getLogicalId()
+                                + " (instance_type=" + req.getInstanceType() + "). "
+                                + "Ensure the service-specific table has a config row.")
+                        .build());
+                return;
+            }
+
+            String runtimeConfig = desiredConfig.configJson();
+            ConfigMetadata configMetadata = ConfigMetadata.newBuilder()
+                    .setConfigVersion(String.valueOf(desiredConfig.configVersion()))
+                    .setConfigHash(desiredConfig.configHash() != null ? desiredConfig.configHash() : "")
+                    .setConfigSource("bootstrap")
+                    .setIssuedAtMs(System.currentTimeMillis())
+                    // loaded_at_ms left as 0 — runtime sets this when config becomes effective
+                    .build();
+
+            // 7. Extract secret_refs via shared schema locator + JSON pointer helper
+            List<SecretRef> secretRefs = extractSecretRefs(
+                    runtimeConfig, req.getLogicalId(), req.getInstanceType());
 
             reply(msg, BootstrapRegisterResponse.newBuilder()
                     .setOwnerSessionId(sessionId)
@@ -175,7 +216,9 @@ public class BootstrapService implements SmartLifecycle {
                     .setInstanceId(instanceId)
                     .setScopedCredential("")
                     .setStatus("OK")
-                    .setRuntimeConfig(runtimeConfig != null ? runtimeConfig : "{}")
+                    .setRuntimeConfig(runtimeConfig)
+                    .setConfigMetadata(configMetadata)
+                    .addAllSecretRefs(secretRefs)
                     .setServerTimeMs(System.currentTimeMillis())
                     .build());
 
@@ -215,6 +258,31 @@ public class BootstrapService implements SmartLifecycle {
 
         } catch (Exception e) {
             log.error("bootstrap: error handling deregister request", e);
+        }
+    }
+
+    /**
+     * Extract secret_ref fields from runtime config using the shared ConfigSchemaLocator
+     * and JsonPointerHelper. Resolves venue-backed services to their venue_capability
+     * descriptors, and uses proper JSON pointer traversal for nested paths.
+     */
+    private List<SecretRef> extractSecretRefs(String runtimeConfigJson,
+                                              String logicalId, String instanceType) {
+        try {
+            var descriptors = schemaLocator.resolveFieldDescriptors(logicalId, instanceType);
+            var entries = JsonPointerHelper.extractSecretRefs(
+                    runtimeConfigJson, descriptors, objectMapper);
+
+            return entries.stream()
+                    .map(e -> SecretRef.newBuilder()
+                            .setLogicalRef(e.logicalRef())
+                            .setFieldKey(e.fieldKey())
+                            .build())
+                    .toList();
+        } catch (Exception e) {
+            log.debug("bootstrap: could not extract secret_refs for {} ({}): {}",
+                    logicalId, instanceType, e.getMessage());
+            return List.of();
         }
     }
 

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RTMD Gateway Service Config",
+  "type": "object",
+  "properties": {
+    "mdgw_id": { "type": "string" },
+    "venue": { "type": "string" },
+    "nats_url": { "type": "string" },
+    "grpc_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "grpc_host": { "type": "string" },
+    "venue_config": { "type": "object" },
+    "venue_root": { "type": "string" },
+    "gateway_kv_prefix": { "type": "string" },
+    "rtmd_sub_bucket": { "type": "string" },
+    "sub_lease_ttl_s": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["mdgw_id", "venue"],
+  "additionalProperties": true
+}

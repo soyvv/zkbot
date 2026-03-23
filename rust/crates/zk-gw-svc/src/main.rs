@@ -148,7 +148,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-
     // ── NATS KV self-registration (after adapter connected + listener bound) ──
     let mut registration = if let Some(ref nats) = nats_client {
         let js = async_nats::jetstream::new(nats.clone());
@@ -156,11 +155,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".to_string());
         let kv_key = format!("{kv_prefix}.{}", cfg.gw_id);
         let grpc_address = format!("{}:{}", cfg.grpc_host, cfg.grpc_port);
+        let admin_port = if cfg.venue == "simulator" && cfg.enable_admin_controls {
+            Some(cfg.admin_grpc_port)
+        } else {
+            None
+        };
         let reg_proto = zk_infra_rs::discovery_registration::gw_registration(
             &cfg.gw_id,
             &grpc_address,
             &cfg.venue,
             cfg.account_id,
+            admin_port,
         );
         let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg_proto);
 

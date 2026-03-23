@@ -1,0 +1,36 @@
+schema_id: svc/oms
+version: 1
+config_schema: schemas/oms_config.schema.json
+field_descriptors:
+  # Reloadable fields
+  - path: /risk_check_enabled
+    reloadable: true
+  - path: /handle_external_orders
+    reloadable: true
+  - path: /max_pending_reports
+    reloadable: true
+  - path: /max_cached_orders
+    reloadable: true
+  # Restart-required fields
+  - path: /nats_url
+    reloadable: false
+  - path: /redis_url
+    reloadable: false
+  - path: /pg_url
+    reloadable: false
+  - path: /grpc_port
+    reloadable: false
+  - path: /grpc_host
+    reloadable: false
+  - path: /cmd_channel_buf
+    reloadable: false
+  - path: /gw_exec_shard_count
+    reloadable: false
+  - path: /gw_exec_queue_capacity
+    reloadable: false
+  - path: /kv_heartbeat_secs
+    reloadable: false
+  # Secret fields
+  - path: /bootstrap_token
+    reloadable: false
+    resolved_secret: true

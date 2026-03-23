@@ -1,14 +1,35 @@
 venue: okx
-version: 1
+schema_id: venue/okx
+version: 2
 capabilities:
   gw:
     language: rust
     entrypoint: rust::okx::gw::OkxGatewayAdaptor
     config_schema: schemas/gw_config.schema.json
+    field_descriptors:
+      - path: /secret_ref
+        secret_ref: true
+        reloadable: false
+      - path: /passphrase_ref
+        secret_ref: true
+        reloadable: false
+      - path: /api_base_url
+        reloadable: false
+      - path: /ws_public_url
+        reloadable: false
+      - path: /ws_private_url
+        reloadable: false
   rtmd:
     language: rust
     entrypoint: rust::okx::rtmd::OkxRtmdAdaptor
     config_schema: schemas/rtmd_config.schema.json
+    field_descriptors:
+      - path: /secret_ref
+        secret_ref: true
+        reloadable: false
+      - path: /passphrase_ref
+        secret_ref: true
+        reloadable: false
   refdata:
     language: python
     entrypoint: python:okx.refdata:OkxRefdataLoader

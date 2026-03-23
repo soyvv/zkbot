@@ -1,0 +1,17 @@
+schema_id: svc/engine
+version: 1
+config_schema: schemas/engine_config.schema.json
+field_descriptors:
+  - path: /nats_url
+    reloadable: false
+  - path: /grpc_port
+    reloadable: false
+  - path: /grpc_host
+    reloadable: false
+  - path: /timer_interval_ms
+    reloadable: true
+  - path: /kline_interval
+    reloadable: true
+  - path: /bootstrap_token
+    reloadable: false
+    resolved_secret: true

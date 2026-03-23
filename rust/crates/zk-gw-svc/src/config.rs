@@ -79,8 +79,7 @@ impl GwSvcConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(51051),
-            grpc_host: std::env::var("ZK_GRPC_HOST")
-                .unwrap_or_else(|_| "127.0.0.1".to_string()),
+            grpc_host: std::env::var("ZK_GRPC_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
             nats_url: std::env::var("ZK_NATS_URL").ok(),
             exec_shard_count,
             exec_queue_capacity,
@@ -102,8 +101,7 @@ impl GwSvcConfig {
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
             bootstrap_token: std::env::var("ZK_BOOTSTRAP_TOKEN").unwrap_or_default(),
-            instance_type: std::env::var("ZK_INSTANCE_TYPE")
-                .unwrap_or_else(|_| "GW".into()),
+            instance_type: std::env::var("ZK_INSTANCE_TYPE").unwrap_or_else(|_| "GW".into()),
             env: std::env::var("ZK_ENV").unwrap_or_else(|_| "dev".into()),
         }
     }

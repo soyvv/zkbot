@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let files = [
         "zk/common/v1/common.proto",
+        "zk/config/v1/config.proto",
         "zk/discovery/v1/discovery.proto",
         "zk/oms/v1/oms.proto",
         "zk/oms/v1/oms_service.proto",

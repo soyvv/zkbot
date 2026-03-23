@@ -26,6 +26,11 @@ pub mod zk {
             include!(concat!(env!("OUT_DIR"), "/zk.common.v1.rs"));
         }
     }
+    pub mod config {
+        pub mod v1 {
+            include!(concat!(env!("OUT_DIR"), "/zk.config.v1.rs"));
+        }
+    }
     pub mod discovery {
         pub mod v1 {
             include!(concat!(env!("OUT_DIR"), "/zk.discovery.v1.rs"));

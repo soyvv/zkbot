@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gateway Service Config",
+  "type": "object",
+  "properties": {
+    "gw_id": { "type": "string" },
+    "account_id": { "type": "integer" },
+    "venue": { "type": "string" },
+    "grpc_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "grpc_host": { "type": "string" },
+    "nats_url": { "type": "string" },
+    "venue_config": { "type": "object" },
+    "venue_root": { "type": "string" },
+    "exec_shard_count": { "type": "integer", "minimum": 1 },
+    "exec_queue_capacity": { "type": "integer", "minimum": 1 },
+    "mock_balances": { "type": "string" },
+    "fill_delay_ms": { "type": "integer", "minimum": 0 },
+    "match_policy": { "type": "string", "enum": ["immediate", "fcfs"] },
+    "admin_grpc_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "enable_admin_controls": { "type": "boolean" },
+    "bootstrap_token": { "type": "string" },
+    "instance_type": { "type": "string" },
+    "env": { "type": "string" }
+  },
+  "required": ["gw_id"],
+  "additionalProperties": true
+}

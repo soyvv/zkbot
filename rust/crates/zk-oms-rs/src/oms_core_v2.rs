@@ -24,6 +24,7 @@ use crate::{
     position_v2::PositionStoreV2,
     reservation_v2::ReservationStoreV2,
     utils::{gen_timestamp_ms, round_to_precision, SPOT_INSTRUMENT_TYPE},
+    validation::{validate_cancel_request, validate_order_request},
 };
 
 // ---------------------------------------------------------------------------
@@ -351,6 +352,14 @@ impl OmsCoreV2 {
             gen_timestamp_ms()
         };
 
+        if let Err(msg) = validate_order_request(&req) {
+            warn!(
+                order_id,
+                account_id, "rejecting invalid order request in OmsCoreV2: {msg}"
+            );
+            return actions;
+        }
+
         // 1. Check panic mode
         if self.panic_accounts.contains(&account_id) {
             return vec![];
@@ -360,6 +369,16 @@ impl OmsCoreV2 {
         let mut meta = match self.resolve_order_meta(&req) {
             Ok(m) => m,
             Err(errors) => {
+                let error_msg = errors.join("; ");
+                warn!(
+                    order_id,
+                    account_id,
+                    instrument_code = %req.instrument_code,
+                    qty = req.qty,
+                    price = req.price,
+                    source_id = %req.source_id,
+                    "resolve_order_meta rejected order request: {error_msg}"
+                );
                 let rejection = Rejection {
                     source: RejectionSource::OmsReject as i32,
                     reason: RejectionReason::RejReasonOmsInternalError as i32,
@@ -384,7 +403,6 @@ impl OmsCoreV2 {
                 };
                 self.orders
                     .create_order(order_id, &req, &stub_meta, flags, None);
-                let error_msg = errors.join("; ");
                 {
                     let (live, detail) = self.orders.get_live_and_detail_mut(order_id).unwrap();
                     OrderStoreV2::apply_oms_error(
@@ -701,6 +719,14 @@ impl OmsCoreV2 {
     fn process_cancel(&mut self, req: OrderCancelRequest) -> Vec<OmsActionV2> {
         let mut actions = Vec::new();
         let order_id = req.order_id;
+
+        if let Err(msg) = validate_cancel_request(&req) {
+            warn!(
+                order_id,
+                "rejecting invalid cancel request in OmsCoreV2: {msg}"
+            );
+            return actions;
+        }
 
         // Extract needed data from immutable borrow first
         let (is_external, is_terminal, gw_id, _account_id, _instrument_id, exch_ref_str) = {

@@ -1,6 +1,8 @@
 syntax = "proto3";
 package zk.pilot.v1;
 
+import "zk/config/v1/config.proto";
+
 // Bootstrap request/response for NATS subjects:
 //   zk.bootstrap.register   — service registers with Pilot on startup
 //   zk.bootstrap.deregister — service deregisters on clean shutdown
@@ -30,6 +32,8 @@ message BootstrapRegisterResponse {
     string error_message     = 8;
     string runtime_config    = 9;  // JSON-encoded service-specific config (venue_config for GW/MDGW, account bindings for OMS, etc.)
     int64  server_time_ms    = 10; // server timestamp for clock-skew detection
+    zk.config.v1.ConfigMetadata config_metadata = 11;      // config version, hash, loaded_at, source
+    repeated zk.config.v1.SecretRef secret_refs = 12;      // logical secret refs for this service (no raw values)
 }
 
 message BootstrapDeregisterRequest {

@@ -40,7 +40,7 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::latency::{publish_latency_batch, system_time_ns, LatencyEvent, LatencyTracker};
 
@@ -483,6 +483,16 @@ fn process_command(
                     tw_core_ns: writer_core_done_ts,
                     writer_dispatch_ts,
                 });
+                debug!(
+                    gw_id,
+                    order_id,
+                    gw_key = %gw_key,
+                    instrument = %request.instrument,
+                    exch_account_id = %request.exch_account_id,
+                    qty = request.scaled_qty,
+                    price = request.scaled_price,
+                    "dispatching SendOrderToGw from OMS writer"
+                );
                 if let Err(_action) = gw_executor.dispatch(
                     *order_id,
                     GwAction::SendOrder {
@@ -532,6 +542,14 @@ fn process_command(
                     };
                     // All oids in this group hash to the same shard, so any works as route_id.
                     let route_id = shard_oids[0];
+                    debug!(
+                        gw_id,
+                        shard_idx,
+                        gw_key = %gw_key,
+                        batch_size = shard_oids.len(),
+                        order_ids = ?shard_oids,
+                        "dispatching BatchSendOrdersToGw from OMS writer"
+                    );
                     if let Err(_action) = gw_executor.dispatch(
                         route_id,
                         GwAction::BatchSendOrders {
@@ -562,6 +580,13 @@ fn process_command(
                     .and_then(|d| d.cancel_req.as_ref())
                     .map(|r| (**r).clone())
                     .unwrap_or_default();
+                debug!(
+                    gw_id,
+                    order_id,
+                    gw_key = %gw_key,
+                    exch_order_ref = %request.exch_order_ref,
+                    "dispatching SendCancelToGw from OMS writer"
+                );
                 if let Err(_action) = gw_executor.dispatch(
                     *order_id,
                     GwAction::CancelOrder {
@@ -606,6 +631,14 @@ fn process_command(
                         cancel_requests: requests,
                     };
                     let route_id = shard_oids[0];
+                    debug!(
+                        gw_id,
+                        shard_idx,
+                        gw_key = %gw_key,
+                        batch_size = shard_oids.len(),
+                        order_ids = ?shard_oids,
+                        "dispatching BatchCancelToGw from OMS writer"
+                    );
                     if let Err(_action) = gw_executor.dispatch(
                         route_id,
                         GwAction::BatchCancel {

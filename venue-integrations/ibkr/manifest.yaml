@@ -1,10 +1,32 @@
 venue: ibkr
-version: 1
+schema_id: venue/ibkr
+version: 2
 capabilities:
   gw:
     language: python
     entrypoint: python:ibkr.gw:IbkrGatewayAdaptor
     config_schema: schemas/gw_config.schema.json
+    field_descriptors:
+      - path: /mode
+        reloadable: false
+      - path: /host
+        reloadable: false
+      - path: /port
+        reloadable: false
+      - path: /client_id
+        reloadable: false
+      - path: /account_code
+        reloadable: false
+      - path: /read_only
+        reloadable: true
+      - path: /max_msg_rate
+        reloadable: true
+      - path: /reconnect_delay_s
+        reloadable: false
+      - path: /reconnect_max_delay_s
+        reloadable: false
+      - path: /next_valid_id_timeout_s
+        reloadable: false
   rtmd:
     language: python
     entrypoint: python:ibkr.rtmd:IbkrRtmdAdaptor

@@ -11,3 +11,5 @@
 - when starting a benchmark script or test script, use a timer to detect a stuck state
 
 - dev-stack: zkbot/devops a local docker-compose env for local dev/debugging
+
+- when giving review feedback, need to give an overall quality/acceptance rating, and for each reivew item, need to lable with priority with semantics, like blocking/recommend/etc. 

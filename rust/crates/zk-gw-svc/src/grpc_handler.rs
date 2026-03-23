@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
+use tracing::{info, warn};
 
 use zk_proto_rs::zk::exch_gw::v1::BalanceUpdate;
 
@@ -10,6 +11,32 @@ use crate::proto::zk_gw_v1::gateway_service_server::GatewayService;
 use crate::proto::zk_gw_v1::*;
 use crate::reconnect::GatewayState;
 use crate::venue_adapter::*;
+
+fn validate_send_order_request(req: &SendOrderRequest) -> Result<(), &'static str> {
+    if req.correlation_id <= 0 {
+        return Err("place_order: correlation_id must be > 0");
+    }
+    if req.exch_account_id.trim().is_empty() {
+        return Err("place_order: exch_account_id is required");
+    }
+    if req.instrument.trim().is_empty() {
+        return Err("place_order: instrument is required");
+    }
+    if !req.scaled_qty.is_finite() || req.scaled_qty <= 0.0 {
+        return Err("place_order: scaled_qty must be finite and > 0");
+    }
+    if !req.scaled_price.is_finite() {
+        return Err("place_order: scaled_price must be finite");
+    }
+    Ok(())
+}
+
+fn validate_cancel_order_request(req: &CancelOrderRequest) -> Result<(), &'static str> {
+    if req.order_id <= 0 {
+        return Err("cancel_order: order_id must be > 0");
+    }
+    Ok(())
+}
 
 /// GatewayService gRPC handler.
 ///
@@ -33,12 +60,28 @@ impl GatewayService for GrpcHandler {
         request: Request<SendOrderRequest>,
     ) -> Result<Response<GatewayResponse>, Status> {
         let req = request.into_inner();
+        if let Err(msg) = validate_send_order_request(&req) {
+            warn!(
+                account_id = self.account_id,
+                correlation_id = req.correlation_id,
+                exch_account_id = %req.exch_account_id,
+                instrument = %req.instrument,
+                scaled_qty = req.scaled_qty,
+                scaled_price = req.scaled_price,
+                "rejecting invalid gateway place_order request: {msg}"
+            );
+            return Err(Status::invalid_argument(msg));
+        }
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
 
         let correlation_id = req.correlation_id;
+        let exch_account_id = req.exch_account_id.clone();
+        let instrument = req.instrument.clone();
+        let scaled_qty = req.scaled_qty;
+        let scaled_price = req.scaled_price;
         let venue_req = VenuePlaceOrder {
             correlation_id: req.correlation_id,
             exch_account_id: req.exch_account_id,
@@ -59,6 +102,15 @@ impl GatewayService for GrpcHandler {
                 correlation_id,
             },
         );
+        info!(
+            account_id = self.account_id,
+            correlation_id,
+            exch_account_id = %exch_account_id,
+            instrument = %instrument,
+            scaled_qty,
+            scaled_price,
+            "accepted gateway place_order request for async execution"
+        );
         Ok(Response::new(GatewayResponse {
             timestamp: ts,
             status: gateway_response::Status::GwRespStatusSuccess as i32,
@@ -77,7 +129,18 @@ impl GatewayService for GrpcHandler {
 
         let batch = request.into_inner();
         for req in batch.order_requests {
+            if let Err(msg) = validate_send_order_request(&req) {
+                warn!(
+                    account_id = self.account_id,
+                    correlation_id = req.correlation_id,
+                    "rejecting invalid gateway batch place_order request: {msg}"
+                );
+                return Err(Status::invalid_argument(msg));
+            }
             let correlation_id = req.correlation_id;
+            let instrument = req.instrument.clone();
+            let scaled_qty = req.scaled_qty;
+            let scaled_price = req.scaled_price;
             let venue_req = VenuePlaceOrder {
                 correlation_id: req.correlation_id,
                 exch_account_id: req.exch_account_id,
@@ -97,6 +160,14 @@ impl GatewayService for GrpcHandler {
                     correlation_id,
                 },
             );
+            info!(
+                account_id = self.account_id,
+                correlation_id,
+                instrument = %instrument,
+                scaled_qty,
+                scaled_price,
+                "accepted gateway batch place_order item for async execution"
+            );
         }
         Ok(Response::new(GatewayResponse {
             timestamp: ts,
@@ -110,12 +181,21 @@ impl GatewayService for GrpcHandler {
         request: Request<CancelOrderRequest>,
     ) -> Result<Response<GatewayResponse>, Status> {
         let req = request.into_inner();
+        if let Err(msg) = validate_cancel_order_request(&req) {
+            warn!(
+                account_id = self.account_id,
+                order_id = req.order_id,
+                "rejecting invalid gateway cancel_order request: {msg}"
+            );
+            return Err(Status::invalid_argument(msg));
+        }
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
 
         let order_id = req.order_id;
+        let exch_order_ref = req.exch_order_ref.clone();
         let venue_req = VenueCancelOrder {
             exch_order_ref: req.exch_order_ref,
             order_id: req.order_id,
@@ -128,6 +208,12 @@ impl GatewayService for GrpcHandler {
                 venue_req,
                 order_id,
             },
+        );
+        info!(
+            account_id = self.account_id,
+            order_id,
+            exch_order_ref = %exch_order_ref,
+            "accepted gateway cancel_order request for async execution"
         );
         Ok(Response::new(GatewayResponse {
             timestamp: ts,
@@ -147,7 +233,16 @@ impl GatewayService for GrpcHandler {
 
         let batch = request.into_inner();
         for req in batch.cancel_requests {
+            if let Err(msg) = validate_cancel_order_request(&req) {
+                warn!(
+                    account_id = self.account_id,
+                    order_id = req.order_id,
+                    "rejecting invalid gateway batch cancel_order request: {msg}"
+                );
+                return Err(Status::invalid_argument(msg));
+            }
             let order_id = req.order_id;
+            let exch_order_ref = req.exch_order_ref.clone();
             let venue_req = VenueCancelOrder {
                 exch_order_ref: req.exch_order_ref,
                 order_id: req.order_id,
@@ -159,6 +254,12 @@ impl GatewayService for GrpcHandler {
                     venue_req,
                     order_id,
                 },
+            );
+            info!(
+                account_id = self.account_id,
+                order_id,
+                exch_order_ref = %exch_order_ref,
+                "accepted gateway batch cancel_order item for async execution"
             );
         }
         Ok(Response::new(GatewayResponse {
@@ -258,5 +359,55 @@ impl GatewayService for GrpcHandler {
                 uptime_ms: 0,
             },
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_cancel_order_request, validate_send_order_request};
+    use crate::proto::zk_gw_v1::{CancelOrderRequest, SendOrderRequest};
+
+    #[test]
+    fn place_order_validation_rejects_zero_correlation_id() {
+        let req = SendOrderRequest {
+            correlation_id: 0,
+            exch_account_id: "acc".into(),
+            instrument: "BTC-USDT".into(),
+            scaled_qty: 1.0,
+            scaled_price: 1.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_send_order_request(&req),
+            Err("place_order: correlation_id must be > 0")
+        );
+    }
+
+    #[test]
+    fn place_order_validation_rejects_empty_instrument() {
+        let req = SendOrderRequest {
+            correlation_id: 1,
+            exch_account_id: "acc".into(),
+            instrument: " ".into(),
+            scaled_qty: 1.0,
+            scaled_price: 1.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_send_order_request(&req),
+            Err("place_order: instrument is required")
+        );
+    }
+
+    #[test]
+    fn cancel_order_validation_rejects_zero_order_id() {
+        let req = CancelOrderRequest {
+            order_id: 0,
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_cancel_order_request(&req),
+            Err("cancel_order: order_id must be > 0")
+        );
     }
 }

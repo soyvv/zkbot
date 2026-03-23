@@ -1,5 +1,8 @@
 package com.zkbot.pilot.ops;
 
+import com.zkbot.pilot.ops.dto.ReconRunEntry;
+import com.zkbot.pilot.ops.dto.ReconcileResponse;
+import com.zkbot.pilot.ops.dto.RegistrationAuditEntry;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -16,20 +19,20 @@ public class OpsController {
     }
 
     @GetMapping("/audit/registrations")
-    public List<Map<String, Object>> registrationAudit(
+    public List<RegistrationAuditEntry> registrationAudit(
             @RequestParam(required = false) String logical_id,
             @RequestParam(defaultValue = "50") int limit) {
         return service.listRegistrationAudit(logical_id, limit);
     }
 
     @GetMapping("/audit/reconciliation")
-    public List<Map<String, Object>> reconciliationAudit(
+    public List<ReconRunEntry> reconciliationAudit(
             @RequestParam(defaultValue = "50") int limit) {
         return service.listReconciliationAudit(limit);
     }
 
     @PostMapping("/reconcile")
-    public Map<String, Object> triggerReconcile(@RequestBody Map<String, Object> request) {
+    public ReconcileResponse triggerReconcile(@RequestBody Map<String, Object> request) {
         return service.triggerReconcile(request);
     }
 }

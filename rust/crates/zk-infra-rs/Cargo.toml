@@ -15,6 +15,15 @@ bytes     = "1"
 # config — env-var loading into typed structs
 envy = "0.4"
 
+# config_mgmt — normalization, hashing, diffing
+sha2 = "0.10"
+hex = "0.4"
+serde_json = "1"
+
+# vault — secret resolution
+reqwest = { version = "0.12", features = ["json"] }
+async-trait = "0.1"
+
 # Proto types (for service-registry discovery decoding)
 prost        = { workspace = true }
 futures      = "0.3"

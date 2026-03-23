@@ -16,9 +16,10 @@
 //! 13. Await shutdown signal (SIGTERM / SIGINT).
 
 use zk_oms_svc::{
-    config, db, grpc_handler, gw_client, gw_executor::GwExecutorPool, latency::LatencyEvent,
-    nats_handler, oms_actor, persist_executor::PersistExecutorPool, proto,
-    publish_executor::PublishExecutorPool, redis_writer,
+    config, config_introspection::OmsConfigIntrospection, db, grpc_handler, gw_client,
+    gw_executor::GwExecutorPool, latency::LatencyEvent, nats_handler, oms_actor,
+    persist_executor::PersistExecutorPool, proto, publish_executor::PublishExecutorPool,
+    redis_writer,
 };
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -39,7 +40,8 @@ use crate::{
     redis_writer::RedisWriter,
 };
 use zk_infra_rs::{
-    nats_kv::KvRegistryClient, service_registry::ServiceRegistration, tracing as zk_tracing,
+    config_mgmt::ConfigEnvelope, nats_kv::KvRegistryClient, service_registry::ServiceRegistration,
+    tracing as zk_tracing,
 };
 use zk_oms_rs::{config::ConfdataManager, oms_core_v2::OmsCoreV2};
 
@@ -47,6 +49,7 @@ use zk_oms_rs::{config::ConfdataManager, oms_core_v2::OmsCoreV2};
 async fn main() -> anyhow::Result<()> {
     // ── 1. Config ─────────────────────────────────────────────────────────────
     let cfg = config::load().expect("Failed to load OmsSvcConfig from env");
+    let config_envelope = Arc::new(ConfigEnvelope::new(cfg.clone(), "env_direct"));
 
     // ── 2. Tracing ────────────────────────────────────────────────────────────
     zk_tracing::init_tracing(&format!("zk-oms-svc[{}]", cfg.oms_id));
@@ -356,6 +359,13 @@ async fn main() -> anyhow::Result<()> {
         oms_id: Arc::new(cfg.oms_id.clone()),
     };
 
+    let config_handler = OmsConfigIntrospection {
+        envelope: config_envelope,
+        oms_id: Arc::new(cfg.oms_id.clone()),
+    };
+
+    use crate::proto::config_svc::config_introspection_service_server::ConfigIntrospectionServiceServer;
+
     let listen_addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port)
         .parse()
         .expect("invalid grpc_port");
@@ -365,6 +375,7 @@ async fn main() -> anyhow::Result<()> {
         info!(%listen_addr, "gRPC server listening");
         Server::builder()
             .add_service(OmsServiceServer::new(handler))
+            .add_service(ConfigIntrospectionServiceServer::new(config_handler))
             .serve_with_shutdown(listen_addr, async move {
                 grpc_shutdown.cancelled().await;
             })

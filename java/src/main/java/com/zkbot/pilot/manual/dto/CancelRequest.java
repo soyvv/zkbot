@@ -4,5 +4,5 @@ import java.util.List;
 
 public record CancelRequest(
         long accountId,
-        List<Long> orderIds
+        List<String> orderIds
 ) {}

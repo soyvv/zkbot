@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use zk_proto_rs::zk::exch_gw::v1::{
     order_report_entry, OrderReport, OrderReportEntry, OrderReportType,
@@ -96,6 +96,10 @@ impl GwExecPool {
     /// Returns `Err(action)` if the shard queue is full.
     pub fn dispatch(&self, order_id: i64, action: GwExecAction) -> Result<(), GwExecAction> {
         let shard = (order_id as u64 % self.shard_count as u64) as usize;
+        debug!(
+            order_id,
+            shard, "dispatching gateway execution action to shard"
+        );
         match self.shards[shard].try_send(action) {
             Ok(()) => Ok(()),
             Err(mpsc::error::TrySendError::Full(a)) => Err(a),
@@ -169,6 +173,15 @@ async fn gw_exec_worker(
                 venue_req,
                 correlation_id,
             } => {
+                debug!(
+                    shard_id,
+                    correlation_id,
+                    instrument = %venue_req.instrument,
+                    exch_account_id = %venue_req.exch_account_id,
+                    qty = venue_req.qty,
+                    price = venue_req.price,
+                    "gw exec worker dequeued place_order"
+                );
                 match adapter.place_order(venue_req).await {
                     Ok(ack) if !ack.success => {
                         // Adapter returned a logical rejection (not a transport error).
@@ -193,6 +206,7 @@ async fn gw_exec_worker(
                         nats_publisher.publish_order_report(&report).await;
                     }
                     Ok(_) => {
+                        debug!(shard_id, correlation_id, "gw adapter accepted place_order");
                         // Success — normal reports flow through the event_tx path.
                     }
                 }
@@ -201,21 +215,36 @@ async fn gw_exec_worker(
             GwExecAction::CancelOrder {
                 venue_req,
                 order_id,
-            } => match adapter.cancel_order(venue_req).await {
-                Ok(ack) if !ack.success => {
-                    let msg = ack.error_message.unwrap_or_default();
-                    warn!(shard_id, order_id, msg, "adapter rejected cancel_order");
-                    let report = build_cancel_rejection_report(order_id, &gw_id, account_id, &msg);
-                    nats_publisher.publish_order_report(&report).await;
+            } => {
+                debug!(
+                    shard_id,
+                    order_id,
+                    exch_order_ref = %venue_req.exch_order_ref,
+                    "gw exec worker dequeued cancel_order"
+                );
+                match adapter.cancel_order(venue_req).await {
+                    Ok(ack) if !ack.success => {
+                        let msg = ack.error_message.unwrap_or_default();
+                        warn!(shard_id, order_id, msg, "adapter rejected cancel_order");
+                        let report =
+                            build_cancel_rejection_report(order_id, &gw_id, account_id, &msg);
+                        nats_publisher.publish_order_report(&report).await;
+                    }
+                    Err(e) => {
+                        warn!(shard_id, order_id, error = %e, "adapter cancel_order failed");
+                        let report = build_cancel_rejection_report(
+                            order_id,
+                            &gw_id,
+                            account_id,
+                            &e.to_string(),
+                        );
+                        nats_publisher.publish_order_report(&report).await;
+                    }
+                    Ok(_) => {
+                        debug!(shard_id, order_id, "gw adapter accepted cancel_order");
+                    }
                 }
-                Err(e) => {
-                    warn!(shard_id, order_id, error = %e, "adapter cancel_order failed");
-                    let report =
-                        build_cancel_rejection_report(order_id, &gw_id, account_id, &e.to_string());
-                    nats_publisher.publish_order_report(&report).await;
-                }
-                Ok(_) => {}
-            },
+            }
         }
     }
 }

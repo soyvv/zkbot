@@ -1,7 +1,6 @@
 package com.zkbot.pilot.bot;
 
-import com.zkbot.pilot.bot.dto.StartExecutionRequest;
-import com.zkbot.pilot.bot.dto.StartExecutionResponse;
+import com.zkbot.pilot.bot.dto.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,13 +28,13 @@ public class LegacyCompatController {
     }
 
     @PostMapping("/v1/strategy-executions/stop")
-    public Map<String, Object> stopExecution(@RequestBody LegacyStopRequest body) {
+    public ExecutionResponse stopExecution(@RequestBody LegacyStopRequest body) {
         return service.stopExecution(body.execution_id(),
                 body.stop_reason() != null ? body.stop_reason() : "graceful");
     }
 
     @GetMapping("/v1/strategies/{id}")
-    public Map<String, Object> getStrategy(@PathVariable String id) {
+    public StrategyResponse getStrategy(@PathVariable String id) {
         return service.getStrategy(id);
     }
 

@@ -87,6 +87,47 @@ Pilot uses this combination to:
 - surface drift
 - decide whether reload or restart is required
 
+### Bundled manifests remain authoritative
+
+For manifest/schema-driven config management:
+
+- bundled manifests and schemas in the codebase/binary are the authoritative contract
+- Pilot may keep an operational mirror/registry in DB for UI, version listing, activation state,
+  and validation support
+- that DB copy must be derived from or synchronized against the bundled manifests
+- mismatch between bundled authoritative manifest/schema and active Pilot registry state should be
+  treated as an error, not normal drift
+
+### Schema/manifest authority model (2026-03-22)
+
+Bundled manifests (repo/binary-baked) are the authoritative source of truth for schema semantics.
+Pilot DB `cfg.schema_resource` is an operational mirror/registry derived from bundled manifests
+via startup sync, used for UI reads, version tracking, activation state, and config validation.
+
+Rules:
+
+- every manifest includes identity metadata: `schema_id`, `version`, `content_hash`
+- `SchemaRegistrySyncer` runs on Pilot startup, syncs bundled manifests to DB
+- if bundled manifest hash does not match DB record for same schema_id + version, Pilot fails
+  closed for that resource (refuses config operations, logs SCHEMA_MISMATCH)
+- `/v1/schema` is primarily a read API; admin endpoints for activate/deprecate among provisioned
+  versions only
+- mismatch between bundled and DB is always an error, never a silent fallback
+
+### Desired config ownership: service-specific tables (2026-03-22)
+
+`cfg.logical_instance` is the identity/topology row only. It should not become the primary
+config-version authority.
+
+Rules:
+
+- desired runtime config, `config_version`, and `config_hash` live on service-specific tables:
+  `cfg.oms_instance`, `cfg.gateway_instance`, `cfg.engine_instance`, `cfg.mdgw_instance`
+- `cfg.logical_instance.runtime_config` is deprecated as config authority (column stays for compat)
+- `DesiredConfigRepository` routes by instance_type to the correct service-specific table
+- drift detection compares desired config from service-specific table vs live effective config
+  from runtime introspection
+
 ## zk-trading-sdk-rs (Phase 7)
 
 ### service_type case: case-insensitive matching with lowercase contract

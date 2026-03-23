@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, Ordering};
 
+use uuid::Uuid;
 use zk_proto_rs::zk::{
     exch_gw::v1::{
         order_report_entry::Report, ExchangeOrderStatus, OrderIdLinkageReport, OrderInfo,
@@ -17,10 +17,8 @@ use crate::{
     models::{MatchResult, SimOrder, SimResult},
 };
 
-static SIM_COUNTER: AtomicI64 = AtomicI64::new(1);
-
 fn next_id() -> String {
-    SIM_COUNTER.fetch_add(1, Ordering::Relaxed).to_string()
+    Uuid::new_v4().to_string()
 }
 
 /// Exchange simulator: maintains pending order state and drives `MatchPolicy`.
@@ -338,5 +336,31 @@ fn make_state_entry_with_status(order: &SimOrder, status: ExchangeOrderStatus) -
             unfilled_qty: order.remaining_qty,
             ..Default::default()
         })),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SimulatorCore;
+    use crate::match_policy::ImmediateMatchPolicy;
+    use uuid::Uuid;
+    use zk_proto_rs::zk::gateway::v1::SendOrderRequest;
+
+    #[test]
+    fn simulator_uses_uuid_for_exchange_order_refs() {
+        let mut sim = SimulatorCore::new(Box::new(ImmediateMatchPolicy), "simulator");
+        let results = sim.on_new_order(
+            SendOrderRequest {
+                correlation_id: 123,
+                instrument: "BTC-USDT".into(),
+                scaled_qty: 1.0,
+                scaled_price: 100.0,
+                ..Default::default()
+            },
+            1_700_000_000_000,
+        );
+
+        let exch_order_ref = &results[0].order_report.exch_order_ref;
+        assert!(Uuid::parse_str(exch_order_ref).is_ok());
     }
 }

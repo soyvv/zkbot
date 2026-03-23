@@ -37,7 +37,10 @@ pub async fn build_adapter(cfg: &GwSvcConfig) -> anyhow::Result<BuiltVenue> {
         ) {
             if cap.language == "python" {
                 zk_pyo3_bridge::manifest::validate_config(
-                    &root, &cfg.venue, cap, &cfg.venue_config,
+                    &root,
+                    &cfg.venue,
+                    cap,
+                    &cfg.venue_config,
                 )?;
                 let ep = zk_pyo3_bridge::manifest::parse_python_entrypoint(&cap.entrypoint)?;
                 let rt = zk_pyo3_bridge::py_runtime::PyRuntime::initialize(&root)?;

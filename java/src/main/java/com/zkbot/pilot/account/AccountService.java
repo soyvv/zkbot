@@ -1,22 +1,22 @@
 package com.zkbot.pilot.account;
 
-import com.zkbot.pilot.account.dto.CreateAccountRequest;
-import com.zkbot.pilot.account.dto.UpdateAccountRequest;
+import com.zkbot.pilot.account.dto.*;
 import com.zkbot.pilot.discovery.DiscoveryCache;
 import com.zkbot.pilot.grpc.OmsGrpcClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import zk.discovery.v1.Discovery.ServiceRegistration;
 import zk.oms.v1.Oms;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Optional;
 
 @Service
 public class AccountService {
@@ -26,102 +26,97 @@ public class AccountService {
     private final AccountRepository repository;
     private final OmsGrpcClient omsClient;
     private final DiscoveryCache discoveryCache;
-    private final StringRedisTemplate redisTemplate;
 
     public AccountService(AccountRepository repository, OmsGrpcClient omsClient,
-                           DiscoveryCache discoveryCache, StringRedisTemplate redisTemplate) {
+                           DiscoveryCache discoveryCache) {
         this.repository = repository;
         this.omsClient = omsClient;
         this.discoveryCache = discoveryCache;
-        this.redisTemplate = redisTemplate;
     }
 
-    public Map<String, Object> createAccount(CreateAccountRequest req) {
+    public AccountSummaryResponse createAccount(CreateAccountRequest req) {
         repository.createAccount(req.accountId(), req.exchAccountId(), req.venue(),
                 req.brokerType(), req.accountType(), req.baseCurrency());
-        return Map.of("status", "created", "account_id", req.accountId());
+        return new AccountSummaryResponse(req.accountId(), req.exchAccountId(), req.venue(),
+                "ACTIVE", req.brokerType(), req.accountType(), req.baseCurrency(), null, null);
     }
 
-    public List<Map<String, Object>> listAccounts(String venue, String omsId, String status, int limit) {
-        return repository.listAccounts(venue, omsId, status, limit);
+    public List<AccountSummaryResponse> listAccounts(String venue, String omsId, String status,
+                                                      int limit, boolean includeSummary,
+                                                      boolean includeBinding) {
+        var rows = repository.listAccounts(venue, omsId, status, limit);
+        return rows.stream()
+                .map(row -> {
+                    long accountId = ((Number) row.get("account_id")).longValue();
+                    AccountSummaryStats stats = includeSummary ? computeSummaryStats(accountId) : null;
+                    AccountBindingResponse bindingDto = includeBinding
+                            ? Optional.ofNullable(repository.getAccountBinding(accountId))
+                                      .map(this::toBindingResponse)
+                                      .orElse(null)
+                            : null;
+                    return toAccountSummary(row, bindingDto, stats);
+                })
+                .toList();
     }
 
-    public Map<String, Object> getAccount(long accountId) {
+    public AccountSummaryResponse getAccount(long accountId) {
         Map<String, Object> account = repository.getAccount(accountId);
         if (account == null) {
-            return Map.of("error", "account_not_found", "account_id", accountId);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Account not found: " + accountId);
         }
-        Map<String, Object> result = new LinkedHashMap<>(account);
         Map<String, Object> binding = repository.getAccountBinding(accountId);
-        if (binding != null) {
-            result.put("binding", binding);
-        }
-        return result;
+        AccountBindingResponse bindingDto = binding != null ? toBindingResponse(binding) : null;
+        return toAccountSummary(account, bindingDto, null);
     }
 
-    public Map<String, Object> updateAccount(long accountId, UpdateAccountRequest req) {
+    public AccountSummaryResponse updateAccount(long accountId, UpdateAccountRequest req) {
         repository.updateAccount(accountId, req.status());
-        return Map.of("status", "updated", "account_id", accountId);
+        Map<String, Object> account = repository.getAccount(accountId);
+        if (account == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Account not found: " + accountId);
+        }
+        return toAccountSummary(account, null, null);
     }
 
-    public List<Map<String, Object>> getBalances(long accountId) {
+    public List<BalanceEntry> getBalances(long accountId) {
         String omsId = resolveOmsId(accountId);
         if (omsId == null) {
-            return List.of(Map.of("error", "no_oms_binding", "account_id", accountId));
-        }
-
-        Set<String> keys = redisTemplate.keys("oms:" + omsId + ":balance:" + accountId + ":*");
-        if (keys == null || keys.isEmpty()) {
             return List.of();
         }
 
-        List<Map<String, Object>> balances = new ArrayList<>();
-        for (String key : keys) {
-            String value = redisTemplate.opsForValue().get(key);
-            if (value == null) continue;
+        Oms.QueryBalancesRequest req = Oms.QueryBalancesRequest.newBuilder()
+                .setAccountId(accountId)
+                .build();
+        Oms.QueryBalancesResponse resp = omsClient.queryBalances(omsId, req);
 
-            // Key format: oms:<oms_id>:balance:<account_id>:<asset>
-            String[] parts = key.split(":");
-            String asset = parts.length >= 5 ? parts[4] : "unknown";
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("asset", asset);
-            entry.put("raw", value);
-            balances.add(entry);
-        }
-        return balances;
+        return resp.getBalancesList().stream()
+                .map(b -> new BalanceEntry(b.getAsset(), b.getTotalQty(), b.getFrozenQty(), b.getAvailQty()))
+                .toList();
     }
 
-    public List<Map<String, Object>> getPositions(long accountId) {
+    public List<PositionEntry> getPositions(long accountId) {
         String omsId = resolveOmsId(accountId);
         if (omsId == null) {
-            return List.of(Map.of("error", "no_oms_binding", "account_id", accountId));
-        }
-
-        Set<String> keys = redisTemplate.keys("oms:" + omsId + ":position:" + accountId + ":*");
-        if (keys == null || keys.isEmpty()) {
             return List.of();
         }
 
-        List<Map<String, Object>> positions = new ArrayList<>();
-        for (String key : keys) {
-            String value = redisTemplate.opsForValue().get(key);
-            if (value == null) continue;
+        Oms.QueryPositionRequest req = Oms.QueryPositionRequest.newBuilder()
+                .setAccountId(accountId)
+                .build();
+        Oms.PositionResponse resp = omsClient.queryPosition(omsId, req);
 
-            // Key format: oms:<oms_id>:position:<account_id>:<instrument>:<side>
-            String[] parts = key.split(":");
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("instrument", parts.length >= 5 ? parts[4] : "unknown");
-            entry.put("side", parts.length >= 6 ? parts[5] : "unknown");
-            entry.put("raw", value);
-            positions.add(entry);
-        }
-        return positions;
+        return resp.getPositionsList().stream()
+                .map(p -> new PositionEntry(
+                        p.getInstrumentCode(),
+                        shortLongShort(p.getLongShortType()),
+                        p.getTotalQty(), p.getFrozenQty(), p.getAvailQty()))
+                .toList();
     }
 
-    public List<Map<String, Object>> getOpenOrders(long accountId) {
+    public List<OpenOrderEntry> getOpenOrders(long accountId) {
         String omsId = resolveOmsId(accountId);
         if (omsId == null) {
-            return List.of(Map.of("error", "no_oms_binding", "account_id", accountId));
+            return List.of();
         }
 
         Oms.QueryOpenOrderRequest req = Oms.QueryOpenOrderRequest.newBuilder()
@@ -129,68 +124,45 @@ public class AccountService {
                 .build();
         Oms.OrderDetailResponse resp = omsClient.queryOpenOrders(omsId, req);
 
-        List<Map<String, Object>> orders = new ArrayList<>();
+        List<OpenOrderEntry> orders = new ArrayList<>();
         for (Oms.Order o : resp.getOrdersList()) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("order_id", o.getOrderId());
-            entry.put("exch_order_ref", o.getExchOrderRef());
-            entry.put("instrument", o.getInstrument());
-            entry.put("side", o.getBuySellType().name());
-            entry.put("price", o.getPrice());
-            entry.put("qty", o.getQty());
-            entry.put("filled_qty", o.getFilledQty());
-            entry.put("filled_avg_price", o.getFilledAvgPrice());
-            orders.add(entry);
+            orders.add(new OpenOrderEntry(
+                    o.getOrderId(), o.getExchOrderRef(), o.getInstrument(),
+                    shortSide(o.getBuySellType()), shortOrderStatus(o.getOrderStatus()),
+                    o.getPrice(), o.getQty(),
+                    o.getFilledQty(), o.getFilledAvgPrice(),
+                    o.getCreatedAt(), o.getUpdatedAt()));
         }
         return orders;
     }
 
-    public List<Map<String, Object>> getTrades(long accountId, int limit) {
-        return repository.listTradesForAccount(accountId, limit);
+    public List<TradeEntry> getTrades(long accountId, int limit) {
+        return repository.listTradesForAccount(accountId, limit).stream()
+                .map(AccountService::toTradeEntry)
+                .toList();
     }
 
-    public List<Map<String, Object>> getActivities(long accountId, int limit) {
-        return repository.listActivitiesForAccount(accountId, limit);
+    public List<ActivityEntry> getActivities(long accountId, int limit) {
+        return repository.listActivitiesForAccount(accountId, limit).stream()
+                .map(AccountService::toActivityEntry)
+                .toList();
     }
 
-    public Map<String, Object> getRuntimeBinding(long accountId) {
+    public AccountBindingResponse getRuntimeBinding(long accountId) {
         Map<String, Object> binding = repository.getAccountBinding(accountId);
         if (binding == null) {
-            return Map.of("error", "no_binding", "account_id", accountId);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No binding for account: " + accountId);
         }
-
-        Map<String, Object> result = new LinkedHashMap<>(binding);
-
-        Object omsId = binding.get("oms_id");
-        if (omsId != null) {
-            String omsKey = "svc.oms." + omsId;
-            ServiceRegistration reg = discoveryCache.get(omsKey);
-            result.put("oms_live", reg != null);
-            if (reg != null && reg.hasEndpoint()) {
-                result.put("oms_address", reg.getEndpoint().getAddress());
-            }
-        }
-
-        Object gwId = binding.get("gw_id");
-        if (gwId != null) {
-            String gwKey = "svc.gw." + gwId;
-            ServiceRegistration reg = discoveryCache.get(gwKey);
-            result.put("gw_live", reg != null);
-            if (reg != null && reg.hasEndpoint()) {
-                result.put("gw_address", reg.getEndpoint().getAddress());
-            }
-        }
-
-        return result;
+        return toBindingResponse(binding);
     }
 
-    public Map<String, Object> cancelOrders(long accountId, List<Long> orderIds) {
+    public CancelOrdersResponse cancelOrders(long accountId, List<Long> orderIds) {
         String omsId = resolveOmsId(accountId);
         if (omsId == null) {
-            return Map.of("error", "no_oms_binding", "account_id", accountId);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No OMS binding for account: " + accountId);
         }
 
-        List<Map<String, Object>> results = new ArrayList<>();
+        List<CancelOrderResult> results = new ArrayList<>();
         for (long orderId : orderIds) {
             try {
                 Oms.CancelOrderRequest req = Oms.CancelOrderRequest.newBuilder()
@@ -199,20 +171,90 @@ public class AccountService {
                                 .build())
                         .build();
                 Oms.OMSResponse resp = omsClient.cancelOrder(omsId, req);
-                results.add(Map.of(
-                        "order_id", orderId,
-                        "status", resp.getStatus().name(),
-                        "message", resp.getMessage()));
+                results.add(new CancelOrderResult(orderId, resp.getStatus().name(), resp.getMessage()));
             } catch (Exception e) {
                 log.error("Failed to cancel order {} for account {}", orderId, accountId, e);
-                results.add(Map.of(
-                        "order_id", orderId,
-                        "status", "ERROR",
-                        "message", e.getMessage()));
+                results.add(new CancelOrderResult(orderId, "ERROR", e.getMessage()));
             }
         }
 
-        return Map.of("account_id", accountId, "results", results);
+        return new CancelOrdersResponse(accountId, results);
+    }
+
+    // --- summary stats (gRPC to OMS) ---
+
+    private AccountSummaryStats computeSummaryStats(long accountId) {
+        String omsId = resolveOmsId(accountId);
+        if (omsId == null) {
+            return new AccountSummaryStats(0, 0, "unknown");
+        }
+
+        int positionCount = 0;
+        int openOrderCount = 0;
+        try {
+            Oms.QueryPositionRequest posReq = Oms.QueryPositionRequest.newBuilder()
+                    .setAccountId(accountId)
+                    .build();
+            positionCount = omsClient.queryPosition(omsId, posReq).getPositionsCount();
+        } catch (Exception e) {
+            log.warn("Failed to query positions for account {} from OMS {}", accountId, omsId, e);
+        }
+
+        try {
+            Oms.QueryOpenOrderRequest orderReq = Oms.QueryOpenOrderRequest.newBuilder()
+                    .setAccountId(accountId)
+                    .build();
+            openOrderCount = omsClient.queryOpenOrders(omsId, orderReq).getOrdersCount();
+        } catch (Exception e) {
+            log.warn("Failed to query open orders for account {} from OMS {}", accountId, omsId, e);
+        }
+
+        return new AccountSummaryStats(positionCount, openOrderCount, "ok");
+    }
+
+    // --- mapping helpers ---
+
+    private AccountSummaryResponse toAccountSummary(Map<String, Object> row,
+                                                     AccountBindingResponse binding,
+                                                     AccountSummaryStats summary) {
+        return new AccountSummaryResponse(
+                ((Number) row.get("account_id")).longValue(),
+                (String) row.get("exch_account_id"),
+                (String) row.get("venue"),
+                (String) row.get("status"),
+                (String) row.get("broker_type"),
+                (String) row.get("account_type"),
+                (String) row.get("base_currency"),
+                binding,
+                summary
+        );
+    }
+
+    private AccountBindingResponse toBindingResponse(Map<String, Object> binding) {
+        String omsId = objToString(binding.get("oms_id"));
+        String gwId = objToString(binding.get("gw_id"));
+
+        boolean omsLive = false;
+        String omsAddress = null;
+        if (omsId != null) {
+            ServiceRegistration reg = discoveryCache.get("svc.oms." + omsId);
+            omsLive = reg != null;
+            if (reg != null && reg.hasEndpoint()) {
+                omsAddress = reg.getEndpoint().getAddress();
+            }
+        }
+
+        boolean gwLive = false;
+        String gwAddress = null;
+        if (gwId != null) {
+            ServiceRegistration reg = discoveryCache.get("svc.gw." + gwId);
+            gwLive = reg != null;
+            if (reg != null && reg.hasEndpoint()) {
+                gwAddress = reg.getEndpoint().getAddress();
+            }
+        }
+
+        return new AccountBindingResponse(omsId, gwId, omsLive, omsAddress, gwLive, gwAddress);
     }
 
     private String resolveOmsId(long accountId) {
@@ -222,5 +264,93 @@ public class AccountService {
         }
         Object omsId = binding.get("oms_id");
         return omsId != null ? omsId.toString() : null;
+    }
+
+    private static String objToString(Object obj) {
+        return obj != null ? obj.toString() : null;
+    }
+
+    private static Instant toInstant(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof Instant i) return i;
+        if (obj instanceof java.sql.Timestamp ts) return ts.toInstant();
+        if (obj instanceof java.time.OffsetDateTime odt) return odt.toInstant();
+        return null;
+    }
+
+    private static BigDecimal toBigDecimal(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof BigDecimal bd) return bd;
+        if (obj instanceof Number n) return BigDecimal.valueOf(n.doubleValue());
+        return null;
+    }
+
+    private static Long toLong(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof Number n) return n.longValue();
+        return null;
+    }
+
+    private static TradeEntry toTradeEntry(Map<String, Object> row) {
+        return new TradeEntry(
+                ((Number) row.get("fill_id")).longValue(),
+                ((Number) row.get("order_id")).longValue(),
+                ((Number) row.get("account_id")).longValue(),
+                (String) row.get("oms_id"),
+                (String) row.get("gw_id"),
+                (String) row.get("strategy_id"),
+                (String) row.get("execution_id"),
+                (String) row.get("instrument_id"),
+                (String) row.get("side"),
+                (String) row.get("open_close"),
+                (String) row.get("fill_type"),
+                (String) row.get("ext_trade_id"),
+                toBigDecimal(row.get("filled_qty")),
+                toBigDecimal(row.get("filled_price")),
+                toInstant(row.get("filled_ts")),
+                toBigDecimal(row.get("fee_total"))
+        );
+    }
+
+    private static String shortOrderStatus(Oms.OrderStatus s) {
+        return switch (s) {
+            case ORDER_STATUS_PENDING -> "PENDING";
+            case ORDER_STATUS_BOOKED -> "BOOKED";
+            case ORDER_STATUS_PARTIALLY_FILLED -> "PARTIAL";
+            case ORDER_STATUS_FILLED -> "FILLED";
+            case ORDER_STATUS_CANCELLED -> "CANCELLED";
+            case ORDER_STATUS_REJECTED -> "REJECTED";
+            default -> s.name();
+        };
+    }
+
+    private static String shortSide(zk.common.v1.Common.BuySellType s) {
+        return switch (s) {
+            case BS_BUY -> "BUY";
+            case BS_SELL -> "SELL";
+            default -> s.name();
+        };
+    }
+
+    private static String shortLongShort(zk.common.v1.Common.LongShortType s) {
+        return switch (s) {
+            case LS_LONG -> "LONG";
+            case LS_SHORT -> "SHORT";
+            default -> s.name();
+        };
+    }
+
+    private static ActivityEntry toActivityEntry(Map<String, Object> row) {
+        return new ActivityEntry(
+                (String) row.get("activity_type"),
+                toInstant(row.get("ts")),
+                toLong(row.get("order_id")),
+                (String) row.get("instrument_id"),
+                (String) row.get("side"),
+                toBigDecimal(row.get("qty")),
+                toBigDecimal(row.get("price")),
+                (String) row.get("asset"),
+                toBigDecimal(row.get("balance_change"))
+        );
     }
 }

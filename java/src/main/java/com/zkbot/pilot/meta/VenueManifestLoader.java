@@ -15,7 +15,7 @@ import java.util.stream.Stream;
 
 /**
  * Loads venue manifest.yaml files from the venue-integrations directory.
- * Provides venue metadata and config schemas to MetaService and topology APIs.
+ * Supports v1 and v2 manifests (v2 adds schema_id and field_descriptors).
  */
 @Component
 public class VenueManifestLoader {
@@ -88,6 +88,18 @@ public class VenueManifestLoader {
         }
     }
 
+    /**
+     * Get field descriptors for a venue capability.
+     * Used by bootstrap to identify secret_ref and reloadable fields.
+     */
+    public List<FieldDescriptor> getFieldDescriptors(String venueId, String capability) {
+        VenueManifest manifest = manifests.get(venueId);
+        if (manifest == null) return List.of();
+        var cap = manifest.capabilities().get(capability);
+        if (cap == null) return List.of();
+        return cap.fieldDescriptors();
+    }
+
     @SuppressWarnings("unchecked")
     private void loadManifest(Path venueDir, Path manifestFile) {
         try {
@@ -95,6 +107,7 @@ public class VenueManifestLoader {
             Map<String, Object> doc = yaml.load(Files.newInputStream(manifestFile));
 
             String venue = (String) doc.get("venue");
+            String schemaId = (String) doc.get("schema_id");
             int version = doc.containsKey("version") ? ((Number) doc.get("version")).intValue() : 1;
 
             var capabilities = new LinkedHashMap<String, VenueCapability>();
@@ -104,7 +117,22 @@ public class VenueManifestLoader {
                     String language = (String) capData.get("language");
                     String entrypoint = (String) capData.get("entrypoint");
                     String configSchema = (String) capData.get("config_schema");
-                    capabilities.put(capName, new VenueCapability(language, entrypoint, configSchema));
+
+                    List<FieldDescriptor> fieldDescriptors = new ArrayList<>();
+                    @SuppressWarnings("unchecked")
+                    var fdList = (List<Map<String, Object>>) capData.get("field_descriptors");
+                    if (fdList != null) {
+                        for (var fd : fdList) {
+                            fieldDescriptors.add(new FieldDescriptor(
+                                    (String) fd.get("path"),
+                                    Boolean.TRUE.equals(fd.get("secret_ref")),
+                                    !Boolean.FALSE.equals(fd.getOrDefault("reloadable", true))
+                            ));
+                        }
+                    }
+
+                    capabilities.put(capName, new VenueCapability(
+                            language, entrypoint, configSchema, List.copyOf(fieldDescriptors)));
                 });
             }
 
@@ -113,7 +141,7 @@ public class VenueManifestLoader {
             @SuppressWarnings("unchecked")
             List<String> notes = (List<String>) metadataMap.getOrDefault("notes", List.of());
 
-            var manifest = new VenueManifest(venue, version, capabilities,
+            var manifest = new VenueManifest(venue, schemaId, version, capabilities,
                     supportsTradfiSessions, notes, venueDir.toString());
             manifests.put(venue, manifest);
 
@@ -124,6 +152,7 @@ public class VenueManifestLoader {
 
     public record VenueManifest(
             String venue,
+            String schemaId,
             int version,
             Map<String, VenueCapability> capabilities,
             boolean supportsTradfiSessions,
@@ -134,6 +163,13 @@ public class VenueManifestLoader {
     public record VenueCapability(
             String language,
             String entrypoint,
-            String configSchemaPath
+            String configSchemaPath,
+            List<FieldDescriptor> fieldDescriptors
+    ) {}
+
+    public record FieldDescriptor(
+            String path,
+            boolean secretRef,
+            boolean reloadable
     ) {}
 }

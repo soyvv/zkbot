@@ -9,9 +9,11 @@ It owns:
 
 - bootstrap registration and deregistration over NATS request/reply
 - control-plane metadata in PostgreSQL
+- schema and manifest resources exposed through a dedicated Pilot API group
 - RTMD policy/default state and RTMD subscription observability
 - topology reconciliation from NATS KV
 - operator-facing REST control/query APIs
+- ops workflows for runtime secret provisioning and orchestrator-facing runtime identity injection
 
 Pilot should also be the admin and trade-facing UI backend for the system.
 
@@ -33,6 +35,7 @@ Pilot is authoritative for:
 
 - whether a logical instance may start
 - what runtime metadata/profile a service receives
+- what schema/manifest versions are active for service kinds and venue capabilities
 - singleton policy for strategies and other logical instances
 - RTMD policy/defaults and global RTMD topology visibility
 - control-plane aggregation for account, bot, refdata, and operations views
@@ -257,7 +260,87 @@ Design note:
 
 - logical instance definitions
 - account/OMS/gateway bindings
+
+### 4.1 Schema and manifest management
+
+Pilot should expose manifests and config schemas as first-class control-plane resources under a
+dedicated API group such as `/v1/schema`.
+
+Recommended rule:
+
+- `/v1/schema` is the canonical read API for schema/manifest metadata and JSON Schema payloads
+- bundled manifest/schema files in the codebase or binary are the authoritative contract
+- Pilot persists schema/manifest resources in control-plane storage with explicit versioning and
+  activation state
+
+Authority rule:
+
+- Pilot DB stores an operational mirror/registry of the authoritative bundled manifests
+- normal schema evolution should happen through code change plus deployment, not hand-authored DB
+  edits as the primary source
+- `/v1/schema` should be read-first for ordinary operations
+- admin/import APIs may exist for controlled sync, activation, or promotion workflows
+- if the bundled authoritative manifest/schema and the active Pilot registry copy do not match,
+  Pilot should surface an explicit error and fail closed for related validation/config operations
+
+This is preferred over direct filesystem-backed schema serving because it:
+
+- gives Pilot one operational registry surface without making DB state the schema authority
+- lets Pilot own versioning, activation, validation, and deprecation state
+- supports future admin workflows for publishing or promoting schema versions
+- keeps local-process and future k3s orchestration aligned on one schema authority
+
+Recommended resource split:
+
+- service-kind schema resources
+  - `oms`, `engine`, `gw`, `mdgw`
+- venue capability schema resources
+  - keyed by `venue` plus capability such as `gw`, `rtmd`, or `refdata`
+
+Suggested API shape:
+
+- `GET /v1/schema`
+  - list schema resources and active versions
+- `GET /v1/schema/service-kinds/{serviceKind}`
+  - return manifest metadata for a service kind
+- `GET /v1/schema/service-kinds/{serviceKind}/versions/{version}`
+  - return a specific version
+- `GET /v1/schema/venues/{venueId}/capabilities/{capability}`
+  - return manifest metadata for a venue capability
+- `GET /v1/schema/.../config`
+  - return the JSON Schema payload used for validation and UI rendering
+
+Simulator note:
+
+- gateway simulator config should be represented as `venue=simulator`, `capability=gw`
+- Pilot should compose the shared `service_kind/gw` schema with the simulator venue-capability
+  schema when rendering onboarding and config-edit flows
+
+Admin-only write APIs may be added later for schema import, activate, deprecate, and controlled
+promotion workflows.
+
+Design constraint:
+
+- runtime bootstrap should not require the managed service to fetch schema on the hot path
+- Pilot uses schemas for authoring, validation, introspection, and drift analysis
+- managed services still receive already-validated runtime config during bootstrap
+- Pilot should synchronize or verify its operational schema registry against the bundled
+  authoritative manifests during startup or controlled import workflows
 - venue module enablement
+
+### 5. Operations and secret provisioning
+
+- onboard venue/account secret material through controlled ops workflows
+- write secret material to Vault and persist only references/metadata in Pilot storage
+- create/update Vault access bindings for managed runtimes
+- provision runtime Vault auth bootstrap inputs through the selected orchestrator backend
+- support local process orchestration now and k3s later behind one shared interface
+
+Design note:
+
+- Pilot owns provisioning and orchestration coordination
+- Vault remains the source of truth for secret material
+- runtimes authenticate to Vault directly and resolve `secret_ref` at startup
 - RTMD policy/defaults
 - service-level runtime config authoring
 
@@ -275,6 +358,53 @@ Design note:
   actual configured instances
 - every bootstrap-managed runtime should expose a default `GetCurrentConfig` query so Pilot can
   inspect live effective config, show drift, and decide whether reload or restart is needed
+
+### 5.1 Simulator-backed gateway operations
+
+Pilot should treat simulator-backed gateways as a first-class control-plane variant of `GW`, not as
+a separate service family.
+
+Recommended model:
+
+- simulator gateways remain `service_kind=gw`
+- simulator-specific config is selected through the venue capability path with `venue=simulator`
+- Pilot should expose simulator instances in normal topology and service lists, with venue metadata
+  making the simulator identity explicit
+- simulator-only operational controls should be exposed through Pilot as an operator workflow,
+  not mixed into the normal manual-trading API surface
+
+Schema and config rule:
+
+- shared gateway host/runtime config remains under the `service_kind/gw` schema resource
+- simulator-specific runtime fields such as match policy, fill delay, seeded balances, and admin
+  control enablement should come from the `venue_capability/simulator/gw` schema resource
+- Pilot UI and validation should compose those two schema layers for simulator onboarding and
+  config authoring
+
+Admin-surface rule:
+
+- simulator-only controls belong to the separate gateway admin gRPC surface described in
+  [Gateway Simulator](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/gateway_simulator.md)
+- Pilot should be the operator-facing REST/UI backend for those workflows
+- Pilot may proxy, orchestrate, or adapt that admin gRPC surface, but should not copy simulator
+  semantics into the normal `GatewayService` or manual-trading REST domain
+
+Operator workflow scope for simulator admin:
+
+- pause or resume matching
+- set match policy
+- force deterministic fills
+- inject and clear synthetic faults
+- seed or reset account state
+- submit synthetic ticks and other scenario-driving inputs
+- inspect open orders, injected-error state, and current simulator state
+
+Design constraint:
+
+- simulator operations are test-harness and operator tooling
+- they should remain clearly separated from production venue operations
+- a simulator may be live in discovery while its matching engine is paused, so Pilot should model
+  simulator readiness separately from ordinary service liveness
 
 ### 5. Refdata management
 
@@ -296,6 +426,7 @@ Design note:
 - service/session inspection
 - reconciliation/audit views
 - operational reloads and bounded recovery workflows
+- simulator-admin workflows for deterministic gateway control
 
 ## Legacy Mapping Notes
 
@@ -547,6 +678,8 @@ Design note:
   tables or as graphs
 - topology inspection should be anchored on a selected live OMS instance, not a global unscoped
   network map, for the normal operator workflow
+- simulator-backed gateways should appear in the same topology family as other gateways, but the UI
+  should retain a venue-aware operator path for simulator-only actions
 
 Topology view response rule:
 
@@ -678,6 +811,27 @@ Current scope:
   - inspect reconciliation/audit outcomes for operational review
 - `POST /v1/ops/reconcile`
   - request a bounded reconciliation workflow across selected scopes
+
+Later simulator-admin extension:
+
+- `GET /v1/ops/simulators`
+  - list simulator-backed gateway instances and operator-facing summary state
+- `GET /v1/ops/simulators/{logical_id}`
+  - return current simulator state snapshot
+- `POST /v1/ops/simulators/{logical_id}/pause-matching`
+- `POST /v1/ops/simulators/{logical_id}/resume-matching`
+- `POST /v1/ops/simulators/{logical_id}/set-match-policy`
+- `POST /v1/ops/simulators/{logical_id}/force-match`
+- `POST /v1/ops/simulators/{logical_id}/inject-error`
+- `GET /v1/ops/simulators/{logical_id}/injected-errors`
+- `DELETE /v1/ops/simulators/{logical_id}/injected-errors/{error_id}`
+- `POST /v1/ops/simulators/{logical_id}/account-state`
+- `POST /v1/ops/simulators/{logical_id}/synthetic-ticks`
+- `POST /v1/ops/simulators/{logical_id}/reset`
+
+These should remain explicitly simulator-scoped and should map onto the separate
+`GatewaySimulatorAdminService` semantics rather than widening the ordinary gateway or manual
+trading domains.
 
 ## Common Query Conventions
 

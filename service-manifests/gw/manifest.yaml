@@ -1,0 +1,22 @@
+schema_id: svc/gw
+version: 1
+config_schema: schemas/gw_svc_config.schema.json
+field_descriptors:
+  - path: /grpc_port
+    reloadable: false
+  - path: /grpc_host
+    reloadable: false
+  - path: /exec_shard_count
+    reloadable: false
+  - path: /exec_queue_capacity
+    reloadable: false
+  - path: /nats_url
+    reloadable: false
+  - path: /admin_grpc_port
+    reloadable: false
+  - path: /enable_admin_controls
+    reloadable: false
+  - path: /bootstrap_token
+    reloadable: false
+    resolved_secret: true
+venue_config_ref: true

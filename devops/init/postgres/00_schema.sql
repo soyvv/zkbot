@@ -7,12 +7,15 @@
 create schema if not exists cfg;
 
 create table cfg.oms_instance (
-  oms_id       text primary key,
-  namespace    text not null,
-  description  text,
-  enabled      boolean not null default true,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
+  oms_id           text primary key,
+  namespace        text not null,
+  description      text,
+  enabled          boolean not null default true,
+  runtime_config   jsonb not null default '{}'::jsonb,
+  config_version   integer not null default 1,
+  config_hash      text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
 );
 
 create table cfg.gateway_instance (
@@ -28,6 +31,9 @@ create table cfg.gateway_instance (
   supports_fee_query            boolean not null default true,
   cancel_required_fields        text[] not null default '{}',
   enabled                       boolean not null default true,
+  runtime_config                jsonb not null default '{}'::jsonb,
+  config_version                integer not null default 1,
+  config_hash                   text,
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
 );
@@ -231,6 +237,69 @@ create table cfg.instance_token (
 
 create index idx_instance_token_logical on cfg.instance_token(logical_id, status);
 
+create table cfg.engine_instance (
+  engine_id        text primary key,
+  description      text,
+  enabled          boolean not null default true,
+  runtime_config   jsonb not null default '{}'::jsonb,
+  config_version   integer not null default 1,
+  config_hash      text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+
+create table cfg.mdgw_instance (
+  mdgw_id          text primary key,
+  venue            text not null,
+  description      text,
+  enabled          boolean not null default true,
+  runtime_config   jsonb not null default '{}'::jsonb,
+  config_version   integer not null default 1,
+  config_hash      text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+
+create table cfg.secret_binding (
+  logical_ref      text primary key,
+  vault_path       text not null,
+  service_kind     text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+
+create table cfg.vault_approle_binding (
+  logical_id       text not null,
+  service_kind     text not null,
+  vault_role_name  text not null,
+  vault_policy     text not null,
+  account_ids      bigint[],
+  provisioned_at   timestamptz not null default now(),
+  primary key (logical_id, service_kind)
+);
+
+create table cfg.schema_resource (
+  resource_type    text not null,
+  resource_key     text not null,
+  schema_id        text not null,
+  version          integer not null,
+  content_hash     text not null,
+  active           boolean not null default true,
+  manifest_json    jsonb not null,
+  config_schema    jsonb,
+  synced_from      text not null default 'bundled',
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  primary key (resource_type, resource_key, version)
+);
+
+create index idx_schema_resource_active
+  on cfg.schema_resource (resource_type, resource_key)
+  where active = true;
+
+-- No unique index on (schema_id, version) — venue manifests share one schema_id
+-- across multiple capabilities. Primary key (resource_type, resource_key, version) suffices.
+
 create table cfg.mdgw_subscription (
   subscription_id  bigserial primary key,
   venue            text not null,
@@ -245,6 +314,36 @@ create table cfg.mdgw_subscription (
 );
 
 create index idx_mdgw_subscription_venue on cfg.mdgw_subscription(venue, enabled);
+
+-- Auto-bump config_version on runtime_config change
+create or replace function cfg.bump_config_version()
+returns trigger as $$
+begin
+    if new.runtime_config is distinct from old.runtime_config then
+        new.config_version := old.config_version + 1;
+        new.config_hash := encode(sha256(convert_to(
+            new.runtime_config::text, 'UTF8')), 'hex');
+        new.updated_at := now();
+    end if;
+    return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_oms_config_version
+    before update on cfg.oms_instance
+    for each row execute function cfg.bump_config_version();
+
+create trigger trg_gw_config_version
+    before update on cfg.gateway_instance
+    for each row execute function cfg.bump_config_version();
+
+create trigger trg_engine_config_version
+    before update on cfg.engine_instance
+    for each row execute function cfg.bump_config_version();
+
+create trigger trg_mdgw_config_version
+    before update on cfg.mdgw_instance
+    for each row execute function cfg.bump_config_version();
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- trd schema

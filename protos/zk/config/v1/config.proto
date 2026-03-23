@@ -1,0 +1,69 @@
+syntax = "proto3";
+package zk.config.v1;
+
+// --- Config metadata envelope ---
+message ConfigMetadata {
+    string config_version = 1; // monotonic revision, e.g. "3"
+    string config_hash    = 2; // SHA-256 of normalized JSON
+    int64  loaded_at_ms   = 3; // epoch millis when config became effective in runtime
+                               // (set by runtime via GetCurrentConfig, NOT by Pilot at bootstrap)
+    string config_source  = 4; // "bootstrap" | "reload" | "env_direct"
+    int64  issued_at_ms   = 5; // epoch millis when Pilot issued this config (bootstrap/reload time)
+}
+
+// --- Secret reference model ---
+// Pilot returns logical refs only. Vault path expansion happens runtime-side
+// in zk-infra-rs::vault::expand_logical_ref — never in the wire contract.
+
+message SecretRef {
+    string logical_ref = 1; // e.g. "oanda/main"
+    // field 2 removed (was vault_path — expansion is runtime-side only)
+    string field_key   = 3; // config field that holds this ref, e.g. "secret_ref", "passphrase_ref"
+}
+
+message SecretRefStatus {
+    string logical_ref    = 1;
+    bool   resolved       = 2; // whether runtime successfully loaded this ref
+    int64  resolved_at_ms = 3;
+    string error          = 4; // empty if resolved
+}
+
+// --- Introspection ---
+
+message GetCurrentConfigRequest {
+    bool include_defaults = 1;
+}
+
+message GetCurrentConfigResponse {
+    string                   effective_config_json = 1; // redacted, normalized JSON
+    ConfigMetadata           metadata              = 2;
+    string                   service_kind          = 3;
+    string                   logical_id            = 4;
+    repeated SecretRefStatus secret_ref_statuses   = 5; // resolution status per ref (no values)
+}
+
+// --- Drift ---
+
+enum DriftStatus {
+    DRIFT_STATUS_UNSPECIFIED = 0;
+    NO_DIFF                 = 1;
+    RELOADABLE              = 2;
+    RESTART_REQUIRED        = 3;
+}
+
+message ChangedField {
+    string      field_path     = 1; // JSON pointer, e.g. "/risk_check_enabled"
+    string      desired_value  = 2;
+    string      current_value  = 3;
+    DriftStatus classification = 4;
+}
+
+message ConfigDriftResult {
+    DriftStatus           overall_status = 1;
+    repeated ChangedField changed_fields = 2;
+}
+
+// Standalone service — each binary adds this alongside its domain service.
+service ConfigIntrospectionService {
+    rpc GetCurrentConfig(GetCurrentConfigRequest) returns (GetCurrentConfigResponse);
+}

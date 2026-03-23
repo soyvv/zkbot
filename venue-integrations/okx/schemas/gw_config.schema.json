@@ -13,10 +13,12 @@
       "type": "string"
     },
     "passphrase_ref": {
-      "type": "string"
+      "type": "string",
+      "x-zk-secret-ref": true
     },
     "secret_ref": {
-      "type": "string"
+      "type": "string",
+      "x-zk-secret-ref": true
     }
   },
   "required": ["secret_ref", "passphrase_ref"],

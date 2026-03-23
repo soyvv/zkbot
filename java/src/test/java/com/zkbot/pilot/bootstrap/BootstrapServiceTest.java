@@ -1,6 +1,9 @@
 package com.zkbot.pilot.bootstrap;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zkbot.pilot.config.DesiredConfigRepository;
 import com.zkbot.pilot.config.PilotProperties;
+import com.zkbot.pilot.schema.ConfigSchemaLocator;
 import io.nats.client.Connection;
 import io.nats.client.Dispatcher;
 import io.nats.client.Message;
@@ -15,6 +18,7 @@ import zk.pilot.v1.Bootstrap.BootstrapDeregisterResponse;
 import zk.pilot.v1.Bootstrap.BootstrapRegisterRequest;
 import zk.pilot.v1.Bootstrap.BootstrapRegisterResponse;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,6 +32,8 @@ class BootstrapServiceTest {
     @Mock BootstrapRepository repository;
     @Mock TokenService tokenService;
     @Mock KvReconciler kvReconciler;
+    @Mock DesiredConfigRepository desiredConfigRepo;
+    @Mock ConfigSchemaLocator schemaLocator;
     @Mock Dispatcher dispatcher;
 
     PilotProperties props;
@@ -35,8 +41,9 @@ class BootstrapServiceTest {
 
     @BeforeEach
     void setUp() {
-        props = new PilotProperties("nats://localhost:4222", "test", "pilot_test", 60, null);
-        service = new BootstrapService(natsConnection, repository, tokenService, kvReconciler, props);
+        props = new PilotProperties("nats://localhost:4222", "test", "pilot_test", 60, null, null);
+        service = new BootstrapService(natsConnection, repository, tokenService, kvReconciler,
+                props, desiredConfigRepo, schemaLocator, new ObjectMapper());
     }
 
     // ── Register: accept ──────────────────────────────────────────────────
@@ -48,6 +55,8 @@ class BootstrapServiceTest {
 
         when(tokenService.validate("valid-token", "oms_1", "OMS", "test")).thenReturn("jti-1");
         when(repository.findSessionForLogical("oms_1", "OMS")).thenReturn(null);
+        when(desiredConfigRepo.getDesiredConfig("oms_1", "OMS"))
+                .thenReturn(new DesiredConfigRepository.DesiredConfig("{\"nats_url\":\"nats://localhost\"}", 1, "abc"));
 
         invokeHandleRegister(msg);
 
@@ -59,6 +68,11 @@ class BootstrapServiceTest {
         var response = captureRegisterResponse(msg);
         assertThat(response.getStatus()).isEqualTo("OK");
         assertThat(response.getKvKey()).isEqualTo("svc.oms.oms_1");
+        assertThat(response.getRuntimeConfig()).isEqualTo("{\"nats_url\":\"nats://localhost\"}");
+        assertThat(response.getConfigMetadata().getConfigVersion()).isEqualTo("1");
+        assertThat(response.getConfigMetadata().getConfigSource()).isEqualTo("bootstrap");
+        assertThat(response.getConfigMetadata().getIssuedAtMs()).isGreaterThan(0);
+        assertThat(response.getConfigMetadata().getLoadedAtMs()).isEqualTo(0);
     }
 
     // ── Register: reject expired token ────────────────────────────────────
@@ -112,6 +126,8 @@ class BootstrapServiceTest {
         when(repository.findSessionForLogical("oms_1", "OMS")).thenReturn(
                 Map.of("owner_session_id", "stale-sess", "kv_key", "svc.oms.oms_1", "instance_type", "OMS"));
         when(kvReconciler.isKvLive("svc.oms.oms_1")).thenReturn(false);
+        when(desiredConfigRepo.getDesiredConfig("oms_1", "OMS"))
+                .thenReturn(new DesiredConfigRepository.DesiredConfig("{}", 1, "abc"));
 
         invokeHandleRegister(msg);
 
@@ -133,6 +149,8 @@ class BootstrapServiceTest {
         when(tokenService.validate("token", "engine_1", "ENGINE", "test")).thenReturn("jti-1");
         when(repository.findSessionForLogical("engine_1", "ENGINE")).thenReturn(null);
         when(repository.acquireInstanceId("test", "engine_1", 60)).thenReturn(42);
+        when(desiredConfigRepo.getDesiredConfig("engine_1", "ENGINE"))
+                .thenReturn(new DesiredConfigRepository.DesiredConfig("{}", 1, "abc"));
 
         invokeHandleRegister(msg);
 
@@ -148,6 +166,8 @@ class BootstrapServiceTest {
 
         when(tokenService.validate("token", "oms_1", "OMS", "test")).thenReturn("jti-1");
         when(repository.findSessionForLogical("oms_1", "OMS")).thenReturn(null);
+        when(desiredConfigRepo.getDesiredConfig("oms_1", "OMS"))
+                .thenReturn(new DesiredConfigRepository.DesiredConfig("{}", 1, "abc"));
 
         invokeHandleRegister(msg);
 
@@ -225,6 +245,71 @@ class BootstrapServiceTest {
         invokeHandleRegister(msg);
 
         verify(natsConnection, never()).publish(any(), any(byte[].class));
+    }
+
+    // ── Register: missing desired config → ERROR (no legacy fallback) ────
+
+    @Test
+    void register_returns_error_when_desired_config_missing() throws Exception {
+        var req = registerRequest("oms_1", "OMS", "test", "token");
+        var msg = mockMessage(req.toByteArray(), "reply-subject");
+
+        when(tokenService.validate("token", "oms_1", "OMS", "test")).thenReturn("jti-1");
+        when(repository.findSessionForLogical("oms_1", "OMS")).thenReturn(null);
+        when(desiredConfigRepo.getDesiredConfig("oms_1", "OMS")).thenReturn(null);
+
+        invokeHandleRegister(msg);
+
+        var response = captureRegisterResponse(msg);
+        assertThat(response.getStatus()).isEqualTo("ERROR");
+        assertThat(response.getErrorMessage()).contains("No desired config found");
+    }
+
+    @Test
+    void register_returns_error_when_desired_config_has_null_json() throws Exception {
+        var req = registerRequest("gw_1", "GW", "test", "token");
+        var msg = mockMessage(req.toByteArray(), "reply-subject");
+
+        when(tokenService.validate("token", "gw_1", "GW", "test")).thenReturn("jti-1");
+        when(repository.findSessionForLogical("gw_1", "GW")).thenReturn(null);
+        when(desiredConfigRepo.getDesiredConfig("gw_1", "GW"))
+                .thenReturn(new DesiredConfigRepository.DesiredConfig(null, 0, null));
+
+        invokeHandleRegister(msg);
+
+        var response = captureRegisterResponse(msg);
+        assertThat(response.getStatus()).isEqualTo("ERROR");
+        assertThat(response.getErrorMessage()).contains("No desired config found");
+    }
+
+    // ── Register: secret_refs extracted from config ──────────────────────
+
+    @Test
+    void register_extracts_secret_refs_from_venue_config() throws Exception {
+        var req = registerRequest("gw_okx_1", "GW", "test", "token");
+        var msg = mockMessage(req.toByteArray(), "reply-subject");
+
+        when(tokenService.validate("token", "gw_okx_1", "GW", "test")).thenReturn("jti-1");
+        when(repository.findSessionForLogical("gw_okx_1", "GW")).thenReturn(null);
+
+        String venueConfig = "{\"secret_ref\":\"okx/main\",\"passphrase_ref\":\"okx/main\",\"api_base_url\":\"https://example.com\"}";
+        when(desiredConfigRepo.getDesiredConfig("gw_okx_1", "GW"))
+                .thenReturn(new DesiredConfigRepository.DesiredConfig(venueConfig, 1, "abc"));
+
+        // Schema locator returns venue_capability descriptors with secret_ref fields
+        when(schemaLocator.resolveFieldDescriptors("gw_okx_1", "GW")).thenReturn(List.of(
+                Map.of("path", "/secret_ref", "secret_ref", true, "reloadable", false),
+                Map.of("path", "/passphrase_ref", "secret_ref", true, "reloadable", false),
+                Map.of("path", "/api_base_url", "reloadable", false)
+        ));
+
+        invokeHandleRegister(msg);
+
+        var response = captureRegisterResponse(msg);
+        assertThat(response.getStatus()).isEqualTo("OK");
+        assertThat(response.getSecretRefsList()).hasSize(2);
+        assertThat(response.getSecretRefsList().get(0).getLogicalRef()).isEqualTo("okx/main");
+        assertThat(response.getSecretRefsList().get(0).getFieldKey()).isEqualTo("secret_ref");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
