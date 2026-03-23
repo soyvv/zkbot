@@ -48,3 +48,5 @@ project_memo.md
 # AI tools
 .claude/
 .codex/
+
+.logs/
