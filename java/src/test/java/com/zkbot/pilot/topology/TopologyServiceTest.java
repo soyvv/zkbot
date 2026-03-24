@@ -1,9 +1,14 @@
 package com.zkbot.pilot.topology;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zkbot.pilot.bootstrap.TokenService;
 import com.zkbot.pilot.config.ConfigDriftService;
 import com.zkbot.pilot.config.PilotProperties;
 import com.zkbot.pilot.discovery.DiscoveryCache;
+import com.zkbot.pilot.schema.SchemaService;
+import com.zkbot.pilot.topology.dto.CreateServiceRequest;
+import com.zkbot.pilot.topology.dto.CreateServiceResponse;
+import com.zkbot.pilot.topology.dto.BootstrapTokenResponse;
 import com.zkbot.pilot.topology.dto.ServiceNode;
 import com.zkbot.pilot.topology.dto.TopologyView;
 import io.nats.client.Connection;
@@ -34,13 +39,14 @@ class TopologyServiceTest {
     @Mock PilotProperties props;
     @Mock Connection natsConnection;
     @Mock ConfigDriftService configDriftService;
+    @Mock SchemaService schemaService;
 
     TopologyService service;
 
     @BeforeEach
     void setUp() {
         service = new TopologyService(repository, discoveryCache, tokenService, props,
-                natsConnection, configDriftService);
+                natsConnection, configDriftService, schemaService, new ObjectMapper());
     }
 
     // ── Workspace scoping ─────────────────────────────────────────────────
@@ -343,6 +349,64 @@ class TopologyServiceTest {
         for (String name : List.of("full", "services", "connections")) {
             var view = service.getView(name, null);
             assertThat(view).isNotNull();
+        }
+    }
+
+    // ── Create service ─────────────────────────────────────────────────────
+
+    @Nested
+    class CreateService {
+
+        @Test
+        void rejects_refdata_with_400() {
+            var request = new CreateServiceRequest("refdata_1", true, Map.of(), null, null, null);
+
+            assertThatThrownBy(() -> service.createService("REFDATA", request))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("refdata-venues");
+        }
+
+        @Test
+        void rejects_unknown_kind() {
+            var request = new CreateServiceRequest("foo_1", true, Map.of(), null, null, null);
+
+            assertThatThrownBy(() -> service.createService("UNKNOWN", request))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("Unknown service kind");
+        }
+
+        @Test
+        void creates_oms_with_provided_config() {
+            when(props.env()).thenReturn("dev");
+            when(repository.getLogicalInstance("oms_1")).thenReturn(null);
+            when(tokenService.generateToken(eq("oms_1"), eq("OMS"), eq("dev"), eq(30)))
+                    .thenReturn(new BootstrapTokenResponse("jti", "tok", null));
+
+            var request = new CreateServiceRequest("oms_1", true,
+                    Map.of("grpc_port", 50051), null, null, null);
+
+            CreateServiceResponse resp = service.createService("OMS", request);
+
+            assertThat(resp.status()).isEqualTo("created");
+            assertThat(resp.logicalId()).isEqualTo("oms_1");
+
+            // Verify logical instance created without config
+            verify(repository).createLogicalInstance("oms_1", "OMS", "dev", null, true);
+            // Verify OMS instance created with provided config JSON
+            verify(repository).createOmsInstance(eq("oms_1"), contains("grpc_port"),
+                    any(), any(), any(), any());
+        }
+
+        @Test
+        void rejects_duplicate_logical_id() {
+            when(repository.getLogicalInstance("oms_1")).thenReturn(
+                    Map.of("logical_id", "oms_1", "instance_type", "OMS"));
+
+            var request = new CreateServiceRequest("oms_1", true, Map.of(), null, null, null);
+
+            assertThatThrownBy(() -> service.createService("OMS", request))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("already exists");
         }
     }
 

@@ -33,6 +33,7 @@ class ServiceRegistry:
         capabilities: list[str],
         heartbeat_interval_s: float = 5.0,
         lease_ttl_s: float = 20.0,
+        kv_key: str | None = None,
     ) -> None:
         self._service_type = service_type
         self._service_id = service_id
@@ -42,7 +43,7 @@ class ServiceRegistry:
         self._lease_ttl_s = lease_ttl_s
 
         self._kv: nats.js.kv.KeyValue | None = None
-        self._key = f"svc.{service_type}.{service_id}"
+        self._key = kv_key or f"svc.{service_type}.{service_id}"
         self._revision: int = 0
         self._heartbeat_task: asyncio.Task | None = None
         self._fenced = asyncio.Event()

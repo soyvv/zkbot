@@ -44,6 +44,31 @@ async def validate_token(
     return row["token_jti"] if row else None
 
 
+# ── Runtime config loading ────────────────────────────────────────────────────
+
+
+async def load_refdata_venue_configs(
+    conn: asyncpg.Connection,
+    env: str,
+) -> list[dict]:
+    """Load all enabled refdata_venue_instance rows for an env."""
+    rows = await conn.fetch(
+        "SELECT venue, enabled, provided_config "
+        "FROM cfg.refdata_venue_instance WHERE env = $1 AND enabled = true",
+        env,
+    )
+    return [
+        {
+            "venue": r["venue"],
+            "enabled": r["enabled"],
+            "config": json.loads(r["provided_config"])
+            if isinstance(r["provided_config"], str)
+            else dict(r["provided_config"]),
+        }
+        for r in rows
+    ]
+
+
 # ── Session management ─────────────────────────────────────────────────────────
 
 

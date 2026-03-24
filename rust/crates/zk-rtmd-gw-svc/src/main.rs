@@ -4,10 +4,11 @@ use std::time::Duration;
 
 use tracing::info;
 
+use zk_infra_rs::bootstrap::{bootstrap_runtime_config, BootstrapMode};
 use zk_infra_rs::discovery_registration;
 use zk_infra_rs::service_registry::ServiceRegistration;
 use zk_rtmd_gw_svc::{
-    config::RtmdGwConfig,
+    config::{MdgwBootstrapConfig, MdgwService},
     grpc_handler::RtmdQueryHandler,
     nats_publisher::RtmdNatsPublisher,
     nats_sub_source::NatsKvSubSource,
@@ -24,20 +25,102 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let cfg = RtmdGwConfig::from_env();
-    info!(
-        mdgw_id = %cfg.mdgw_id,
-        venue = %cfg.venue,
-        grpc_port = cfg.grpc_port,
-        "zk-rtmd-gw-svc starting"
-    );
+    // ── 1. Load bootstrap config (always from env) ───────────────────────────
+    let boot_cfg = MdgwBootstrapConfig::from_env()
+        .expect("failed to load MdgwBootstrapConfig from env");
 
-    // ── NATS connection ────────────────────────────────────────────────────
-    info!(url = %cfg.nats_url, "connecting to NATS");
-    let nats_client = async_nats::connect(&cfg.nats_url).await?;
+    // ── 2. NATS connection (uses only bootstrap nats_url) ────────────────────
+    info!(url = %boot_cfg.nats_url, "connecting to NATS");
+    let nats_client = async_nats::connect(&boot_cfg.nats_url).await?;
     let js = async_nats::jetstream::new(nats_client.clone());
 
-    // ── Venue adapter ──────────────────────────────────────────────────────
+    // ── 3. Config assembly + service registration ────────────────────────────
+    let (cfg, mut registration) = if boot_cfg.bootstrap_token.is_empty() {
+        // Direct mode: assemble config from env, then register in KV.
+        let outcome = bootstrap_runtime_config::<MdgwService>(&boot_cfg, BootstrapMode::Direct)
+            .expect("config assembly failed");
+        let cfg = outcome.runtime_config;
+
+        info!(
+            mdgw_id = %cfg.mdgw_id,
+            venue = %cfg.venue,
+            grpc_port = cfg.grpc_port,
+            source = "direct",
+            "zk-rtmd-gw-svc config assembled"
+        );
+
+        // Build KV registration blob (needs venue from runtime config).
+        let kv_key = format!("{}.{}", cfg.gateway_kv_prefix, cfg.mdgw_id);
+        let kv_value = mdgw_registration_value(&cfg);
+
+        let registration = ServiceRegistration::register_direct(
+            &js,
+            kv_key.clone(),
+            kv_value,
+            Duration::from_secs(15),
+        )
+        .await
+        .expect("failed to register in NATS KV");
+        info!(kv_key = %kv_key, "registered in NATS KV (direct)");
+
+        (cfg, registration)
+    } else {
+        // Pilot mode: request Pilot grant first, then assemble config and register.
+        info!("requesting Pilot bootstrap grant");
+        let grpc_address = format!("{}:{}", boot_cfg.grpc_host, boot_cfg.grpc_port);
+        let mut runtime_info = std::collections::HashMap::new();
+        runtime_info.insert("grpc_address".into(), grpc_address);
+
+        let grant = ServiceRegistration::pilot_request(
+            &nats_client,
+            &boot_cfg.bootstrap_token,
+            &boot_cfg.mdgw_id,
+            &boot_cfg.instance_type,
+            &boot_cfg.env,
+            runtime_info,
+        )
+        .await
+        .expect("Pilot bootstrap request failed — is Pilot running?");
+
+        let outcome = bootstrap_runtime_config::<MdgwService>(
+            &boot_cfg,
+            BootstrapMode::Pilot {
+                payload: grant.payload.clone(),
+                validate_hash: false, // enable once normalization contract is confirmed
+            },
+        )
+        .expect("Pilot config assembly failed");
+        let cfg = outcome.runtime_config;
+
+        info!(
+            mdgw_id = %cfg.mdgw_id,
+            venue = %cfg.venue,
+            grpc_port = cfg.grpc_port,
+            source = "pilot",
+            "zk-rtmd-gw-svc config assembled"
+        );
+
+        let kv_value = mdgw_registration_value(&cfg);
+        let registration = ServiceRegistration::register_kv_with_grant(
+            &nats_client,
+            &js,
+            &grant,
+            kv_value,
+            Duration::from_secs(15),
+        )
+        .await
+        .expect("Pilot KV registration failed");
+
+        info!(
+            kv_key = registration.grant().kv_key,
+            session_id = registration.grant().owner_session_id,
+            "registered via Pilot grant"
+        );
+
+        (cfg, registration)
+    };
+
+    // ── Venue adapter ────────────────────────────────────────────────────────
     let adapter = {
         #[cfg(feature = "python-venue")]
         {
@@ -80,7 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     adapter.connect().await?;
     info!(venue = %cfg.venue, "venue adapter connected");
 
-    // ── Subscription KV bucket ─────────────────────────────────────────────
+    // ── Subscription KV bucket ───────────────────────────────────────────────
     let sub_bucket = &cfg.rtmd_sub_bucket;
     let sub_ttl = Duration::from_secs(cfg.sub_lease_ttl_s * 3);
     let sub_store = match js.get_key_value(sub_bucket).await {
@@ -94,7 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?,
     };
 
-    // ── Subscription manager ───────────────────────────────────────────────
+    // ── Subscription manager ─────────────────────────────────────────────────
     let sub_source = Arc::new(NatsKvSubSource::new(sub_store, cfg.venue.clone()));
     let sub_mgr = Arc::new(SubscriptionManager::new(
         Arc::clone(&adapter),
@@ -109,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sub_mgr_watch.run_watch_loop().await;
     });
 
-    // ── Event loop: adapter events → NATS publisher ────────────────────────
+    // ── Event loop: adapter events → NATS publisher ──────────────────────────
     let publisher = Arc::new(RtmdNatsPublisher::new(
         nats_client.clone(),
         cfg.venue.clone(),
@@ -135,47 +218,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // ── Bind gRPC listener before registering ──────────────────────────────
+    // ── Bind gRPC listener before serving ────────────────────────────────────
     let grpc_addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;
     let listener = tokio::net::TcpListener::bind(grpc_addr).await?;
     let local_addr = listener.local_addr()?;
     info!(%local_addr, "gRPC listener bound");
 
-    // ── Service registry KV registration (after listener is ready) ─────────
-    let kv_prefix = &cfg.gateway_kv_prefix;
-    let kv_key = format!("{kv_prefix}.{}", cfg.mdgw_id);
-    let grpc_address = format!("{}:{}", cfg.grpc_host, cfg.grpc_port);
-    let capabilities = vec![
-        "tick".to_string(), "kline".to_string(), "funding".to_string(),
-        "orderbook".to_string(), "query_current".to_string(), "query_history".to_string(),
-    ];
-    let mut metadata = std::collections::HashMap::new();
-    metadata.insert("publisher_mode".to_string(), "standalone".to_string());
-    metadata.insert("subscription_scope".to_string(), "global".to_string());
-    metadata.insert(
-        "query_types".to_string(),
-        "current_tick,current_orderbook,current_funding,kline_history".to_string(),
-    );
-    let reg_proto = discovery_registration::mdgw_registration(
-        &cfg.mdgw_id,
-        &grpc_address,
-        &cfg.venue,
-        capabilities,
-        metadata,
-    );
-    let kv_value = discovery_registration::encode_registration(&reg_proto);
-
-    let mut registration = ServiceRegistration::register_direct(
-        &js,
-        kv_key.clone(),
-        kv_value,
-        Duration::from_secs(15),
-    )
-    .await
-    .expect("failed to register in NATS KV");
-    info!(kv_key = %kv_key, "registered in NATS KV");
-
-    // ── gRPC server (serve on already-bound listener) ──────────────────────
+    // ── gRPC server (serve on already-bound listener) ────────────────────────
     let handler = RtmdQueryHandler { adapter: Arc::clone(&adapter) };
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
 
@@ -206,4 +255,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("zk-rtmd-gw-svc stopped");
     Ok(())
+}
+
+fn mdgw_capabilities() -> Vec<String> {
+    vec![
+        "tick".into(),
+        "kline".into(),
+        "funding".into(),
+        "orderbook".into(),
+        "query_current".into(),
+        "query_history".into(),
+    ]
+}
+
+fn mdgw_metadata() -> std::collections::HashMap<String, String> {
+    let mut m = std::collections::HashMap::new();
+    m.insert("publisher_mode".into(), "standalone".into());
+    m.insert("subscription_scope".into(), "global".into());
+    m.insert(
+        "query_types".into(),
+        "current_tick,current_orderbook,current_funding,kline_history".into(),
+    );
+    m
+}
+
+fn mdgw_registration_value(
+    cfg: &zk_rtmd_gw_svc::config::MdgwRuntimeConfig,
+) -> bytes::Bytes {
+    let grpc_address = format!("{}:{}", cfg.grpc_host, cfg.grpc_port);
+    let reg_proto = discovery_registration::mdgw_registration(
+        &cfg.mdgw_id,
+        &grpc_address,
+        &cfg.venue,
+        mdgw_capabilities(),
+        mdgw_metadata(),
+    );
+    discovery_registration::encode_registration(&reg_proto)
 }

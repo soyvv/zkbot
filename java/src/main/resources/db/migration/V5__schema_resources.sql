@@ -17,9 +17,9 @@ CREATE TABLE IF NOT EXISTS cfg.schema_resource (
     PRIMARY KEY (resource_type, resource_key, version)
 );
 
-CREATE INDEX idx_schema_resource_active
+CREATE INDEX IF NOT EXISTS idx_schema_resource_active
     ON cfg.schema_resource (resource_type, resource_key)
     WHERE active = true;
 
-CREATE UNIQUE INDEX idx_schema_resource_schema_id_version
+CREATE UNIQUE INDEX IF NOT EXISTS idx_schema_resource_schema_id_version
     ON cfg.schema_resource (schema_id, version);

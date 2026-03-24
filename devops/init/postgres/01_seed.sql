@@ -3,7 +3,8 @@
 -- cfg.logical_instance (required before account_binding and mon.active_session)
 insert into cfg.logical_instance (logical_id, instance_type, env) values
   ('oms_dev_1',  'OMS', 'dev'),
-  ('gw_sim_1',   'GW',  'dev');
+  ('gw_sim_1',   'GW',  'dev'),
+  ('refdata_dev_1', 'REFDATA', 'dev');
 
 -- cfg.oms_instance
 insert into cfg.oms_instance (oms_id, namespace, description) values
@@ -38,6 +39,17 @@ insert into cfg.instrument_refdata (
   0.01, 0.00001, 2, 5,
   0.00001, 100.0
 );
+
+-- cfg.refdata_venue_instance
+insert into cfg.refdata_venue_instance (
+  logical_id, env, venue, description, provided_config
+) values
+  ('refdata_sim_dev_1', 'dev', 'simulator', 'Local dev simulator refdata publisher',
+   '{}'::jsonb),
+  ('refdata_oanda_dev_1', 'dev', 'oanda', 'Dev OANDA refdata',
+   '{"environment": "practice", "account_id": "101-003-26138765-001", "secret_ref": "8001"}'::jsonb),
+  ('refdata_okx_dev_1', 'dev', 'okx', 'Dev OKX refdata',
+   '{"api_base_url": "https://www.okx.com"}'::jsonb);
 
 -- cfg.strategy_definition
 insert into cfg.strategy_definition (strategy_id, runtime_type, code_ref, description) values

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
-use zk_gw_svc::config::GwSvcConfig;
+use zk_gw_svc::config::{GwBootstrap, GwBootstrapConfig, GwRuntimeConfig};
 use zk_gw_svc::grpc_handler::GrpcHandler;
 use zk_gw_svc::gw_executor::GwExecPool;
 use zk_gw_svc::nats_publisher::NatsPublisher;
@@ -13,9 +13,16 @@ use zk_gw_svc::proto::zk_gw_v1::gateway_simulator_admin_service_server::GatewayS
 use zk_gw_svc::reconnect::GatewayState;
 use zk_gw_svc::semantic_pipeline::SemanticPipeline;
 use zk_gw_svc::venue::simulator::admin::SimAdminHandler;
+use zk_infra_rs::bootstrap::{bootstrap_runtime_config, BootstrapMode, BootstrapOutcome};
+use zk_infra_rs::service_registry::{PilotBootstrapGrant, ServiceRegistration};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // ── 1. Bootstrap config from env ─────────────────────────────────────
+    let bootstrap = GwBootstrapConfig::from_env()
+        .expect("failed to load bootstrap config from env");
+
+    // ── 2. Tracing ───────────────────────────────────────────────────────
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -23,18 +30,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let cfg = GwSvcConfig::from_env();
     info!(
-        gw_id = cfg.gw_id,
-        venue = cfg.venue,
-        grpc_port = cfg.grpc_port,
-        account_id = cfg.account_id,
-        match_policy = cfg.match_policy,
+        gw_id = bootstrap.gw_id,
+        grpc_port = bootstrap.grpc_port,
         "zk-gw-svc starting"
     );
 
-    // ── NATS connection ────────────────────────────────────────────────────
-    let nats_client = if let Some(ref url) = cfg.nats_url {
+    // ── 3. NATS connection ───────────────────────────────────────────────
+    let nats_client = if let Some(ref url) = bootstrap.nats_url {
         info!(url, "connecting to NATS");
         Some(async_nats::connect(url).await?)
     } else {
@@ -42,29 +45,139 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // ── Gateway state ──────────────────────────────────────────────────────
+    // ── 4. Pilot request (split-phase) or direct-mode flag ───────────────
+    let pilot_grant: Option<PilotBootstrapGrant> =
+        if !bootstrap.bootstrap_token.is_empty() {
+            let nats = nats_client
+                .as_ref()
+                .expect("ZK_NATS_URL is required for Pilot bootstrap");
+            info!("sending Pilot bootstrap request");
+            let mut runtime_info = std::collections::HashMap::new();
+            runtime_info.insert(
+                "grpc_address".into(),
+                format!("{}:{}", bootstrap.grpc_host, bootstrap.grpc_port),
+            );
+            let grant = ServiceRegistration::pilot_request(
+                nats,
+                &bootstrap.bootstrap_token,
+                &bootstrap.gw_id,
+                &bootstrap.instance_type,
+                &bootstrap.env,
+                runtime_info,
+            )
+            .await
+            .expect("Pilot registration failed — is Pilot running?");
+            Some(grant)
+        } else {
+            None
+        };
+
+    // ── 5. Assemble runtime config ───────────────────────────────────────
+    let mode = if let Some(ref grant) = pilot_grant {
+        BootstrapMode::Pilot {
+            payload: grant.payload.clone(),
+            validate_hash: false,
+        }
+    } else {
+        BootstrapMode::Direct
+    };
+
+    let outcome: BootstrapOutcome<GwRuntimeConfig> =
+        bootstrap_runtime_config::<GwBootstrap>(&bootstrap, mode)
+            .expect("config assembly failed");
+
+    let runtime_cfg = &outcome.runtime_config;
+    info!(
+        gw_id = runtime_cfg.gw_id,
+        venue = runtime_cfg.venue,
+        account_id = runtime_cfg.account_id,
+        grpc_port = runtime_cfg.grpc_port,
+        source = ?outcome.source,
+        "runtime config assembled"
+    );
+
+    // ── Gateway state ────────────────────────────────────────────────────
     let gw_state = Arc::new(Mutex::new(GatewayState::Starting));
 
-    // ── Build venue adapter via factory ──────────────────────────────────
-    let built = zk_gw_svc::venue::build_adapter(&cfg).await?;
+    // ── 6. Build full KV registration proto ──────────────────────────────
+    let admin_port = if let Some(ref sim) = runtime_cfg.simulator {
+        if sim.enable_admin_controls {
+            Some(sim.admin_grpc_port)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let grpc_address = format!("{}:{}", runtime_cfg.grpc_host, runtime_cfg.grpc_port);
+    let reg_proto = zk_infra_rs::discovery_registration::gw_registration(
+        &runtime_cfg.gw_id,
+        &grpc_address,
+        &runtime_cfg.venue,
+        runtime_cfg.account_id,
+        admin_port,
+    );
+    let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg_proto);
+
+    // ── 7. KV registration ───────────────────────────────────────────────
+    let mut registration = if let Some(ref nats) = nats_client {
+        let js = async_nats::jetstream::new(nats.clone());
+        let reg = if let Some(ref grant) = pilot_grant {
+            let r = ServiceRegistration::register_kv_with_grant(
+                nats,
+                &js,
+                grant,
+                kv_value,
+                std::time::Duration::from_secs(15),
+            )
+            .await
+            .expect("Pilot KV registration failed");
+            info!(
+                kv_key = r.grant().kv_key,
+                session_id = r.grant().owner_session_id,
+                "registered via Pilot (split-phase)"
+            );
+            r
+        } else {
+            let kv_prefix =
+                std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".into());
+            let kv_key = format!("{kv_prefix}.{}", runtime_cfg.gw_id);
+            let r = ServiceRegistration::register_direct(
+                &js,
+                kv_key.clone(),
+                kv_value,
+                std::time::Duration::from_secs(15),
+            )
+            .await
+            .expect("failed to register in NATS KV");
+            info!(kv_key, "registered in NATS KV (direct)");
+            r
+        };
+        Some(reg)
+    } else {
+        None
+    };
+
+    // ── 8. Build venue adapter via factory ───────────────────────────────
+    let built = zk_gw_svc::venue::build_adapter(runtime_cfg).await?;
     let adapter = built.adapter;
 
     // Connect adapter.
     adapter.connect().await?;
 
-    // ── Semantic pipeline + publisher ──────────────────────────────────────
-    let pipeline = Arc::new(Mutex::new(SemanticPipeline::new(cfg.account_id)));
+    // ── Semantic pipeline + publisher ────────────────────────────────────
+    let pipeline = Arc::new(Mutex::new(SemanticPipeline::new(runtime_cfg.account_id)));
 
     let publisher = if let Some(ref nats) = nats_client {
         Some(Arc::new(NatsPublisher::new(
             nats.clone(),
-            cfg.gw_id.clone(),
+            runtime_cfg.gw_id.clone(),
         )))
     } else {
         None
     };
 
-    // ── Event loop: adapter events → pipeline → publisher ──────────────────
+    // ── Event loop: adapter events → pipeline → publisher ────────────────
     if let Some(ref pub_arc) = publisher {
         let adapter_clone = Arc::clone(&adapter);
         let pipeline_clone = Arc::clone(&pipeline);
@@ -86,7 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // ── Transition: Starting → Connecting → Live ──────────────────────────
+    // ── Transition: Starting → Connecting → Live ─────────────────────────
     {
         let mut state = gw_state.lock().await;
         *state = GatewayState::Connecting;
@@ -99,9 +212,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Publish GW_EVENT_STARTED.
     if let Some(ref pub_arc) = publisher {
         let event = zk_proto_rs::zk::exch_gw::v1::GatewaySystemEvent {
-            gw_name: cfg.gw_id.clone(),
+            gw_name: runtime_cfg.gw_id.clone(),
             event_type: zk_proto_rs::zk::exch_gw::v1::GatewayEventType::GwEventStarted as i32,
-            service_endpoint: format!("0.0.0.0:{}", cfg.grpc_port),
+            service_endpoint: format!("0.0.0.0:{}", runtime_cfg.grpc_port),
             event_timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -110,107 +223,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pub_arc.publish_system_event(&event).await;
     }
 
-    info!(gw_id = cfg.gw_id, "gateway LIVE");
+    info!(gw_id = runtime_cfg.gw_id, "gateway LIVE");
 
-    // ── Internal execution pool ─────────────────────────────────────────
+    // ── Internal execution pool ──────────────────────────────────────────
     let exec_pool = if let Some(ref pub_arc) = publisher {
         Arc::new(GwExecPool::new(
-            cfg.exec_shard_count,
-            cfg.exec_queue_capacity,
+            runtime_cfg.exec_shard_count,
+            runtime_cfg.exec_queue_capacity,
             Arc::clone(&adapter),
             Arc::clone(pub_arc),
-            cfg.gw_id.clone(),
-            cfg.account_id,
+            runtime_cfg.gw_id.clone(),
+            runtime_cfg.account_id,
         ))
     } else {
-        // Even without NATS, we need the exec pool for gRPC to work.
-        // Create a dummy NatsPublisher — rejection reports will fail to publish
-        // but the pool itself will function. In practice NATS is always present.
         panic!("ZK_NATS_URL is required for gateway operation");
     };
 
-    // ── gRPC servers ───────────────────────────────────────────────────────
+    // ── gRPC servers ─────────────────────────────────────────────────────
     let gw_handler = GrpcHandler {
         exec_pool: Arc::clone(&exec_pool),
         adapter: Arc::clone(&adapter),
         gw_state: Arc::clone(&gw_state),
-        account_id: cfg.account_id,
+        account_id: runtime_cfg.account_id,
     };
 
-    let gw_addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;
+    let gw_addr: SocketAddr = format!("0.0.0.0:{}", runtime_cfg.grpc_port).parse()?;
     let gw_listener = tokio::net::TcpListener::bind(gw_addr).await?;
 
-    // Bind admin listener early (before registration) so the port is guaranteed live.
-    let admin_listener = if cfg.venue == "simulator" && cfg.enable_admin_controls {
-        let admin_addr: SocketAddr = format!("0.0.0.0:{}", cfg.admin_grpc_port).parse()?;
-        Some(tokio::net::TcpListener::bind(admin_addr).await?)
-    } else {
-        None
-    };
-
-    // ── NATS KV self-registration (after adapter connected + listener bound) ──
-    let mut registration = if let Some(ref nats) = nats_client {
-        let js = async_nats::jetstream::new(nats.clone());
-        let kv_prefix =
-            std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".to_string());
-        let kv_key = format!("{kv_prefix}.{}", cfg.gw_id);
-        let grpc_address = format!("{}:{}", cfg.grpc_host, cfg.grpc_port);
-        let admin_port = if cfg.venue == "simulator" && cfg.enable_admin_controls {
-            Some(cfg.admin_grpc_port)
+    // Bind admin listener early (before serving) so the port is guaranteed live.
+    let admin_listener = if let Some(ref sim) = runtime_cfg.simulator {
+        if sim.enable_admin_controls {
+            let admin_addr: SocketAddr =
+                format!("0.0.0.0:{}", sim.admin_grpc_port).parse()?;
+            Some(tokio::net::TcpListener::bind(admin_addr).await?)
         } else {
             None
-        };
-        let reg_proto = zk_infra_rs::discovery_registration::gw_registration(
-            &cfg.gw_id,
-            &grpc_address,
-            &cfg.venue,
-            cfg.account_id,
-            admin_port,
-        );
-        let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg_proto);
-
-        let reg = if cfg.bootstrap_token.is_empty() {
-            let r = zk_infra_rs::service_registry::ServiceRegistration::register_direct(
-                &js,
-                kv_key.clone(),
-                kv_value,
-                std::time::Duration::from_secs(15),
-            )
-            .await
-            .expect("failed to register in NATS KV");
-            info!(kv_key, "registered in NATS KV (direct)");
-            r
-        } else {
-            info!("registering via Pilot bootstrap");
-            let mut runtime_info = std::collections::HashMap::new();
-            runtime_info.insert("grpc_address".into(), grpc_address);
-            runtime_info.insert("venue".into(), cfg.venue.clone());
-            let r = zk_infra_rs::service_registry::ServiceRegistration::register_with_pilot(
-                nats,
-                &js,
-                &cfg.bootstrap_token,
-                &cfg.gw_id,
-                &cfg.instance_type,
-                &cfg.env,
-                runtime_info,
-                kv_value,
-                std::time::Duration::from_secs(15),
-            )
-            .await
-            .expect("Pilot registration failed — is Pilot running?");
-            info!(
-                kv_key = r.grant().kv_key,
-                session_id = r.grant().owner_session_id,
-                "registered via Pilot"
-            );
-            r
-        };
-        Some(reg)
+        }
     } else {
         None
     };
 
-    // ── Serve ──────────────────────────────────────────────────────────────
+    // ── Serve ────────────────────────────────────────────────────────────
     let fenced;
 
     if let Some(admin_listener) = admin_listener {

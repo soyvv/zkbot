@@ -1,34 +1,111 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OMS Service Config",
+  "title": "OMS Provided Config",
   "type": "object",
+  "description": "Pilot-managed provided config for the OMS service. Bootstrap-owned fields such as oms_id, grpc_host, grpc_port, nats_url, bootstrap_token, instance_type, and env are not part of this schema.",
   "properties": {
-    "nats_url": { "type": "string" },
-    "redis_url": { "type": "string" },
-    "pg_url": { "type": "string" },
-    "oms_id": { "type": "string" },
-    "grpc_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-    "grpc_host": { "type": "string" },
-    "handle_external_orders": { "type": "boolean" },
-    "risk_check_enabled": { "type": "boolean" },
-    "max_pending_reports": { "type": "integer", "minimum": 1 },
-    "max_cached_orders": { "type": "integer", "minimum": 1 },
-    "cmd_channel_buf": { "type": "integer", "minimum": 1 },
-    "kv_heartbeat_secs": { "type": "integer", "minimum": 1 },
-    "gateway_kv_prefix": { "type": "string" },
-    "bootstrap_token": { "type": "string" },
-    "instance_type": { "type": "string" },
-    "env": { "type": "string" },
-    "order_resync_interval_secs": { "type": "integer", "minimum": 1 },
-    "balance_resync_interval_secs": { "type": "integer", "minimum": 1 },
-    "position_recheck_interval_secs": { "type": "integer", "minimum": 1 },
-    "cleanup_interval_secs": { "type": "integer", "minimum": 1 },
-    "gw_exec_shard_count": { "type": "integer", "minimum": 1 },
-    "gw_exec_queue_capacity": { "type": "integer", "minimum": 1 },
-    "metrics_interval_secs": { "type": "integer", "minimum": 1 },
-    "metrics_max_pending": { "type": "integer", "minimum": 1 },
-    "metrics_max_complete": { "type": "integer", "minimum": 1 }
+    "redis_url": {
+      "type": "string",
+      "description": "Redis connection URL for OMS caches and supporting state."
+    },
+    "pg_url": {
+      "type": "string",
+      "description": "Postgres connection URL for OMS persistence."
+    },
+    "handle_external_orders": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether OMS should accept and track exchange orders not originally submitted through this OMS."
+    },
+    "risk_check_enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable built-in OMS pre-trade risk checks."
+    },
+    "max_pending_reports": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1000,
+      "description": "Maximum number of entries retained in the pending order-report cache."
+    },
+    "max_cached_orders": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 100000,
+      "description": "Maximum number of orders retained in the OMS order cache."
+    },
+    "cmd_channel_buf": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 4096,
+      "description": "Capacity of the command channel feeding the OMS writer task."
+    },
+    "kv_heartbeat_secs": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 10,
+      "description": "Heartbeat interval used for service-registry KV updates."
+    },
+    "gateway_kv_prefix": {
+      "type": "string",
+      "default": "svc.gw",
+      "description": "NATS KV prefix OMS watches to discover live gateways."
+    },
+    "order_resync_interval_secs": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 60,
+      "description": "Periodic order resync interval in seconds."
+    },
+    "balance_resync_interval_secs": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 60,
+      "description": "Periodic balance resync interval in seconds."
+    },
+    "position_recheck_interval_secs": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 30,
+      "description": "Periodic position recheck interval in seconds."
+    },
+    "cleanup_interval_secs": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 600,
+      "description": "Background cleanup interval in seconds."
+    },
+    "gw_exec_shard_count": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 16,
+      "description": "Number of gateway executor shards used by OMS."
+    },
+    "gw_exec_queue_capacity": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 256,
+      "description": "Per-shard queue capacity for the gateway executor."
+    },
+    "metrics_interval_secs": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 2,
+      "description": "Latency metrics flush interval in seconds."
+    },
+    "metrics_max_pending": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 5000,
+      "description": "Maximum number of in-flight latency samples retained."
+    },
+    "metrics_max_complete": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 10000,
+      "description": "Maximum number of completed latency samples buffered between flushes."
+    }
   },
-  "required": ["oms_id", "redis_url", "pg_url"],
+  "required": ["redis_url", "pg_url"],
   "additionalProperties": true
 }

@@ -41,10 +41,12 @@ async def _refresh_venue_sessions(
 
     if supports_sessions:
         # TradFi venue: call adaptor's load_market_sessions()
+        # Use instantiate_refdata_loader (no schema validation) since config
+        # has already been resolved (secret_ref replaced by credentials).
         try:
-            from zk_refdata_svc.venue_registry import resolve_refdata_loader
+            from zk_refdata_svc.venue_registry import instantiate_refdata_loader
 
-            loader = resolve_refdata_loader(venue, config)
+            loader = instantiate_refdata_loader(venue, config)
             sessions = await loader.load_market_sessions()
             for s in sessions:
                 await repo.upsert_market_session_state(

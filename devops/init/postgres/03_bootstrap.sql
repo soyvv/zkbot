@@ -26,6 +26,19 @@ values (
 )
 on conflict (token_jti) do nothing;
 
+-- Dev bootstrap token for refdata_dev_1 (plaintext token = "dev-refdata-token-1").
+-- Token hash: sha256("dev-refdata-token-1") — verified by Pilot on registration.
+insert into cfg.instance_token (token_jti, logical_id, instance_type, token_hash, status, expires_at)
+values (
+  'dev-refdata-token-jti-1',
+  'refdata_dev_1',
+  'REFDATA',
+  encode(sha256('dev-refdata-token-1'::bytea), 'hex'),
+  'active',
+  now() + interval '365 days'
+)
+on conflict (token_jti) do nothing;
+
 -- Dev bootstrap token for gw_sim_1 (plaintext token = "dev-gw-token-1").
 -- Token hash: sha256("dev-gw-token-1") — verified by Pilot on registration.
 insert into cfg.instance_token (token_jti, logical_id, instance_type, token_hash, status, expires_at)

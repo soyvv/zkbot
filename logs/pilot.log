@@ -1,0 +1,89 @@
+cd java && ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_PG_URL=jdbc:postgresql://localhost:5432/zkbot \
+	           ZK_PG_USER=zk \
+	           ZK_PG_PASS=zk \
+	           ZK_REDIS_URL=redis://localhost:6379 \
+	           ZK_ENV=dev \
+	           ZK_PILOT_ID=pilot_dev_1 \
+	           ZK_HTTP_PORT=8090 \
+	           SPRING_PROFILES_ACTIVE=dev \
+	           ./gradlew bootRun
+> Task :extractIncludeProto UP-TO-DATE
+> Task :extractProto UP-TO-DATE
+> Task :generateProto UP-TO-DATE
+> Task :compileJava UP-TO-DATE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :resolveMainClassName UP-TO-DATE
+
+> Task :bootRun
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.3)
+
+2026-03-23T20:01:11.321+08:00  INFO 28609 --- [           main] com.zkbot.pilot.PilotApplication         : Starting PilotApplication using Java 21.0.10 with PID 28609 (/Users/zzk/workspace/zklab/zkbot/java/build/classes/java/main started by zzk in /Users/zzk/workspace/zklab/zkbot/java)
+2026-03-23T20:01:11.322+08:00  INFO 28609 --- [           main] com.zkbot.pilot.PilotApplication         : The following 1 profile is active: "dev"
+2026-03-23T20:01:11.792+08:00  INFO 28609 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Multiple Spring Data modules found, entering strict repository configuration mode
+2026-03-23T20:01:11.793+08:00  INFO 28609 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-03-23T20:01:11.811+08:00  INFO 28609 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 10 ms. Found 0 Redis repository interfaces.
+2026-03-23T20:01:12.108+08:00  INFO 28609 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8090 (http)
+2026-03-23T20:01:12.115+08:00  INFO 28609 --- [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-03-23T20:01:12.115+08:00  INFO 28609 --- [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.36]
+2026-03-23T20:01:12.142+08:00  INFO 28609 --- [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-03-23T20:01:12.143+08:00  INFO 28609 --- [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 803 ms
+2026-03-23T20:01:12.329+08:00  INFO 28609 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-03-23T20:01:12.431+08:00  INFO 28609 --- [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@350d26f3
+2026-03-23T20:01:12.431+08:00  INFO 28609 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-03-23T20:01:12.451+08:00  INFO 28609 --- [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:5432/zkbot (PostgreSQL 16.13)
+2026-03-23T20:01:12.480+08:00  INFO 28609 --- [           main] o.f.core.internal.command.DbValidate     : Successfully validated 6 migrations (execution time 00:00.017s)
+2026-03-23T20:01:12.502+08:00  INFO 28609 --- [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 6
+2026-03-23T20:01:12.503+08:00  INFO 28609 --- [           main] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
+2026-03-23T20:01:12.564+08:00  INFO 28609 --- [           main] com.zkbot.pilot.config.NatsConfig        : Connected to NATS at nats://localhost:4222
+2026-03-23T20:01:12.573+08:00  INFO 28609 --- [           main] com.zkbot.pilot.config.NatsConfig        : KV bucket 'zk-svc-registry-v1' already exists
+2026-03-23T20:01:12.641+08:00  INFO 28609 --- [           main] c.zkbot.pilot.meta.VenueManifestLoader   : venue-manifest: loaded 4 venue manifests: [oanda, ibkr, simulator, okx]
+2026-03-23T20:01:12.686+08:00  INFO 28609 --- [           main] c.z.pilot.schema.SchemaRegistrySyncer    : schema-sync: complete — new=0, unchanged=14, mismatch=0
+2026-03-23T20:01:13.103+08:00  INFO 28609 --- [           main] r$InitializeUserDetailsManagerConfigurer : Global AuthenticationManager configured with UserDetailsService bean with name userDetailsService
+2026-03-23T20:01:13.244+08:00  INFO 28609 --- [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 3 endpoints beneath base path '/actuator'
+2026-03-23T20:01:13.485+08:00  INFO 28609 --- [         nats:5] com.zkbot.pilot.bootstrap.KvReconciler   : reconciler: initial snapshot loaded (3 live keys)
+2026-03-23T20:01:13.485+08:00  INFO 28609 --- [           main] c.z.pilot.bootstrap.BootstrapService     : BootstrapService started, subscribed to zk.bootstrap.register and zk.bootstrap.deregister
+2026-03-23T20:01:13.494+08:00  INFO 28609 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8090 (http) with context path '/'
+2026-03-23T20:01:13.503+08:00  INFO 28609 --- [           main] com.zkbot.pilot.PilotApplication         : Started PilotApplication in 2.372 seconds (process running for 2.572)
+2026-03-23T20:01:13.548+08:00  INFO 28609 --- [         nats:4] c.z.pilot.discovery.DiscoveryWatcher     : discovery: initial snapshot loaded (3 entries)
+2026-03-23T20:01:39.058+08:00  INFO 28609 --- [nio-8090-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-03-23T20:01:39.058+08:00  INFO 28609 --- [nio-8090-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-03-23T20:01:39.060+08:00  INFO 28609 --- [nio-8090-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-03-23T20:01:39.294+08:00  INFO 28609 --- [nio-8090-exec-1] com.zkbot.pilot.grpc.OmsGrpcClient       : Creating gRPC channel to OMS oms_dev_1 at 127.0.0.1:50051
+2026-03-23T20:40:02.421+08:00  INFO 28609 --- [nio-8090-exec-6] c.z.pilot.schema.SchemaRegistrySyncer    : schema-sync: inserted service_kind/gw schema_id=svc/gw version=2
+2026-03-23T20:40:02.437+08:00  INFO 28609 --- [nio-8090-exec-6] c.z.pilot.schema.SchemaRegistrySyncer    : schema-sync: complete — new=1, unchanged=13, mismatch=0
+2026-03-23T20:47:12.899+08:00  INFO 28609 --- [ionShutdownHook] o.s.b.w.e.tomcat.GracefulShutdown        : Commencing graceful shutdown. Waiting for active requests to complete
+2026-03-23T20:47:12.903+08:00  INFO 28609 --- [tomcat-shutdown] o.s.b.w.e.tomcat.GracefulShutdown        : Graceful shutdown complete
+2026-03-23T20:47:12.918+08:00  INFO 28609 --- [ionShutdownHook] com.zkbot.pilot.grpc.GwSimAdminClient    : Shutting down 0 simulator admin gRPC channels
+2026-03-23T20:47:12.918+08:00  INFO 28609 --- [ionShutdownHook] c.z.p.orchestrator.ProcessOrchestrator   : orchestrator: shutting down, stopping 0 managed processes
+2026-03-23T20:47:12.919+08:00  INFO 28609 --- [ionShutdownHook] com.zkbot.pilot.config.NatsConfig        : NATS connection closed
+2026-03-23T20:47:12.919+08:00  INFO 28609 --- [ionShutdownHook] com.zkbot.pilot.grpc.OmsGrpcClient       : Shutting down 1 OMS gRPC channels
+2026-03-23T20:47:12.921+08:00  INFO 28609 --- [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2026-03-23T20:47:12.923+08:00  INFO 28609 --- [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+
+> Task :bootRun FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':bootRun'.
+> Process 'command '/Users/zzk/.sdkman/candidates/java/21.0.10-zulu/bin/java'' finished with non-zero exit value 143
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 46m 3s
+7 actionable tasks: 1 executed, 6 up-to-date
+make: *** [pilot-java-run] Error 1

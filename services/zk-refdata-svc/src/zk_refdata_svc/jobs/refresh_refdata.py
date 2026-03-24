@@ -36,11 +36,21 @@ async def refresh_refdata(
 
 
 def _resolve_loader(venue_name: str, config: dict | None = None):
-    """Try manifest-driven resolution first, then fall back to old registry."""
-    try:
-        from zk_refdata_svc.venue_registry import resolve_refdata_loader, VenueCapabilityNotFound
+    """Resolve a venue loader.
 
-        return resolve_refdata_loader(venue_name, config)
+    Uses instantiate_refdata_loader (no schema validation) because the config
+    passed here is the resolved runtime config (secret_ref already replaced by
+    actual credentials). Schema validation happens earlier during config assembly.
+
+    Falls back to legacy VENUE_LOADERS for venues not yet in venue-integrations.
+    """
+    try:
+        from zk_refdata_svc.venue_registry import (
+            instantiate_refdata_loader,
+            VenueCapabilityNotFound,
+        )
+
+        return instantiate_refdata_loader(venue_name, config)
     except (FileNotFoundError, VenueCapabilityNotFound) as e:
         logger.debug(f"manifest resolution failed for {venue_name!r}: {e}, trying legacy registry")
     # Fall back to hardcoded VENUE_LOADERS for venues not yet in venue-integrations.

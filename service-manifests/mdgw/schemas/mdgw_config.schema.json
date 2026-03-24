@@ -1,19 +1,39 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "RTMD Gateway Service Config",
+  "title": "RTMD Gateway Provided Config",
   "type": "object",
+  "description": "Pilot-managed provided config for the RTMD gateway service. Bootstrap-owned fields such as mdgw_id, env, nats_url, grpc_host, grpc_port, bootstrap_token, and instance_type are not part of this schema.",
   "properties": {
-    "mdgw_id": { "type": "string" },
-    "venue": { "type": "string" },
-    "nats_url": { "type": "string" },
-    "grpc_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-    "grpc_host": { "type": "string" },
-    "venue_config": { "type": "object" },
-    "venue_root": { "type": "string" },
-    "gateway_kv_prefix": { "type": "string" },
-    "rtmd_sub_bucket": { "type": "string" },
-    "sub_lease_ttl_s": { "type": "integer", "minimum": 1 }
+    "venue": {
+      "type": "string",
+      "description": "Venue identifier, for example okx, binance, or simulator."
+    },
+    "venue_config": {
+      "type": "object",
+      "default": {},
+      "description": "Opaque venue-specific market-data config payload."
+    },
+    "venue_root": {
+      "type": "string",
+      "description": "Optional root path for manifest-driven venue module loading."
+    },
+    "gateway_kv_prefix": {
+      "type": "string",
+      "default": "svc.mdgw",
+      "description": "NATS KV prefix used when registering MDGW discovery entries."
+    },
+    "rtmd_sub_bucket": {
+      "type": "string",
+      "default": "zk-rtmd-subs-v1",
+      "description": "NATS KV bucket used to coordinate RTMD subscription leases."
+    },
+    "sub_lease_ttl_s": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 60,
+      "description": "Subscription lease TTL in seconds."
+    }
   },
-  "required": ["mdgw_id", "venue"],
+  "required": ["venue"],
   "additionalProperties": true
 }

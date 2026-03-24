@@ -13,11 +13,12 @@ async def run_periodic(
     interval_s: float,
     coro_factory: Callable[..., Coroutine[Any, Any, Any]],
     *args: Any,
+    **kwargs: Any,
 ) -> None:
-    """Run *coro_factory(\*args)* every *interval_s* seconds, forever."""
+    """Run *coro_factory(\*args, \*\*kwargs)* every *interval_s* seconds, forever."""
     while True:
         try:
-            await coro_factory(*args)
+            await coro_factory(*args, **kwargs)
         except asyncio.CancelledError:
             return
         except Exception:

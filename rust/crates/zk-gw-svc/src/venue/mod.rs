@@ -5,7 +5,7 @@ pub mod simulator;
 
 use std::sync::Arc;
 
-use crate::config::GwSvcConfig;
+use crate::config::{self, GwRuntimeConfig};
 use crate::venue_adapter::VenueAdapter;
 
 /// Build result containing the adapter and optional simulator-specific handles.
@@ -22,7 +22,7 @@ pub struct SimulatorHandles {
 }
 
 /// Factory: build the venue adapter for the configured venue.
-pub async fn build_adapter(cfg: &GwSvcConfig) -> anyhow::Result<BuiltVenue> {
+pub async fn build_adapter(cfg: &GwRuntimeConfig) -> anyhow::Result<BuiltVenue> {
     // ── Manifest-driven Python venue loading ────────────────────────────
     #[cfg(feature = "python-venue")]
     if let Some(ref venue_root) = cfg.venue_root {
@@ -57,11 +57,15 @@ pub async fn build_adapter(cfg: &GwSvcConfig) -> anyhow::Result<BuiltVenue> {
 
     match cfg.venue.as_str() {
         "simulator" => {
-            let balances = GwSvcConfig::parse_balances(&cfg.mock_balances);
-            let match_policy = simulator::make_match_policy(&cfg.match_policy);
+            let sim = cfg
+                .simulator
+                .as_ref()
+                .expect("simulator config validated at assembly");
+            let balances = config::parse_balances(&sim.mock_balances);
+            let match_policy = simulator::make_match_policy(&sim.match_policy);
             let sim_core = zk_sim_core::simulator::SimulatorCore::new(match_policy, "SIM");
             let account_state = simulator::SimAccountState::new(cfg.account_id, balances);
-            let control_state = simulator::ManualControlState::new(cfg.match_policy.clone());
+            let control_state = simulator::ManualControlState::new(sim.match_policy.clone());
 
             let sim_state = Arc::new(tokio::sync::Mutex::new(simulator::SimulatorState {
                 sim_core,

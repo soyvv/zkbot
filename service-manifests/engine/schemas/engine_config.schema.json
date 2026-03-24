@@ -1,22 +1,39 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Engine Service Config",
+  "title": "Engine Provided Config",
   "type": "object",
+  "description": "Pilot-managed provided config for the engine service. Bootstrap-owned fields such as nats_url, env, engine_id, grpc_host, grpc_port, kv_heartbeat_secs, discovery_bucket, and bootstrap_token are not part of this schema.",
   "properties": {
-    "nats_url": { "type": "string" },
-    "env": { "type": "string" },
-    "engine_id": { "type": "string" },
-    "grpc_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-    "grpc_host": { "type": "string" },
-    "kv_heartbeat_secs": { "type": "integer", "minimum": 1 },
-    "bootstrap_token": { "type": "string" },
-    "account_ids_csv": { "type": "string" },
-    "strategy_key": { "type": "string" },
-    "instruments_csv": { "type": "string" },
-    "discovery_bucket": { "type": "string" },
-    "timer_interval_ms": { "type": "integer", "minimum": 1 },
-    "kline_interval": { "type": "string" }
+    "strategy_key": {
+      "type": "string",
+      "description": "Strategy key to execute."
+    },
+    "account_ids": {
+      "type": "array",
+      "description": "Account identifiers bound to this engine.",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "instruments": {
+      "type": "array",
+      "description": "Instrument codes to subscribe.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "timer_interval_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1000,
+      "description": "Timer clock interval in milliseconds."
+    },
+    "kline_interval": {
+      "type": "string",
+      "default": "",
+      "description": "Kline interval such as 1m or 5m. Empty string disables kline subscriptions."
+    }
   },
-  "required": ["nats_url", "engine_id"],
+  "required": ["strategy_key", "account_ids", "instruments"],
   "additionalProperties": true
 }

@@ -505,7 +505,15 @@ fn test_config_defaults() {
     std::env::set_var("ZK_REDIS_URL", "redis://localhost:6379");
     std::env::set_var("ZK_PG_URL", "postgres://localhost/test");
 
-    let cfg = zk_oms_svc::config::load().unwrap();
+    let boot = zk_oms_svc::config::load_bootstrap().unwrap();
+    assert_eq!(boot.oms_id, "test_oms");
+    assert_eq!(boot.grpc_port, 50051);
+
+    use zk_infra_rs::bootstrap::{bootstrap_runtime_config, BootstrapMode};
+    use zk_oms_svc::config::OmsService;
+    let outcome =
+        bootstrap_runtime_config::<OmsService>(&boot, BootstrapMode::Direct).unwrap();
+    let cfg = outcome.runtime_config;
     assert_eq!(cfg.oms_id, "test_oms");
     assert_eq!(cfg.grpc_port, 50051);
     assert!(cfg.risk_check_enabled);
@@ -901,6 +909,302 @@ fn test_query_order_details_dedup() {
         1,
         "duplicate refs must not produce duplicate trades"
     );
+}
+
+// ── Bootstrap config tests ───────────────────────────────────────────────────
+
+mod bootstrap_tests {
+    use zk_infra_rs::bootstrap::{
+        bootstrap_runtime_config, BootstrapConfigError, BootstrapMode, PilotPayload,
+    };
+    use zk_oms_svc::config::{OmsBootstrapConfig, OmsService};
+    use zk_proto_rs::zk::config::v1::ConfigMetadata;
+
+    fn test_boot_cfg() -> OmsBootstrapConfig {
+        OmsBootstrapConfig {
+            oms_id: "oms_test_1".into(),
+            grpc_host: "127.0.0.1".into(),
+            grpc_port: 50051,
+            nats_url: "nats://localhost:4222".into(),
+            bootstrap_token: String::new(),
+            instance_type: "OMS".into(),
+            env: "dev".into(),
+        }
+    }
+
+    fn pilot_payload(json: &str) -> PilotPayload {
+        PilotPayload {
+            runtime_config_json: json.into(),
+            config_metadata: None,
+            secret_refs: vec![],
+            server_time_ms: 1700000000000,
+        }
+    }
+
+    fn pilot_payload_with_hash(json: &str, hash: &str) -> PilotPayload {
+        PilotPayload {
+            runtime_config_json: json.into(),
+            config_metadata: Some(ConfigMetadata {
+                config_version: "1".into(),
+                config_hash: hash.into(),
+                config_source: "bootstrap".into(),
+                issued_at_ms: 1700000000000,
+                loaded_at_ms: 0,
+            }),
+            secret_refs: vec![],
+            server_time_ms: 1700000000000,
+        }
+    }
+
+    fn valid_pilot_json() -> &'static str {
+        r#"{"redis_url":"redis://localhost:6379","pg_url":"postgres://localhost/test"}"#
+    }
+
+    #[test]
+    fn test_pilot_mode_assembles_runtime_config() {
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(valid_pilot_json()),
+            validate_hash: false,
+        };
+        let outcome = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap();
+        assert_eq!(outcome.runtime_config.oms_id, "oms_test_1");
+        assert_eq!(outcome.runtime_config.env, "dev");
+        assert_eq!(
+            outcome.runtime_config.redis_url,
+            "redis://localhost:6379"
+        );
+        assert_eq!(
+            outcome.runtime_config.pg_url,
+            "postgres://localhost/test"
+        );
+        // Defaults should be applied for fields not in JSON.
+        assert!(outcome.runtime_config.risk_check_enabled);
+        assert_eq!(outcome.runtime_config.cmd_channel_buf, 4096);
+    }
+
+    #[test]
+    fn test_pilot_mode_malformed_json_fails() {
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload("{not valid json}"),
+            validate_hash: false,
+        };
+        let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
+        assert!(matches!(err, BootstrapConfigError::InvalidJson(_)));
+    }
+
+    #[test]
+    fn test_pilot_mode_empty_json_fails() {
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(""),
+            validate_hash: false,
+        };
+        let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
+        assert!(matches!(err, BootstrapConfigError::InvalidJson(_)));
+    }
+
+    #[test]
+    fn test_pilot_mode_missing_redis_url_fails() {
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(r#"{"pg_url":"postgres://localhost/test"}"#),
+            validate_hash: false,
+        };
+        let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
+        match err {
+            BootstrapConfigError::MissingField { field } => assert_eq!(field, "redis_url"),
+            other => panic!("expected MissingField, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_pilot_mode_missing_pg_url_fails() {
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(r#"{"redis_url":"redis://localhost:6379"}"#),
+            validate_hash: false,
+        };
+        let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
+        match err {
+            BootstrapConfigError::MissingField { field } => assert_eq!(field, "pg_url"),
+            other => panic!("expected MissingField, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_pilot_mode_empty_redis_url_fails() {
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(
+                r#"{"redis_url":"","pg_url":"postgres://localhost/test"}"#,
+            ),
+            validate_hash: false,
+        };
+        let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
+        assert!(matches!(
+            err,
+            BootstrapConfigError::MissingField { .. }
+        ));
+    }
+
+    #[test]
+    fn test_pilot_mode_hash_mismatch_fails() {
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload_with_hash(valid_pilot_json(), "badhash"),
+            validate_hash: true,
+        };
+        let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
+        assert!(matches!(err, BootstrapConfigError::HashMismatch { .. }));
+    }
+
+    #[test]
+    fn test_pilot_mode_hash_match_succeeds() {
+        let json = valid_pilot_json();
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let normalized = zk_infra_rs::config_mgmt::normalize_json(&value);
+        // Compute SHA-256 hex the same way the shared lib does.
+        use sha2::{Digest, Sha256};
+        let hash = format!("{:x}", Sha256::digest(normalized.as_bytes()));
+
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload_with_hash(json, &hash),
+            validate_hash: true,
+        };
+        let outcome = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap();
+        assert_eq!(
+            outcome.runtime_config.redis_url,
+            "redis://localhost:6379"
+        );
+    }
+
+    #[test]
+    fn test_pilot_mode_does_not_fallback_to_direct() {
+        // Pilot mode with invalid JSON must fail, NOT silently fall back to direct.
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload("{}"),
+            validate_hash: false,
+        };
+        // Empty object means redis_url/pg_url are empty strings → MissingField.
+        let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
+        assert!(matches!(
+            err,
+            BootstrapConfigError::MissingField { .. }
+        ));
+    }
+
+    #[test]
+    fn test_direct_mode_preserves_defaults() {
+        // Temporarily set required env vars.
+        std::env::set_var("ZK_OMS_ID", "oms_defaults_test");
+        std::env::set_var("ZK_REDIS_URL", "redis://localhost:6379");
+        std::env::set_var("ZK_PG_URL", "postgres://localhost/test");
+
+        let boot = zk_oms_svc::config::load_bootstrap().unwrap();
+        let outcome =
+            bootstrap_runtime_config::<OmsService>(&boot, BootstrapMode::Direct).unwrap();
+        let cfg = outcome.runtime_config;
+
+        // Check all defaults.
+        assert!(cfg.risk_check_enabled);
+        assert!(!cfg.handle_external_orders);
+        assert_eq!(cfg.max_pending_reports, 1_000);
+        assert_eq!(cfg.max_cached_orders, 100_000);
+        assert_eq!(cfg.cmd_channel_buf, 4_096);
+        assert_eq!(cfg.kv_heartbeat_secs, 10);
+        assert_eq!(cfg.gateway_kv_prefix, "svc.gw");
+        assert_eq!(cfg.order_resync_interval_secs, 60);
+        assert_eq!(cfg.balance_resync_interval_secs, 60);
+        assert_eq!(cfg.position_recheck_interval_secs, 30);
+        assert_eq!(cfg.cleanup_interval_secs, 600);
+        assert_eq!(cfg.gw_exec_shard_count, 16);
+        assert_eq!(cfg.gw_exec_queue_capacity, 256);
+        assert_eq!(cfg.metrics_interval_secs, 2);
+        assert_eq!(cfg.metrics_max_pending, 5_000);
+        assert_eq!(cfg.metrics_max_complete, 10_000);
+
+        std::env::remove_var("ZK_OMS_ID");
+        std::env::remove_var("ZK_REDIS_URL");
+        std::env::remove_var("ZK_PG_URL");
+    }
+
+    #[test]
+    fn test_assemble_validation_shard_count_zero() {
+        let boot = test_boot_cfg();
+        let json = r#"{"redis_url":"redis://localhost:6379","pg_url":"postgres://localhost/test","gw_exec_shard_count":0}"#;
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(json),
+            validate_hash: false,
+        };
+        let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
+        assert!(matches!(err, BootstrapConfigError::Validation(_)));
+    }
+
+    #[test]
+    fn test_assemble_validation_queue_capacity_zero() {
+        let boot = test_boot_cfg();
+        let json = r#"{"redis_url":"redis://localhost:6379","pg_url":"postgres://localhost/test","gw_exec_queue_capacity":0}"#;
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(json),
+            validate_hash: false,
+        };
+        let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
+        assert!(matches!(err, BootstrapConfigError::Validation(_)));
+    }
+
+    #[test]
+    fn test_pilot_mode_bootstrap_fields_from_bootstrap_config() {
+        let mut boot = test_boot_cfg();
+        boot.oms_id = "oms_prod_7".into();
+        boot.env = "prod".into();
+        boot.nats_url = "nats://prod:4222".into();
+
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(valid_pilot_json()),
+            validate_hash: false,
+        };
+        let outcome = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap();
+        assert_eq!(outcome.runtime_config.oms_id, "oms_prod_7");
+        assert_eq!(outcome.runtime_config.env, "prod");
+        assert_eq!(outcome.runtime_config.nats_url, "nats://prod:4222");
+    }
+
+    #[test]
+    fn test_pilot_mode_source_tag() {
+        let boot = test_boot_cfg();
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(valid_pilot_json()),
+            validate_hash: false,
+        };
+        let outcome = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap();
+        assert!(matches!(
+            outcome.source,
+            zk_infra_rs::bootstrap::ConfigSource::Pilot { .. }
+        ));
+    }
+
+    #[test]
+    fn test_direct_mode_source_tag() {
+        std::env::set_var("ZK_OMS_ID", "oms_src_tag");
+        std::env::set_var("ZK_REDIS_URL", "redis://localhost:6379");
+        std::env::set_var("ZK_PG_URL", "postgres://localhost/test");
+
+        let boot = zk_oms_svc::config::load_bootstrap().unwrap();
+        let outcome =
+            bootstrap_runtime_config::<OmsService>(&boot, BootstrapMode::Direct).unwrap();
+        assert_eq!(
+            outcome.source,
+            zk_infra_rs::bootstrap::ConfigSource::Direct
+        );
+
+        std::env::remove_var("ZK_OMS_ID");
+        std::env::remove_var("ZK_REDIS_URL");
+        std::env::remove_var("ZK_PG_URL");
+    }
 }
 
 // ── Integration tests (require dev docker-compose stack) ──────────────────────

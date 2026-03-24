@@ -255,15 +255,15 @@ become the anchor scope for topology, account live views, and manual trading.
    - `GET /v1/schema?resource_type=service_kind`
 4. UI loads the OMS manifest/schema contract and renders:
    - logical id
-   - environment-scoped host/runtime config
+   - environment-scoped `provided_config`
    - service bindings
    - secret-ref fields if any
 5. Operator enters desired OMS config.
 6. UI submits:
    - `POST /v1/topology/services/oms`
 7. Pilot stores:
-   - `cfg.logical_instance`
-   - OMS-specific desired config row
+   - `cfg.logical_instance` identity/topology row
+   - OMS-specific `provided_config` row in `cfg.oms_instance`
 8. UI offers `Issue Bootstrap Token`.
 9. UI calls:
    - `POST /v1/topology/services/oms/{oms_id}/issue-bootstrap-token`
@@ -295,12 +295,12 @@ sequenceDiagram
     UI->>P: GET /v1/schema?resource_type=service_kind
     U->>UI: Submit OMS config
     UI->>P: POST /v1/topology/services/oms
-    P->>DB: Insert logical_instance + oms config
+    P->>DB: Insert cfg.logical_instance + cfg.oms_instance.provided_config
     UI->>P: POST /v1/topology/services/oms/{oms_id}/issue-bootstrap-token
     P-->>UI: bootstrap token
     U->>O: Start OMS with token
     O->>P: zk.bootstrap.register
-    P-->>O: runtime config + bootstrap grant
+    P-->>O: provided-config payload + bootstrap grant
     O->>KV: register and heartbeat
     UI->>P: GET /v1/topology/services/oms/{oms_id}
     P-->>UI: OMS online
@@ -463,15 +463,15 @@ Define MDGW runtime config and bring it online so OMS/GW/bot scopes can consume 
    - `GET /v1/meta?domains=topology,refdata`
    - `GET /v1/schema`
 4. UI renders:
-   - host/runtime config
+   - service-level `provided_config`
    - venue RTMD capability config
    - secret refs
    - optional initial refdata / RTMD policy linkage
 5. Operator submits:
    - `POST /v1/topology/services/mdgw`
 6. Pilot stores:
-   - logical instance
-   - MDGW desired config
+   - `cfg.logical_instance`
+   - `cfg.mdgw_instance.provided_config`
 7. UI offers bootstrap token issuance:
    - `POST /v1/topology/services/mdgw/{logical_id}/issue-bootstrap-token`
 8. Operator starts the MDGW runtime.
@@ -487,6 +487,37 @@ Define MDGW runtime config and bring it online so OMS/GW/bot scopes can consume 
   - configured
   - online
   - currently subscribed / actively used
+
+## Sequence 5: Refdata Venue Onboarding
+
+### Goal
+
+Create one venue-scoped refdata control-plane row for a shared refdata runtime.
+
+### UI Steps
+
+1. Open `Refdata Venue Setup` from Pilot ops/topology.
+2. Select venue.
+3. UI loads:
+   - `GET /v1/schema/venues/{venueId}/capabilities/refdata/config`
+4. UI renders:
+   - venue-specific `provided_config`
+   - secret-ref metadata fields if declared by the venue manifest
+5. Operator submits:
+   - `POST /v1/topology/refdata-venues`
+6. Pilot stores:
+   - `cfg.refdata_venue_instance`
+   - schema provenance for the selected venue capability
+7. If the refdata runtime is Pilot-bootstrapped, the matching logical-instance/bootstrap-token path
+   must also exist before runtime restart.
+8. Operator starts or restarts the shared refdata runtime.
+9. Refdata bootstraps, loads venue-scoped `provided_config`, resolves secrets, and registers live.
+
+### UI Notes
+
+- Refdata venue onboarding is not the same path as `POST /v1/topology/services/{kind}`.
+- The UI should present refdata as a venue-scoped control-plane entity, not as a generic service-kind
+  create form.
 
 ## Sequence 5: Bind OMS, GW, Accounts Into A Live Trading Scope
 

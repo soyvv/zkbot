@@ -1,0 +1,10 @@
+{
+  "oanda": {
+    "environment": "practice",
+    "account_id": "101-003-26138765-001",
+    "secret_ref": "8001"
+  },
+  "okx": {
+    "api_base_url": "https://www.okx.com"
+  }
+}

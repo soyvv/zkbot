@@ -32,8 +32,13 @@ class DesiredConfigRepositoryTest {
     }
 
     @Test
+    void isManagedType_returns_true_for_refdata() {
+        assertThat(repo.isManagedType("REFDATA")).isTrue();
+        assertThat(repo.isManagedType("refdata")).isTrue();
+    }
+
+    @Test
     void isManagedType_returns_false_for_unknown_types() {
-        assertThat(repo.isManagedType("REFDATA")).isFalse();
         assertThat(repo.isManagedType("UNKNOWN")).isFalse();
     }
 

@@ -23,7 +23,7 @@ use zk_strategy_sdk_rs::strategy::Strategy;
 use zk_trading_sdk_rs::client::TradingClient;
 
 use crate::bootstrap;
-use crate::config::EngineSvcConfig;
+use crate::config::EngineBootstrapConfig;
 use crate::control_api::ControlApiState;
 use crate::dispatcher::TradingDispatcher;
 use crate::proto::engine_svc::engine_service_server::{EngineService, EngineServiceServer};
@@ -97,25 +97,26 @@ impl EngineService for EngineGrpcHandler {
 ///
 /// Generic over `S: Strategy` so the binary can plug in any concrete strategy.
 ///
-/// 1. Bootstrap (Pilot claim or direct mode)
-/// 2. Connect TradingClient
-/// 3. Rehydrate initial state (stubbed)
-/// 4. Build LiveEngine with TradingDispatcher
-/// 5. Start gRPC server
-/// 6. Register in NATS KV
-/// 7. Start event subscriptions + timer clock
-/// 8. Run engine event loop
-/// 9. Supervise (fencing / signal)
-/// 10. Graceful shutdown
+/// 1. Connect NATS
+/// 2. Bootstrap (Pilot or direct mode) → EngineRuntimeConfig
+/// 3. Connect TradingClient
+/// 4. Rehydrate initial state (stubbed)
+/// 5. Build LiveEngine with TradingDispatcher
+/// 6. Start gRPC server
+/// 7. Register in NATS KV (direct mode only; Pilot mode already registered)
+/// 8. Start event subscriptions + timer clock
+/// 9. Run engine event loop
+/// 10. Supervise (fencing / signal)
+/// 11. Graceful shutdown
 pub async fn run<S: Strategy>(
-    cfg: EngineSvcConfig,
+    boot_cfg: EngineBootstrapConfig,
     strategy: S,
     refdata: Vec<InstrumentRefData>,
 ) -> anyhow::Result<()> {
     let start_time = Instant::now();
 
     // ── 1. Infrastructure connections ───────────────────────────────────
-    let nats_client = zk_infra_rs::nats::connect(&cfg.nats_url)
+    let nats_client = zk_infra_rs::nats::connect(&boot_cfg.nats_url)
         .await
         .expect("NATS connect failed");
     info!("NATS connected");
@@ -123,12 +124,15 @@ pub async fn run<S: Strategy>(
     let js = async_nats::jetstream::new(nats_client.clone());
 
     // ── 2. Bootstrap ────────────────────────────────────────────────────
-    let grant = bootstrap::bootstrap(&cfg, &nats_client, &js).await?;
+    let (outcome, pilot_grant) = bootstrap::run_bootstrap(&boot_cfg, &nats_client).await?;
+    let cfg = outcome.runtime_config;
+
     info!(
-        execution_id = %grant.execution_id,
-        strategy_key = %grant.strategy_key,
-        accounts = ?grant.account_ids,
-        instruments = ?grant.instruments,
+        execution_id = %cfg.execution_id,
+        strategy_key = %cfg.strategy_key,
+        accounts = ?cfg.account_ids,
+        instruments = ?cfg.instruments,
+        config_source = %outcome.source.as_metadata_source(),
         "bootstrap complete"
     );
 
@@ -136,8 +140,8 @@ pub async fn run<S: Strategy>(
     let trading_config = zk_trading_sdk_rs::config::TradingClientConfig {
         nats_url: cfg.nats_url.clone(),
         env: cfg.env.clone(),
-        account_ids: grant.account_ids.clone(),
-        client_instance_id: grant.instance_id,
+        account_ids: cfg.account_ids.clone(),
+        client_instance_id: cfg.instance_id,
         discovery_bucket: cfg.discovery_bucket.clone(),
         refdata_grpc: None,
     };
@@ -149,19 +153,19 @@ pub async fn run<S: Strategy>(
     info!("TradingClient connected");
 
     // ── 4. Rehydrate initial state (stubbed) ────────────────────────────
-    let _rehydrated = crate::rehydration::rehydrate(&trading_client, &grant.account_ids).await;
+    let _rehydrated = crate::rehydration::rehydrate(&trading_client, &cfg.account_ids).await;
 
     // ── 5. Build LiveEngine ─────────────────────────────────────────────
     let dispatcher =
-        TradingDispatcher::new(Arc::clone(&trading_client), grant.execution_id.clone());
+        TradingDispatcher::new(Arc::clone(&trading_client), cfg.execution_id.clone());
 
     let mut engine = LiveEngine::new(
-        grant.account_ids.clone(),
+        cfg.account_ids.clone(),
         refdata,
         strategy,
         dispatcher,
-        grant.execution_id.clone(),
-        grant.strategy_key.clone(),
+        cfg.execution_id.clone(),
+        cfg.strategy_key.clone(),
     );
 
     // Grab the read replica before moving into the event loop task.
@@ -220,7 +224,12 @@ pub async fn run<S: Strategy>(
     });
 
     // ── 8. Register in NATS KV ──────────────────────────────────────────
-    let mut registration = bootstrap::register_kv(&js, &cfg, &grant).await?;
+    // In Pilot mode, registration was already established during bootstrap.
+    // In direct mode, register now.
+    let mut registration = match pilot_grant {
+        Some(grant) => bootstrap::register_kv_with_grant(&nats_client, &js, &grant, &cfg).await?,
+        None => bootstrap::register_kv(&js, &cfg).await?,
+    };
 
     // ── 9. Start subscriptions + timer ──────────────────────────────────
     let mut sub_handles = Vec::new();
@@ -233,7 +242,7 @@ pub async fn run<S: Strategy>(
     // RTMD tick subscriptions.
     let tick_handles = crate::subscriptions::subscribe_ticks(
         &trading_client,
-        &grant.instruments,
+        &cfg.instruments,
         event_tx.clone(),
     )
     .await;
@@ -243,7 +252,7 @@ pub async fn run<S: Strategy>(
     if !cfg.kline_interval.is_empty() {
         let kline_handles = crate::subscriptions::subscribe_klines(
             &trading_client,
-            &grant.instruments,
+            &cfg.instruments,
             &cfg.kline_interval,
             grace_tx.clone(),
         )

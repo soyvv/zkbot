@@ -65,6 +65,7 @@ tonic-build = "0.12"
 tokio     = { version = "1", features = ["full", "test-util"] }
 mockall   = "0.13"
 criterion = { version = "0.5", features = ["async_tokio"] }
+sha2      = "0.10"
 
 [[bench]]
 name    = "oms_svc_latency"

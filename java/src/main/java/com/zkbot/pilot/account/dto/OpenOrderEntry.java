@@ -1,7 +1,10 @@
 package com.zkbot.pilot.account.dto;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
 public record OpenOrderEntry(
-        long orderId,
+        @JsonSerialize(using = ToStringSerializer.class) long orderId,
         String exchOrderRef,
         String instrument,
         String side,
@@ -10,6 +13,6 @@ public record OpenOrderEntry(
         double qty,
         double filledQty,
         double filledAvgPrice,
-        long createdAt,
-        long updatedAt
+        @JsonSerialize(using = ToStringSerializer.class) long createdAt,
+        @JsonSerialize(using = ToStringSerializer.class) long updatedAt
 ) {}

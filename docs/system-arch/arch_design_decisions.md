@@ -71,6 +71,10 @@ and live config should be inspectable from the runtime.
 
 Rule:
 
+- config should be understood in three layers:
+  - `bootstrap_config`
+  - `provided_config`
+  - `runtime_config`
 - venue-backed services such as GW and MDGW use the venue integration manifest/schema
 - non-venue bootstrap-managed services such as OMS and engine use an equivalent service-kind
   manifest/schema contract
@@ -86,6 +90,13 @@ Pilot uses this combination to:
 - compare desired config vs live effective config
 - surface drift
 - decide whether reload or restart is required
+
+Compatibility rule:
+
+- direct startup mode remains valid
+- in direct mode, the same logical `runtime_config` is assembled locally
+- the difference is only that `provided_config` is sourced from env vars/files instead of Pilot
+  bootstrap
 
 ### Bundled manifests remain authoritative
 

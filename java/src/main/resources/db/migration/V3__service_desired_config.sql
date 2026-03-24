@@ -52,18 +52,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_oms_config_version ON cfg.oms_instance;
 CREATE TRIGGER trg_oms_config_version
     BEFORE UPDATE ON cfg.oms_instance
     FOR EACH ROW EXECUTE FUNCTION cfg.bump_config_version();
 
+DROP TRIGGER IF EXISTS trg_gw_config_version ON cfg.gateway_instance;
 CREATE TRIGGER trg_gw_config_version
     BEFORE UPDATE ON cfg.gateway_instance
     FOR EACH ROW EXECUTE FUNCTION cfg.bump_config_version();
 
+DROP TRIGGER IF EXISTS trg_engine_config_version ON cfg.engine_instance;
 CREATE TRIGGER trg_engine_config_version
     BEFORE UPDATE ON cfg.engine_instance
     FOR EACH ROW EXECUTE FUNCTION cfg.bump_config_version();
 
+DROP TRIGGER IF EXISTS trg_mdgw_config_version ON cfg.mdgw_instance;
 CREATE TRIGGER trg_mdgw_config_version
     BEFORE UPDATE ON cfg.mdgw_instance
     FOR EACH ROW EXECUTE FUNCTION cfg.bump_config_version();

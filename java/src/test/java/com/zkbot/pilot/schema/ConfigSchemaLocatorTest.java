@@ -13,7 +13,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class ConfigSchemaLocatorTest {
@@ -134,12 +134,58 @@ class ConfigSchemaLocatorTest {
         assertThat(result).isEqualTo(svcDescriptors);
     }
 
+    // ── REFDATA: venue-only (no service_kind layer) ────────────────────────
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void resolveFieldDescriptors_refdata_uses_venue_capability_only() {
+        when(jdbc.query(contains("refdata_venue_instance"), any(ResultSetExtractor.class), eq("refdata_1")))
+                .thenReturn("binance");
+
+        var venueDescriptors = List.of(Map.<String, Object>of("path", "/api_base_url", "reloadable", false));
+        when(schemaService.getFieldDescriptors("venue_capability", "binance/refdata"))
+                .thenReturn(venueDescriptors);
+
+        var result = locator.resolveFieldDescriptors("refdata_1", "REFDATA");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().get("path")).isEqualTo("/api_base_url");
+        // No service_kind call for REFDATA
+        verify(schemaService, never()).getFieldDescriptors(eq("service_kind"), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void resolveFieldDescriptors_refdata_returns_empty_when_no_venue() {
+        when(jdbc.query(contains("refdata_venue_instance"), any(ResultSetExtractor.class), eq("refdata_x")))
+                .thenReturn(null);
+
+        var result = locator.resolveFieldDescriptors("refdata_x", "REFDATA");
+
+        assertThat(result).isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void resolveConfigSchema_refdata_uses_venue_capability() {
+        when(jdbc.query(contains("refdata_venue_instance"), any(ResultSetExtractor.class), eq("refdata_1")))
+                .thenReturn("okx");
+        when(schemaService.getConfigSchema("venue_capability", "okx/refdata"))
+                .thenReturn("{\"type\":\"object\"}");
+
+        var result = locator.resolveConfigSchema("refdata_1", "REFDATA");
+
+        assertThat(result).isEqualTo("{\"type\":\"object\"}");
+        verify(schemaService, never()).getConfigSchema(eq("service_kind"), any());
+    }
+
     // ── isVenueBacked ─────────────────────────────────────────────────────
 
     @Test
     void isVenueBacked_returns_true_for_venue_types() {
         assertThat(locator.isVenueBacked("GW")).isTrue();
         assertThat(locator.isVenueBacked("MDGW")).isTrue();
+        assertThat(locator.isVenueBacked("REFDATA")).isTrue();
         assertThat(locator.isVenueBacked("gw")).isTrue(); // case insensitive
     }
 
@@ -147,6 +193,5 @@ class ConfigSchemaLocatorTest {
     void isVenueBacked_returns_false_for_non_venue_types() {
         assertThat(locator.isVenueBacked("OMS")).isFalse();
         assertThat(locator.isVenueBacked("ENGINE")).isFalse();
-        assertThat(locator.isVenueBacked("REFDATA")).isFalse(); // REFDATA not Pilot-managed
     }
 }

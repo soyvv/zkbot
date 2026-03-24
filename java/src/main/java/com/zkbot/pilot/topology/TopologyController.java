@@ -100,4 +100,21 @@ public class TopologyController {
     public List<SessionResponse> listSessions(@RequestParam(required = false) String oms_id) {
         return service.listSessions(oms_id);
     }
+
+    // --- Refdata venue instances ---
+
+    @GetMapping("/refdata-venues")
+    public List<RefdataVenueInstanceEntry> listRefdataVenues() {
+        return service.listRefdataVenueInstances();
+    }
+
+    @GetMapping("/refdata-venues/{logicalId}")
+    public RefdataVenueInstanceEntry getRefdataVenue(@PathVariable String logicalId) {
+        return service.getRefdataVenueInstance(logicalId);
+    }
+
+    @PostMapping("/refdata-venues")
+    public RefdataVenueInstanceEntry createRefdataVenue(@RequestBody CreateRefdataVenueRequest request) {
+        return service.createRefdataVenueInstance(request);
+    }
 }

@@ -6,7 +6,8 @@ import java.util.Map;
 public record CreateServiceRequest(
     String logicalId,
     boolean enabled,
-    Map<String, Object> runtimeConfig,
+    Map<String, Object> providedConfig,
+    String venue,
     Map<String, Object> metadata,
     List<BindingSpec> bindings
 ) {

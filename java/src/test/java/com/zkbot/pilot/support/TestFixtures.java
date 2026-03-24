@@ -212,6 +212,17 @@ public final class TestFixtures {
                 """, accountId);
     }
 
+    // --- cfg.refdata_venue_instance ---
+
+    public static void insertRefdataVenueInstance(JdbcTemplate jdbc, String logicalId,
+                                                    String env, String venue) {
+        jdbc.update("""
+                INSERT INTO cfg.refdata_venue_instance (logical_id, env, venue)
+                VALUES (?, ?, ?)
+                ON CONFLICT (logical_id) DO NOTHING
+                """, logicalId, env, venue);
+    }
+
     // --- helpers ---
 
     private static String sha256Hex(String input) {

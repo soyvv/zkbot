@@ -4,9 +4,12 @@ Uses betterproto dataclasses — wire-compatible with the protobuf definitions i
 `protos/zk/pilot/v1/bootstrap.proto`. No codegen step required.
 """
 
+from dataclasses import dataclass
+
 import betterproto
 
 
+@dataclass
 class BootstrapRegisterRequest(betterproto.Message):
     token: str = betterproto.string_field(1)
     logical_id: str = betterproto.string_field(2)
@@ -15,6 +18,7 @@ class BootstrapRegisterRequest(betterproto.Message):
     runtime_info: dict[str, str] = betterproto.map_field(5, betterproto.TYPE_STRING, betterproto.TYPE_STRING)
 
 
+@dataclass
 class BootstrapRegisterResponse(betterproto.Message):
     owner_session_id: str = betterproto.string_field(1)
     kv_key: str = betterproto.string_field(2)
@@ -24,8 +28,10 @@ class BootstrapRegisterResponse(betterproto.Message):
     scoped_credential: str = betterproto.string_field(6)
     status: str = betterproto.string_field(7)
     error_message: str = betterproto.string_field(8)
+    runtime_config: str = betterproto.string_field(9)
 
 
+@dataclass
 class BootstrapDeregisterRequest(betterproto.Message):
     owner_session_id: str = betterproto.string_field(1)
     logical_id: str = betterproto.string_field(2)
@@ -33,6 +39,7 @@ class BootstrapDeregisterRequest(betterproto.Message):
     env: str = betterproto.string_field(4)
 
 
+@dataclass
 class BootstrapDeregisterResponse(betterproto.Message):
     success: bool = betterproto.bool_field(1)
     error_message: str = betterproto.string_field(2)

@@ -49,6 +49,90 @@ Recommended runtime split:
 - gRPC query service
 - control/reload loop
 
+## Config Model
+
+The refdata service should follow the same three-layer config model now used by OMS/GW/MDGW/engine:
+
+- `bootstrap_config`
+  - minimal env/deployment-owned startup inputs
+  - examples: `logical_id`, `env`, `grpc_host`, `grpc_port`, `nats_url`, `pg_url`,
+    `bootstrap_token`
+- `provided_config`
+  - Pilot-managed control-plane config, or env-sourced equivalent in direct mode
+  - examples: enabled venues, per-venue refdata config, refresh policy, secret-ref metadata
+- `runtime_config`
+  - effective in-memory config assembled by the service from bootstrap inputs, provided config, and
+    resolved secrets
+
+Design rule:
+
+- manifest schemas describe `provided_config`, not the full process-start env contract
+- direct mode remains supported, but direct mode changes the source of provided fields, not the
+  logical config model
+
+## Pilot-Managed Venue Config
+
+Refdata config should be stored as venue-scoped control-plane rows rather than one large
+service-global blob.
+
+Recommended DB authority:
+
+- `cfg.refdata_venue_instance`
+- one row per logical refdata venue instance
+- usually unique on `(env, venue)`
+
+Recommended stored fields:
+
+- `logical_id`
+- `env`
+- `venue`
+- `enabled`
+- `provided_config`
+- schema provenance:
+  - `schema_resource_type`
+  - `schema_resource_key`
+  - `schema_version`
+  - `schema_content_hash`
+- `config_version`
+- `config_hash`
+
+Design rule:
+
+- Pilot owns the persisted `provided_config`
+- the refdata runtime assembles `runtime_config`
+- PostgreSQL refdata content tables such as `cfg.instrument_refdata` remain canonical data state,
+  not config authority
+
+## Secret Handling
+
+Some venue refdata loaders need credentials before the initial refresh can succeed.
+
+Examples:
+
+- OANDA refdata may require an access token
+- some future venue loaders may require API key material even for metadata fetches
+
+Required rule:
+
+- Pilot stores only secret-reference metadata in `provided_config`
+- the refdata host resolves those refs through Vault before initial venue refresh
+- resolved credentials exist only in assembled `runtime_config` / in-memory loader inputs
+- venue loader adaptors must not treat `secret_ref` itself as a credential
+
+Operational consequence:
+
+- if a required secret cannot be resolved, the service must fail early rather than start with a
+  partially configured venue loader
+
+Recommended Vault path convention follows the account-scoped convention already used elsewhere:
+
+- OANDA:
+  - `kv/trading/gw/<internal_account_id>/token`
+- OKX:
+  - `kv/trading/gw/<internal_account_id>/api_key`
+  - `kv/trading/gw/<internal_account_id>/api_secret`
+  - `kv/trading/gw/<internal_account_id>/passphrase`
+
 Suggested logical shape:
 
 ```text
@@ -89,9 +173,11 @@ Recommended host-side loading sequence:
 1. load `venue-integrations/<venue>/manifest.yaml`
 2. confirm the venue exposes the `refdata` capability
 3. confirm `refdata.language == python`
-4. validate the provided config against `refdata.config_schema`
-5. resolve and instantiate the manifest-declared Python loader class
-6. call the adaptor through the stable refdata-loader interface
+4. validate `provided_config` against `refdata.config_schema`
+5. resolve any referenced secrets via Vault
+6. assemble the effective runtime loader config
+7. resolve and instantiate the manifest-declared Python loader class
+8. call the adaptor through the stable refdata-loader interface
 
 This keeps the refdata host generic and aligned with the gateway/RTMD venue-integration pattern.
 
@@ -129,6 +215,13 @@ class SomeRefdataLoader:
 ```
 
 `load_market_sessions()` may return an empty list for always-open crypto venues.
+
+Design rule:
+
+- the loader should receive resolved runtime credentials such as `token`, `api_key`, or
+  `passphrase` if they are required
+- the loader should not be responsible for talking to Vault
+- `secret_ref` stays a host/control-plane concern
 
 ## Source Conflict Policy
 
@@ -285,6 +378,19 @@ Recommended registration shape:
   - `query_market_status`
   - `query_market_calendar`
 
+Startup ordering rule:
+
+1. load `bootstrap_config`
+2. in Pilot mode, bootstrap with Pilot and load venue-scoped `provided_config`
+3. in direct mode, load equivalent `provided_config` locally
+4. resolve required secrets via Vault
+5. assemble `runtime_config`
+6. start DB/NATS/gRPC runtime pieces
+7. run initial refresh for enabled venues
+8. register discovery / report ready
+
+The service should not become operational if config assembly or required secret resolution fails.
+
 ## Cache Distribution To SDK
 
 The trading SDK needs local refdata lookup anyway for:
@@ -347,6 +453,10 @@ Shared-service rule:
   independently by each consumer
 - if market status becomes stale, the caller decides how to react; the mapping entry itself should
   not be removed merely because freshness is poor
+- switching the service to Pilot mode requires both bootstrap env changes and valid
+  `cfg.refdata_venue_instance` rows before restart
+- direct mode should remain available as a compatibility path, but Pilot-managed venue config is the
+  primary control-plane authoring model
 
 ## Draft Event Schema
 
@@ -388,6 +498,8 @@ Recommended shape for `zk.control.market_status.updated`:
 - define whether Pilot proxies refdata queries for operator/UI convenience or always delegates to the
   refdata service
 - add health/SLO and staleness policy details
+- define the concrete Pilot API surface for `cfg.refdata_venue_instance` CRUD and schema-aware edit
+  flows
 
 ## Related Docs
 

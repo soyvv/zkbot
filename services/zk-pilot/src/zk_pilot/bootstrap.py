@@ -1,13 +1,23 @@
 """NATS bootstrap request handlers and Pilot KV reconciler."""
 
 import asyncio
+import json
 from uuid import uuid4
 
 import asyncpg
 import nats.aio.client
 from loguru import logger
 from nats.aio.msg import Msg
-from nats.js.kv import KeyValueOperation
+try:
+    from nats.js.kv import KeyValueOperation
+except ImportError:
+    # nats-py >=2.10 removed KeyValueOperation; entries use string operation field.
+    from enum import Enum
+
+    class KeyValueOperation(str, Enum):
+        PUT = "PUT"
+        DELETE = "DEL"
+        PURGE = "PURGE"
 
 from .config import Config
 from . import db
@@ -59,7 +69,11 @@ class KvReconciler:
                 next_live: set[str] = set()
                 snapshot_done = False
 
-                async for entry in watcher:
+                # Use updates() instead of async-for because nats-py >=2.10
+                # raises StopAsyncIteration on None (snapshot marker) instead
+                # of yielding it, which would break the snapshot detection.
+                while True:
+                    entry = await watcher.updates(timeout=30.0)
                     if entry is None:
                         # Snapshot-complete marker: atomically swap in the new live set.
                         old_live = self._live
@@ -89,6 +103,8 @@ class KvReconciler:
                         else:
                             next_live.discard(key)
 
+            except nats.errors.TimeoutError:
+                continue  # Timeout on updates() is normal, just retry
             except Exception as exc:
                 logger.warning(f"reconciler: watch error: {exc}, retrying in 5s")
                 await asyncio.sleep(5)
@@ -222,6 +238,12 @@ def make_handlers(
                 LEASE_TTL_MS,
             )
 
+            # 6. Load service-specific runtime config
+            runtime_config_json = ""
+            if req.instance_type.upper() == "REFDATA":
+                venue_configs = await db.load_refdata_venue_configs(conn, req.env)
+                runtime_config_json = json.dumps({"venues": venue_configs})
+
         logger.info(
             f"bootstrap: registered logical_id={req.logical_id!r} "
             f"session={session_id} kv_key={kv_key!r} instance_id={instance_id}"
@@ -235,6 +257,7 @@ def make_handlers(
             instance_id=instance_id,
             scoped_credential="",
             status="OK",
+            runtime_config=runtime_config_json,
         )
         await msg.respond(bytes(resp))
 

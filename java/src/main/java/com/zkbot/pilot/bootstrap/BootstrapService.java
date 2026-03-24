@@ -181,7 +181,8 @@ public class BootstrapService implements SmartLifecycle {
             log.info("bootstrap: registered logical_id='{}' session={} kv_key='{}' instance_id={}",
                     req.getLogicalId(), sessionId, kvKey, instanceId);
 
-            // 6. Load runtime config from service-specific table (authoritative).
+            // 6. Load provided config from service-specific table (authoritative).
+            //    DesiredConfigRepository reads provided_config from the service table.
             //    No legacy fallback — missing config is an explicit error.
             var desiredConfig = desiredConfigRepo.getDesiredConfig(
                     req.getLogicalId(), req.getInstanceType());
@@ -195,6 +196,8 @@ public class BootstrapService implements SmartLifecycle {
                 return;
             }
 
+            // provided_config is what operators author; runtime_config is what services report.
+            // The proto field is still called runtime_config for wire compat.
             String runtimeConfig = desiredConfig.configJson();
             ConfigMetadata configMetadata = ConfigMetadata.newBuilder()
                     .setConfigVersion(String.valueOf(desiredConfig.configVersion()))
@@ -262,7 +265,7 @@ public class BootstrapService implements SmartLifecycle {
     }
 
     /**
-     * Extract secret_ref fields from runtime config using the shared ConfigSchemaLocator
+     * Extract secret_ref fields from provided config using the shared ConfigSchemaLocator
      * and JsonPointerHelper. Resolves venue-backed services to their venue_capability
      * descriptors, and uses proper JSON pointer traversal for nested paths.
      */

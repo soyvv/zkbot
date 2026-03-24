@@ -24,8 +24,8 @@ COPY rust/crates/zk-sim-core/Cargo.toml        ./rust/crates/zk-sim-core/
 COPY rust/crates/zk-strategy-sdk-rs/Cargo.toml ./rust/crates/zk-strategy-sdk-rs/
 COPY rust/crates/zk-infra-rs/Cargo.toml        ./rust/crates/zk-infra-rs/
 COPY rust/crates/zk-pyo3-rs/Cargo.toml         ./rust/crates/zk-pyo3-rs/
-COPY rust/crates/zk-mock-gw/Cargo.toml         ./rust/crates/zk-mock-gw/
-COPY rust/crates/zk-mock-gw/build.rs           ./rust/crates/zk-mock-gw/
+COPY rust/crates/zk-gw-types/Cargo.toml        ./rust/crates/zk-gw-types/
+COPY rust/crates/zk-pyo3-bridge/Cargo.toml     ./rust/crates/zk-pyo3-bridge/
 COPY rust/crates/zk-oms-svc/Cargo.toml         ./rust/crates/zk-oms-svc/
 COPY rust/crates/zk-oms-svc/build.rs           ./rust/crates/zk-oms-svc/
 COPY rust/crates/zk-gw-svc/Cargo.toml          ./rust/crates/zk-gw-svc/
@@ -55,7 +55,8 @@ RUN for dir in \
       rust/crates/zk-strategy-sdk-rs \
       rust/crates/zk-infra-rs \
       rust/crates/zk-pyo3-rs \
-      rust/crates/zk-mock-gw \
+      rust/crates/zk-gw-types \
+      rust/crates/zk-pyo3-bridge \
       rust/crates/zk-oms-svc \
       rust/crates/zk-trading-sdk-rs \
       rust/crates/zk-rtmd-rs \
@@ -67,7 +68,6 @@ RUN for dir in \
       rust/strategies/arbi; do \
         mkdir -p $dir/src && echo "" > $dir/src/lib.rs; \
     done && \
-    mkdir -p rust/crates/zk-mock-gw/src && echo "fn main() {}" > rust/crates/zk-mock-gw/src/main.rs && \
     mkdir -p rust/crates/zk-oms-svc/src && echo "fn main() {}" > rust/crates/zk-oms-svc/src/main.rs && \
     mkdir -p rust/crates/zk-gw-svc/src && \
     echo "" > rust/crates/zk-gw-svc/src/lib.rs && \

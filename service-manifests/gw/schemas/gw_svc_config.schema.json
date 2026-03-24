@@ -1,27 +1,39 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Gateway Service Config",
+  "title": "Gateway Provided Config",
   "type": "object",
+  "description": "Pilot-managed provided config for the gateway service. Bootstrap-owned fields such as gw_id, grpc_host, grpc_port, nats_url, bootstrap_token, instance_type, and env are not part of this schema.",
   "properties": {
-    "gw_id": { "type": "string" },
-    "account_id": { "type": "integer" },
-    "venue": { "type": "string" },
-    "grpc_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-    "grpc_host": { "type": "string" },
-    "nats_url": { "type": "string" },
-    "venue_config": { "type": "object" },
-    "venue_root": { "type": "string" },
-    "exec_shard_count": { "type": "integer", "minimum": 1 },
-    "exec_queue_capacity": { "type": "integer", "minimum": 1 },
-    "mock_balances": { "type": "string" },
-    "fill_delay_ms": { "type": "integer", "minimum": 0 },
-    "match_policy": { "type": "string", "enum": ["immediate", "fcfs"] },
-    "admin_grpc_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-    "enable_admin_controls": { "type": "boolean" },
-    "bootstrap_token": { "type": "string" },
-    "instance_type": { "type": "string" },
-    "env": { "type": "string" }
+    "account_id": {
+      "type": "integer",
+      "description": "Primary account identifier exposed by this gateway runtime."
+    },
+    "venue": {
+      "type": "string",
+      "description": "Venue adaptor to load, for example simulator, okx, ibkr, or oanda."
+    },
+    "venue_config": {
+      "type": "object",
+      "default": {},
+      "description": "Opaque venue-specific config payload. Real venue adaptors parse their typed config from this object."
+    },
+    "venue_root": {
+      "type": "string",
+      "description": "Optional root path for manifest-driven venue module loading."
+    },
+    "exec_shard_count": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 4,
+      "description": "Number of internal gateway execution shards."
+    },
+    "exec_queue_capacity": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 256,
+      "description": "Per-shard queue capacity for gateway execution work."
+    }
   },
-  "required": ["gw_id"],
+  "required": ["venue", "account_id"],
   "additionalProperties": true
 }

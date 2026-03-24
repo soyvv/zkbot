@@ -11,6 +11,11 @@ create table cfg.oms_instance (
   namespace        text not null,
   description      text,
   enabled          boolean not null default true,
+  provided_config  jsonb not null default '{}'::jsonb,
+  schema_resource_type text,
+  schema_resource_key  text,
+  schema_version       integer,
+  schema_content_hash  text,
   runtime_config   jsonb not null default '{}'::jsonb,
   config_version   integer not null default 1,
   config_hash      text,
@@ -31,6 +36,14 @@ create table cfg.gateway_instance (
   supports_fee_query            boolean not null default true,
   cancel_required_fields        text[] not null default '{}',
   enabled                       boolean not null default true,
+  provided_config               jsonb not null default '{}'::jsonb,
+  schema_resource_type          text,
+  schema_resource_key           text,
+  schema_version                integer,
+  schema_content_hash           text,
+  venue_schema_resource_key     text,
+  venue_schema_version          integer,
+  venue_schema_content_hash     text,
   runtime_config                jsonb not null default '{}'::jsonb,
   config_version                integer not null default 1,
   config_hash                   text,
@@ -241,6 +254,11 @@ create table cfg.engine_instance (
   engine_id        text primary key,
   description      text,
   enabled          boolean not null default true,
+  provided_config  jsonb not null default '{}'::jsonb,
+  schema_resource_type text,
+  schema_resource_key  text,
+  schema_version       integer,
+  schema_content_hash  text,
   runtime_config   jsonb not null default '{}'::jsonb,
   config_version   integer not null default 1,
   config_hash      text,
@@ -253,6 +271,14 @@ create table cfg.mdgw_instance (
   venue            text not null,
   description      text,
   enabled          boolean not null default true,
+  provided_config  jsonb not null default '{}'::jsonb,
+  schema_resource_type text,
+  schema_resource_key  text,
+  schema_version       integer,
+  schema_content_hash  text,
+  venue_schema_resource_key     text,
+  venue_schema_version          integer,
+  venue_schema_content_hash     text,
   runtime_config   jsonb not null default '{}'::jsonb,
   config_version   integer not null default 1,
   config_hash      text,
@@ -315,11 +341,37 @@ create table cfg.mdgw_subscription (
 
 create index idx_mdgw_subscription_venue on cfg.mdgw_subscription(venue, enabled);
 
--- Auto-bump config_version on runtime_config change
+create table cfg.refdata_venue_instance (
+  logical_id            text primary key,
+  env                   text not null,
+  venue                 text not null,
+  description           text,
+  enabled               boolean not null default true,
+  provided_config       jsonb not null default '{}'::jsonb,
+  schema_resource_type  text not null default 'venue_capability',
+  schema_resource_key   text,
+  schema_version        integer,
+  schema_content_hash   text,
+  config_version        integer not null default 1,
+  config_hash           text,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  unique (env, venue)
+);
+
+-- Auto-bump config_version on provided_config change. Fall back to runtime_config
+-- only for legacy compatibility during the migration window.
 create or replace function cfg.bump_config_version()
 returns trigger as $$
 begin
-    if new.runtime_config is distinct from old.runtime_config then
+    if to_jsonb(new) ? 'provided_config'
+       and new.provided_config is distinct from old.provided_config then
+        new.config_version := old.config_version + 1;
+        new.config_hash := encode(sha256(convert_to(
+            new.provided_config::text, 'UTF8')), 'hex');
+        new.updated_at := now();
+    elsif to_jsonb(new) ? 'runtime_config'
+       and new.runtime_config is distinct from old.runtime_config then
         new.config_version := old.config_version + 1;
         new.config_hash := encode(sha256(convert_to(
             new.runtime_config::text, 'UTF8')), 'hex');
@@ -343,6 +395,10 @@ create trigger trg_engine_config_version
 
 create trigger trg_mdgw_config_version
     before update on cfg.mdgw_instance
+    for each row execute function cfg.bump_config_version();
+
+create trigger trg_refdata_venue_config_version
+    before update on cfg.refdata_venue_instance
     for each row execute function cfg.bump_config_version();
 
 -- ─────────────────────────────────────────────────────────────────────────────

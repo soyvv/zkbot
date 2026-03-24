@@ -278,7 +278,7 @@ pub fn build_get_current_config_response<T: Serialize>(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn sha256_hex(data: &[u8]) -> String {
+pub fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     hex::encode(hasher.finalize())

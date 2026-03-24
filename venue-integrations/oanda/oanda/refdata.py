@@ -37,7 +37,13 @@ class OandaRefdataLoader:
         cfg = config or {}
         env = cfg.get("environment", "practice")
         self._account_id = cfg.get("account_id", "")
-        self._token = cfg.get("token") or cfg.get("secret_ref", "")
+        token = cfg.get("token", "")
+        if not token:
+            raise ValueError(
+                "OANDA refdata loader requires a resolved 'token' in config. "
+                "The host must resolve secret_ref before loader instantiation."
+            )
+        self._token = token
         self._api_base_url = cfg.get("api_base_url") or _API_URLS.get(env, _API_URLS["practice"])
 
     async def load_instruments(self) -> list[dict]:

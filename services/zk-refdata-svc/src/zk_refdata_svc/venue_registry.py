@@ -137,3 +137,92 @@ def resolve_refdata_loader(venue: str, config: dict | None = None) -> Any:
 
     logger.debug(f"resolved refdata loader for {venue!r}: {module_path}.{class_name}")
     return cls(config=config)
+
+
+def validate_venue_config(venue: str, config: dict | None = None) -> None:
+    """Validate venue config against the manifest-declared JSON schema.
+
+    Use this to validate provided_config (which may contain secret_ref)
+    before secret resolution. Does nothing if no schema is declared.
+
+    Raises:
+        FileNotFoundError: no manifest for this venue
+        VenueCapabilityNotFound: manifest has no refdata capability
+        jsonschema.ValidationError: config fails schema validation
+    """
+    manifest = load_manifest(venue)
+    venue_dir = _integrations_dir() / venue
+    refdata_cap = manifest.get("capabilities", {}).get("refdata")
+    if refdata_cap is None:
+        raise VenueCapabilityNotFound(f"venue {venue!r} manifest has no 'refdata' capability")
+
+    config_schema_rel = refdata_cap.get("config_schema")
+    if config_schema_rel:
+        schema_path = venue_dir / config_schema_rel
+        if schema_path.exists():
+            import jsonschema
+
+            with open(schema_path) as f:
+                schema = json.load(f)
+            jsonschema.validate(instance=config or {}, schema=schema)
+
+
+def instantiate_refdata_loader(venue: str, config: dict | None = None):
+    """Instantiate a refdata loader without schema validation.
+
+    Use this when config has already been validated and secrets resolved.
+    The resolved config (with token instead of secret_ref) would fail
+    schema validation, so we skip it here.
+
+    Raises:
+        FileNotFoundError: no manifest for this venue
+        VenueCapabilityNotFound: manifest has no refdata capability
+        ValueError: invalid entrypoint or module not found
+    """
+    manifest = load_manifest(venue)
+    venue_dir = _integrations_dir() / venue
+
+    capabilities = manifest.get("capabilities", {})
+    refdata_cap = capabilities.get("refdata")
+    if refdata_cap is None:
+        raise VenueCapabilityNotFound(f"venue {venue!r} manifest has no 'refdata' capability")
+
+    language = refdata_cap.get("language", "")
+    if language != "python":
+        raise ValueError(
+            f"venue {venue!r} refdata capability has language={language!r}, expected 'python'"
+        )
+
+    entrypoint = refdata_cap.get("entrypoint", "")
+    if not entrypoint.startswith("python:"):
+        raise ValueError(
+            f"venue {venue!r} refdata entrypoint must start with 'python:': {entrypoint!r}"
+        )
+
+    parts = entrypoint[len("python:"):].split(":")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise ValueError(
+            f"invalid entrypoint format {entrypoint!r}, expected 'python:<module>:<class>'"
+        )
+
+    module_path, class_name = parts
+
+    venue_str = str(venue_dir)
+    if venue_str not in sys.path:
+        sys.path.insert(0, venue_str)
+
+    try:
+        mod = importlib.import_module(module_path)
+    except ModuleNotFoundError as e:
+        raise ValueError(
+            f"could not import module {module_path!r} for venue {venue!r}: {e}"
+        ) from e
+
+    cls = getattr(mod, class_name, None)
+    if cls is None:
+        raise ValueError(
+            f"class {class_name!r} not found in module {module_path!r} for venue {venue!r}"
+        )
+
+    logger.debug(f"instantiated refdata loader for {venue!r}: {module_path}.{class_name}")
+    return cls(config=config)

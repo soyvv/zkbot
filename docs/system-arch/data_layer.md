@@ -68,6 +68,11 @@ create table cfg.oms_instance (
   namespace    text not null,
   description  text,
   enabled      boolean not null default true,
+  provided_config      jsonb not null default '{}'::jsonb,
+  schema_resource_type text,
+  schema_resource_key  text,
+  schema_version       integer,
+  schema_content_hash  text,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
@@ -96,6 +101,14 @@ create table cfg.gateway_instance (
   adaptor_type                  text not null default 'default',
   adaptor_mode                  text not null default 'streaming', -- streaming | query_after_action | periodic_query | hybrid
   adaptor_config                jsonb not null default '{}'::jsonb,
+  provided_config               jsonb not null default '{}'::jsonb,
+  schema_resource_type          text,
+  schema_resource_key           text,
+  schema_version                integer,
+  schema_content_hash           text,
+  venue_schema_resource_key     text,
+  venue_schema_version          integer,
+  venue_schema_content_hash     text,
   enabled                       boolean not null default true,
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
@@ -165,6 +178,8 @@ Gateway config model:
 
 - generic gateway fields live in top-level columns (`gw_id`, `venue`, `account_id`, reconnect, transport, capability metadata)
 - adaptor-specific settings live in `adaptor_config`
+- Pilot-managed desired config lives in `provided_config`
+- schema provenance should be stored beside the config row (`schema_resource_key`, `schema_version`, and for venue-backed services the venue schema identity too)
 - `adaptor_type` selects the adaptor implementation
 - `adaptor_mode` selects the primary operating mode for event acquisition/recovery
 - `secret_ref` points to Vault-managed trading credentials; it is metadata, not secret material
@@ -230,11 +245,41 @@ create table cfg.strategy_instance (
 
 create index idx_strategy_instance_strategy on cfg.strategy_instance(strategy_id);
 create index idx_strategy_instance_status   on cfg.strategy_instance(status);
+
+-- Refdata venue instances
+-- One control-plane row per venue-scoped refdata publisher in one environment.
+create table cfg.refdata_venue_instance (
+  logical_id            text primary key,
+  env                   text not null,
+  venue                 text not null,
+  description           text,
+  enabled               boolean not null default true,
+  provided_config       jsonb not null default '{}'::jsonb,
+  schema_resource_type  text not null default 'venue_capability',
+  schema_resource_key   text,
+  schema_version        integer,
+  schema_content_hash   text,
+  config_version        integer not null default 1,
+  config_hash           text,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  unique (env, venue)
+);
 ```
 
 ### 2.2 Registration control tables (`cfg`)
 
 These tables support Pilot-managed topology and token-gated bootstrap over NATS request/reply.
+
+Design rule:
+
+- `cfg.logical_instance` is identity/topology authority, not config authority
+- desired service config should live in service-specific instance tables as `provided_config`
+- effective `runtime_config` should come from runtime introspection, not be the primary stored authoring payload
+- legacy `runtime_config` columns may remain temporarily for compatibility during migration, but they should be treated as deprecated
+- `cfg.refdata_venue_instance` is the venue-scoped refdata config authority, but it does not replace
+  `cfg.logical_instance` when a refdata runtime participates in bootstrap/session/discovery as a
+  logical service
 
 ```sql
 -- Logical runtime instances managed by Pilot

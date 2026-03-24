@@ -65,6 +65,15 @@ Pilot uses that metadata to decide:
 - what duplicate policy to apply
 - what stable logical KV key to grant
 
+Config ownership note:
+
+- `cfg.logical_instance` is the identity/topology authority used for bootstrap-token validation,
+  session ownership, and topology views
+- desired control-plane config should live in service-specific tables as `provided_config`
+- for venue-scoped refdata config, Pilot stores `provided_config` in `cfg.refdata_venue_instance`
+- if a refdata runtime bootstraps as a logical service, it still needs a matching
+  `cfg.logical_instance` row in addition to `cfg.refdata_venue_instance`
+
 ## 3. Token Model
 
 One token per logical instance.

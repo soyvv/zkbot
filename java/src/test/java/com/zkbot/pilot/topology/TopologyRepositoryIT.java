@@ -76,13 +76,13 @@ class TopologyRepositoryIT extends PostgresTestBase {
 
     @Test
     void create_logical_instance_upserts() {
-        repo.createLogicalInstance("oms_1", "OMS", "dev", null, null, true);
+        repo.createLogicalInstance("oms_1", "OMS", "dev", null, true);
 
         var result = repo.getLogicalInstance("oms_1");
         assertThat(result.get("instance_type")).isEqualTo("OMS");
 
         // Update type via upsert
-        repo.createLogicalInstance("oms_1", "GW", "dev", null, null, true);
+        repo.createLogicalInstance("oms_1", "GW", "dev", null, true);
         result = repo.getLogicalInstance("oms_1");
         assertThat(result.get("instance_type")).isEqualTo("GW");
     }

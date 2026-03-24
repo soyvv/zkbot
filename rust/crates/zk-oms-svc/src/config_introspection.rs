@@ -1,7 +1,6 @@
 //! ConfigIntrospectionService implementation for OMS.
 //!
-//! Returns the effective (redacted) OMS config with metadata.
-//! OMS has no venue secret refs — only bootstrap_token is redacted.
+//! Returns the effective (redacted) OMS runtime config with metadata.
 
 use std::sync::Arc;
 
@@ -10,11 +9,11 @@ use tonic::{Request, Response, Status};
 use zk_infra_rs::config_mgmt::{self, ConfigEnvelope};
 use zk_proto_rs::zk::config::v1::{GetCurrentConfigRequest, GetCurrentConfigResponse};
 
-use crate::config::{OmsSvcConfig, RESOLVED_SECRET_PATHS};
+use crate::config::{OmsRuntimeConfig, RESOLVED_SECRET_PATHS};
 use crate::proto::config_svc::config_introspection_service_server::ConfigIntrospectionService;
 
 pub struct OmsConfigIntrospection {
-    pub envelope: Arc<ConfigEnvelope<OmsSvcConfig>>,
+    pub envelope: Arc<ConfigEnvelope<OmsRuntimeConfig>>,
     pub oms_id: Arc<String>,
 }
 

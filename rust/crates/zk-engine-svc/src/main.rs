@@ -1,7 +1,7 @@
 //! `zk-engine-svc` — production engine service binary.
 //!
 //! # Startup sequence
-//! 1. Load `EngineSvcConfig` from `ZK_*` env vars.
+//! 1. Load `EngineBootstrapConfig` from `ZK_*` env vars.
 //! 2. Initialise tracing.
 //! 3. Connect NATS, bootstrap with Pilot (or direct mode).
 //! 4. Connect TradingClient.
@@ -23,14 +23,14 @@ use tracing::info;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // ── 1. Config ─────────────────────────────────────────────────────
-    let cfg = config::load().expect("Failed to load EngineSvcConfig from env");
+    let boot_cfg =
+        config::load_bootstrap().expect("Failed to load EngineBootstrapConfig from env");
 
     // ── 2. Tracing ────────────────────────────────────────────────────
-    zk_tracing::init_tracing(&format!("zk-engine-svc[{}]", cfg.engine_id));
+    zk_tracing::init_tracing(&format!("zk-engine-svc[{}]", boot_cfg.engine_id));
     info!(
-        engine_id = %cfg.engine_id,
-        grpc_port = cfg.grpc_port,
-        strategy_key = %cfg.strategy_key,
+        engine_id = %boot_cfg.engine_id,
+        grpc_port = boot_cfg.grpc_port,
         "starting zk-engine-svc"
     );
 
@@ -40,5 +40,5 @@ async fn main() -> anyhow::Result<()> {
     let strategy = build_strategy(&StrategySpec::Noop)?;
     let refdata = vec![];
 
-    zk_engine_svc::runtime::run(cfg, strategy, refdata).await
+    zk_engine_svc::runtime::run(boot_cfg, strategy, refdata).await
 }

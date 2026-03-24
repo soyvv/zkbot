@@ -22,6 +22,15 @@ All bootstrap-managed services should also follow one shared config-management c
 - the runtime exposes a default `GetCurrentConfig` style query so Pilot can inspect the live effective
   config
 
+This should be understood as three explicit config layers:
+
+- `bootstrap_config`
+  - minimal startup inputs supplied by deployment/orchestration
+- `provided_config`
+  - control-plane config returned and managed by Pilot
+- `runtime_config`
+  - the effective config actually active inside the process
+
 ## Rationale
 
 Using one bootstrap model reduces service-specific startup logic and keeps the control-plane
@@ -42,7 +51,32 @@ That split avoids:
 
 ## Config Layers
 
-### 1. Minimal Deployment Config
+### Overview
+
+Each bootstrap-managed service should conceptually operate with three config shapes:
+
+1. `bootstrap_config`
+2. `provided_config`
+3. `runtime_config`
+
+Ownership rule:
+
+- orchestrator/deployment owns `bootstrap_config`
+- Pilot owns `provided_config`
+- the runtime owns the final assembled `runtime_config`
+
+Compatibility rule:
+
+- in Pilot-bootstrap mode:
+  - `runtime_config = bootstrap_config + provided_config + runtime-derived values`
+- in direct startup mode:
+  - `runtime_config = bootstrap_config + provided_config`, but both are supplied through env vars,
+    files, or equivalent local deployment inputs
+
+This preserves direct startup compatibility without changing the logical config model. The field
+model stays the same; only the source of the fields changes.
+
+### 1. Bootstrap Config
 
 This is deployment-owned and intentionally small.
 
@@ -58,15 +92,22 @@ Typical fields:
 - bootstrap token path or logical instance identity input
 - local dev override flags if needed
 
-It should not include the full service runtime config or raw secrets.
+It should not include the full Pilot-managed service config or raw secrets.
 
-### 2. Effective Enriched Runtime Config
+In direct mode, deployment tooling may still supply more fields via env vars for compatibility, but
+those additional fields should be treated as a direct-mode source for `provided_config`, not as a
+redefinition of what belongs in `bootstrap_config`.
+
+### 2. Provided Config
 
 This is Pilot-owned control-plane config returned during bootstrap.
 
+It should match the manifest/schema contract for the service kind and, where applicable, the venue
+capability.
+
 It may include:
 
-- generic service runtime config
+- generic service config managed by Pilot
 - service-specific config payload
 - topology bindings
 - venue/account scope
@@ -74,12 +115,32 @@ It may include:
 - registration metadata
 - `secret_ref`
 
-The service should switch to this config as its effective runtime configuration after bootstrap.
+The service should incorporate this into its effective `runtime_config` after bootstrap.
 
-### 3. Manifest-Driven Desired Config
+### 3. Runtime Config
 
-The desired config shape should be defined by a manifest/schema contract, not by ad hoc UI forms or
-service-local environment variables.
+This is the effective config actually loaded by the process.
+
+It is the config the runtime should report via `GetCurrentConfig`.
+
+It may include:
+
+- all `bootstrap_config` fields that remain relevant at runtime
+- all `provided_config` fields returned by Pilot
+- runtime defaults
+- derived fields
+- orchestrator-injected environment-specific values
+
+Recommended rule:
+
+- `runtime_config` is an observed/effective shape, not the primary authoring shape
+- Pilot should compare desired `provided_config` against live `runtime_config`
+- secret material must be redacted from `GetCurrentConfig`
+
+### 4. Manifest-Driven Desired Config
+
+The `provided_config` shape should be defined by a manifest/schema contract, not by ad hoc UI forms
+or service-local environment variables.
 
 Recommended rule:
 
@@ -98,11 +159,12 @@ The manifest/schema contract should define:
 - capability flags
 - which fields are reloadable vs restart-required
 - which fields are secret references vs ordinary config
+- which fields conceptually belong to `provided_config` rather than `bootstrap_config`
 
 Pilot should use this manifest/schema contract to:
 
 - render config authoring forms
-- validate desired config before persistence
+- validate `provided_config` before persistence
 - classify drift and change impact
 - decide whether a change can be applied by reload or requires restart
 
@@ -114,14 +176,14 @@ Operational registry rule:
 - if the bundled manifest/schema and the active Pilot registry copy do not match for the same
   resource, Pilot should fail closed for related config operations rather than silently continuing
 
-### 4. Runtime Config Introspection
+### 5. Runtime Config Introspection
 
 Every bootstrap-managed runtime should expose a default `GetCurrentConfig` style query.
 
 Purpose:
 
 - let Pilot inspect the currently loaded effective runtime config
-- compare desired config in control-plane storage against live effective config
+- compare desired `provided_config` in control-plane storage against live effective config
 - expose operator-visible drift information
 - support reload/restart decisions
 
@@ -252,6 +314,35 @@ The runtime host may expand a logical ref into an environment-specific Vault pat
 - venue/account identity from enriched runtime config
 
 This keeps Pilot config portable across local and k3s deployment modes.
+
+## Direct Mode Compatibility
+
+Direct startup mode remains a supported compatibility mode.
+
+Rule:
+
+- the service should still assemble the same conceptual `runtime_config`
+- the only difference is that `provided_config` is supplied locally through env vars, files, or
+  other deployment inputs instead of being returned by Pilot bootstrap
+
+This allows:
+
+- local debugging without Pilot
+- incremental migration from env-only services to Pilot-managed services
+- one internal runtime config model across both modes
+
+Recommended implementation direction:
+
+- keep one canonical internal runtime config model per service
+- in direct mode, parse env vars into that model directly
+- in Pilot mode, parse minimal bootstrap env, then merge in Pilot-returned `provided_config`
+
+Documentation rule:
+
+- service schemas should primarily describe `provided_config`
+- service docs may separately document direct-mode env var mappings for backward compatibility
+- bootstrap-only fields should not be mixed into the service-kind schema unless they are also part
+  of the canonical Pilot-managed field model
 
 ## Unified Startup Contract
 

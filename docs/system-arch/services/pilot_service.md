@@ -354,10 +354,14 @@ Design note:
 - non-venue services such as OMS and bot/engine should use a service-kind manifest/schema contract
 - Pilot should use that manifest/schema data to render and validate onboarding/config forms
 - Pilot should persist only the validated chosen configuration into control-plane tables
-- the manifest/schema is the source for config shape; Pilot DB remains the source of truth for the
-  actual configured instances
+- the manifest/schema is the source for `provided_config` shape; Pilot DB remains the source of
+  truth for the actual configured instances
 - every bootstrap-managed runtime should expose a default `GetCurrentConfig` query so Pilot can
-  inspect live effective config, show drift, and decide whether reload or restart is needed
+  inspect live `runtime_config`, show drift, and decide whether reload or restart is needed
+- bootstrap-only fields required before Pilot contact belong to `bootstrap_config`, which is
+  deployment/orchestrator owned rather than schema-authored by Pilot
+- direct startup mode may still source `provided_config` fields from env vars for compatibility, but
+  that does not change Pilot ownership of the logical control-plane config model
 
 ### 5.1 Simulator-backed gateway operations
 
@@ -666,6 +670,12 @@ Recommended metadata contents:
   - issue or rotate bootstrap token material for one logical service
 - `POST /v1/topology/services/{service_kind}/{logical_id}/reload`
   - request a config reload for one logical service
+- `GET /v1/topology/refdata-venues`
+  - list venue-scoped refdata control-plane rows
+- `GET /v1/topology/refdata-venues/{logical_id}`
+  - fetch one refdata venue config row
+- `POST /v1/topology/refdata-venues`
+  - create one venue-scoped refdata config row
 
 Design note:
 
@@ -1491,6 +1501,8 @@ Manifest/config rule:
 - submitted gateway config should be validated against the same schema before Pilot stores it
 - gateway should expose `GetCurrentConfig` so Pilot can compare desired config to the currently
   loaded effective config and classify reload vs restart
+- Pilot should persist gateway `provided_config` in `cfg.gateway_instance`, and keep
+  `cfg.logical_instance` as identity/topology only
 
 Required control-plane endpoints:
 
@@ -1510,8 +1522,8 @@ sequenceDiagram
     participant KV as NATS KV
 
     U->>P: POST /v1/topology/services/gw
-    P->>DB: validate venue/account binding and store cfg.gateway_instance
-    P->>DB: store logical instance + binding metadata
+    P->>DB: validate venue/account binding and store cfg.gateway_instance.provided_config
+    P->>DB: store cfg.logical_instance + binding metadata
     P->>V: record or validate secret_ref metadata
     P-->>U: gw_id + bootstrap token reference
 
@@ -1539,6 +1551,8 @@ Manifest/config rule:
 - submitted OMS config should be validated against the same schema before Pilot stores it
 - OMS should expose `GetCurrentConfig` so Pilot can compare desired config to the currently loaded
   effective config and show drift
+- Pilot should persist OMS `provided_config` in `cfg.oms_instance`, and keep `cfg.logical_instance`
+  as identity/topology only
 
 Required control-plane endpoints:
 
@@ -1557,8 +1571,8 @@ sequenceDiagram
     participant KV as NATS KV
 
     U->>P: POST /v1/topology/services/oms
-    P->>DB: create cfg.oms_instance + account bindings
-    P->>DB: create logical instance metadata
+    P->>DB: create cfg.oms_instance.provided_config + account bindings
+    P->>DB: create cfg.logical_instance metadata
     P-->>U: oms_id + bootstrap token reference
 
     Note over U,OMS: deployment image/manifests and process/container startup are managed outside Pilot
@@ -1585,6 +1599,8 @@ Manifest/config rule:
 - submitted RTMD config should be validated against the same schema before Pilot stores it
 - MDGW should expose `GetCurrentConfig` so Pilot can compare desired config to the currently loaded
   effective config and classify reload vs restart
+- Pilot should persist MDGW `provided_config` in `cfg.mdgw_instance`, and keep `cfg.logical_instance`
+  as identity/topology only
 
 Required control-plane endpoints:
 
@@ -1603,7 +1619,7 @@ sequenceDiagram
     participant KV as NATS KV
 
     U->>P: POST /v1/topology/services/mdgw
-    P->>DB: create logical instance + mdgw policy/default config
+    P->>DB: create cfg.logical_instance + cfg.mdgw_instance.provided_config
     P-->>U: logical_id + bootstrap token reference
 
     Note over U,MDGW: deployment image/manifests and process/container startup are managed outside Pilot
@@ -1611,11 +1627,52 @@ sequenceDiagram
     P->>DB: load mdgw runtime config and policy/default profile
     P-->>MDGW: registration grant + config
     MDGW->>KV: register svc.mdgw.<logical_id>
-    P->>KV: observe live registration
-    P-->>U: mdgw visible in topology
+P->>KV: observe live registration
+P-->>U: mdgw visible in topology
 ```
 
-### 4. Onboard A Strategy
+### 4. Onboard A Refdata Venue Instance
+
+Goal:
+
+- create one venue-scoped control-plane config row for the shared refdata runtime
+
+Manifest/config rule:
+
+- Pilot should load the selected venue integration manifest and `refdata` config schema
+- submitted refdata config should be validated against the venue capability schema before Pilot
+  stores it
+- Pilot should persist refdata `provided_config` in `cfg.refdata_venue_instance`
+- if the shared refdata runtime is bootstrap-managed as a logical service, the matching
+  `cfg.logical_instance` row remains the identity/topology authority
+
+Required control-plane endpoints:
+
+- `POST /v1/topology/refdata-venues`
+- `GET /v1/topology/refdata-venues/{logical_id}`
+
+```mermaid
+sequenceDiagram
+    participant U as Operator/UI
+    participant P as Pilot
+    participant DB as PostgreSQL
+    participant Ref as zk-refdata-svc
+    participant KV as NATS KV
+
+    U->>P: POST /v1/topology/refdata-venues
+    P->>DB: create cfg.refdata_venue_instance
+    P-->>U: venue-scoped refdata config stored
+
+    Note over U,Ref: shared refdata runtime startup remains external to Pilot
+    Ref->>P: zk.bootstrap.register(token, logical_id, instance_type=refdata)
+    P->>DB: load refdata provided_config for that logical_id
+    P-->>Ref: registration grant + provided-config payload
+    Ref->>KV: register svc.refdata.<logical_id>
+    P->>KV: observe live registration
+    P-->>U: refdata runtime visible in topology
+```
+
+### 5. Onboard A Strategy
 
 Goal:
 

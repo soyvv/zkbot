@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zk_refdata_svc.loaders.base import VenueLoader, instrument_id_ccxt, int_precision
+from zk_refdata_svc.loaders.base import VenueLoader, int_precision
 
 
 class OkxRefdataLoader(VenueLoader):
@@ -32,9 +32,7 @@ class OkxRefdataLoader(VenueLoader):
                         "instrument_id": self.instrument_id(
                             base_asset, type_suffix, quote_asset, venue
                         ),
-                        "instrument_exch": instrument_id_ccxt(
-                            base_asset, quote_asset, settlement_asset
-                        ),
+                        "instrument_exch": data["instId"],
                         "venue": venue,
                         "instrument_type": "SPOT",
                         "base_asset": base_asset,
@@ -70,9 +68,7 @@ class OkxRefdataLoader(VenueLoader):
                         "instrument_id": self.instrument_id(
                             base_asset, type_suffix, quote_asset, venue
                         ),
-                        "instrument_exch": instrument_id_ccxt(
-                            base_asset, quote_asset, settlement_asset
-                        ),
+                        "instrument_exch": data["instId"],
                         "venue": venue,
                         "instrument_type": "PERP",
                         "base_asset": base_asset,

@@ -1,24 +1,37 @@
 //! `zk-oms-svc` — production OMS gRPC service.
 //!
 //! # Startup sequence
-//! 1. Load `OmsSvcConfig` from `ZK_*` env vars.
+//! 1. Load `OmsBootstrapConfig` from `ZK_*` env vars.
 //! 2. Initialise JSON/pretty tracing.
-//! 3. Connect to NATS, Redis, PostgreSQL.
-//! 4. Load `ConfdataManager` from PG (`cfg.*` tables).
-//! 5. Warm-start: load open order snapshots from Redis → `OmsCore::init_state`.
-//! 6. Watch `svc.gw.*` in NATS KV; connect to each live gateway via gRPC.
-//! 7. Reconcile: `QueryAccountBalance` for each bound account (populate balances).
-//! 8. Start OMS writer task (single-writer actor).
-//! 9. Start tonic gRPC server.
-//! 10. Register `svc.oms.<oms_id>` in NATS KV (with heartbeat).
-//! 11. Start NATS subscribers for gateway reports.
-//! 12. Start periodic tasks (cleanup, resync timers).
-//! 13. Await shutdown signal (SIGTERM / SIGINT).
+//! 3. Connect to NATS.
+//! 4. Determine bootstrap mode and assemble `OmsRuntimeConfig`:
+//!    - Direct mode: load provided config from env, assemble runtime config.
+//!    - Pilot mode: register with Pilot, decode payload, assemble runtime config.
+//! 5. Connect to Redis, PostgreSQL (using runtime config).
+//! 6. Load `ConfdataManager` from PG (`cfg.*` tables).
+//! 7. Warm-start: load open order snapshots from Redis → `OmsCore::init_state`.
+//! 8. Watch `svc.gw.*` in NATS KV; connect to each live gateway via gRPC.
+//! 9. Reconcile: `QueryAccountBalance` for each bound account (populate balances).
+//! 10. Start OMS writer task (single-writer actor).
+//! 11. Start tonic gRPC server.
+//! 12. Register `svc.oms.<oms_id>` in NATS KV (with heartbeat).
+//! 13. Start NATS subscribers for gateway reports.
+//! 14. Start periodic tasks (cleanup, resync timers).
+//! 15. Await shutdown signal (SIGTERM / SIGINT).
 
 use zk_oms_svc::{
-    config, config_introspection::OmsConfigIntrospection, db, grpc_handler, gw_client,
-    gw_executor::GwExecutorPool, latency::LatencyEvent, nats_handler, oms_actor,
-    persist_executor::PersistExecutorPool, proto, publish_executor::PublishExecutorPool,
+    config::{self, OmsService},
+    config_introspection::OmsConfigIntrospection,
+    db,
+    grpc_handler,
+    gw_client,
+    gw_executor::GwExecutorPool,
+    latency::LatencyEvent,
+    nats_handler,
+    oms_actor,
+    persist_executor::PersistExecutorPool,
+    proto,
+    publish_executor::PublishExecutorPool,
     redis_writer,
 };
 
@@ -40,27 +53,79 @@ use crate::{
     redis_writer::RedisWriter,
 };
 use zk_infra_rs::{
-    config_mgmt::ConfigEnvelope, nats_kv::KvRegistryClient, service_registry::ServiceRegistration,
+    bootstrap::{self, BootstrapMode},
+    nats_kv::KvRegistryClient,
+    service_registry::ServiceRegistration,
     tracing as zk_tracing,
 };
 use zk_oms_rs::{config::ConfdataManager, oms_core_v2::OmsCoreV2};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // ── 1. Config ─────────────────────────────────────────────────────────────
-    let cfg = config::load().expect("Failed to load OmsSvcConfig from env");
-    let config_envelope = Arc::new(ConfigEnvelope::new(cfg.clone(), "env_direct"));
+    // ── 1. Bootstrap config ──────────────────────────────────────────────────
+    let boot_cfg = config::load_bootstrap().expect("Failed to load OmsBootstrapConfig from env");
 
-    // ── 2. Tracing ────────────────────────────────────────────────────────────
-    zk_tracing::init_tracing(&format!("zk-oms-svc[{}]", cfg.oms_id));
-    info!(oms_id = %cfg.oms_id, grpc_port = cfg.grpc_port, "starting zk-oms-svc");
+    // ── 2. Tracing ───────────────────────────────────────────────────────────
+    zk_tracing::init_tracing(&format!("zk-oms-svc[{}]", boot_cfg.oms_id));
+    info!(oms_id = %boot_cfg.oms_id, "starting zk-oms-svc");
 
-    // ── 3. Infrastructure connections ─────────────────────────────────────────
-    let nats_client = zk_infra_rs::nats::connect(&cfg.nats_url)
+    // ── 3. Connect NATS (needs nats_url from bootstrap) ──────────────────────
+    let nats_client = zk_infra_rs::nats::connect(&boot_cfg.nats_url)
         .await
         .expect("NATS connect failed");
     info!("NATS connected");
+    let js = async_nats::jetstream::new(nats_client.clone());
 
+    // ── 4. Determine mode and assemble runtime config ────────────────────────
+    let (pilot_grant, outcome) = if boot_cfg.bootstrap_token.is_empty() {
+        // Direct mode: load provided config from env vars, assemble runtime config.
+        let outcome = bootstrap::bootstrap_runtime_config::<OmsService>(
+            &boot_cfg,
+            BootstrapMode::Direct,
+        )
+        .expect("Failed to assemble runtime config (direct mode)");
+        info!(source = "direct", "runtime config assembled");
+        (None, outcome)
+    } else {
+        // Pilot mode: request Pilot grant, then decode payload into runtime config.
+        info!("requesting Pilot bootstrap grant");
+        let grpc_address = format!("{}:{}", boot_cfg.grpc_host, boot_cfg.grpc_port);
+        let mut runtime_info = std::collections::HashMap::new();
+        runtime_info.insert("grpc_address".into(), grpc_address);
+
+        let grant = ServiceRegistration::pilot_request(
+            &nats_client,
+            &boot_cfg.bootstrap_token,
+            &boot_cfg.oms_id,
+            &boot_cfg.instance_type,
+            &boot_cfg.env,
+            runtime_info,
+        )
+        .await
+        .expect("Pilot bootstrap request failed — is Pilot running?");
+
+        let outcome = bootstrap::bootstrap_runtime_config::<OmsService>(
+            &boot_cfg,
+            BootstrapMode::Pilot {
+                payload: grant.payload.clone(),
+                validate_hash: false, // until Pilot/Rust normalization contract confirmed
+            },
+        )
+        .expect("Failed to assemble runtime config (Pilot mode)");
+        info!(source = "pilot", "runtime config assembled");
+        (Some(grant), outcome)
+    };
+
+    let cfg = outcome.runtime_config;
+    let config_envelope = Arc::new(bootstrap::wrap_in_envelope(cfg.clone(), &outcome.source));
+    info!(
+        oms_id = %cfg.oms_id,
+        grpc_port = cfg.grpc_port,
+        source = outcome.source.as_metadata_source(),
+        "effective runtime config loaded"
+    );
+
+    // ── 5. Connect Redis, PostgreSQL (using runtime config) ──────────────────
     let redis_conn = zk_infra_rs::redis::connect(&cfg.redis_url)
         .await
         .expect("Redis connect failed");
@@ -71,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("PostgreSQL connect failed");
     info!("PostgreSQL connected");
 
-    // ── 4. Load ConfdataManager ───────────────────────────────────────────────
+    // ── 6. Load ConfdataManager ──────────────────────────────────────────────
     let raw = db::load_config(&pg_pool, &cfg.oms_id)
         .await
         .expect("Failed to load config from PG");
@@ -85,7 +150,7 @@ async fn main() -> anyhow::Result<()> {
     );
     info!(oms_id = %confdata.oms_id, accounts = confdata.account_routes.len(), "ConfdataManager loaded");
 
-    // ── 5. Warm-start from Redis ──────────────────────────────────────────────
+    // ── 7. Warm-start from Redis ─────────────────────────────────────────────
     let mut redis_writer = RedisWriter::new(redis_conn, cfg.oms_id.clone());
 
     let persisted_orders = redis_writer.load_orders().await.unwrap_or_else(|e| {
@@ -120,7 +185,7 @@ async fn main() -> anyhow::Result<()> {
         "warm-start positions loaded from Redis"
     );
 
-    // ── 6. Build OmsCoreV2 ────────────────────────────────────────────────────
+    // ── 8. Build OmsCoreV2 ───────────────────────────────────────────────────
     let mut core = OmsCoreV2::new(
         &confdata,
         false, // use_time_emulation: false for live trading
@@ -131,8 +196,7 @@ async fn main() -> anyhow::Result<()> {
     core.init_state(warm_orders, persisted_positions, persisted_balances);
     info!("OmsCoreV2 initialised");
 
-    // ── 7. Connect to gateways via NATS KV ───────────────────────────────────
-    let js = async_nats::jetstream::new(nats_client.clone());
+    // ── 9. Connect to gateways via NATS KV ──────────────────────────────────
     let kv_registry = KvRegistryClient::create(
         &js,
         zk_infra_rs::nats_kv::REGISTRY_BUCKET,
@@ -198,7 +262,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // ── 8. Balance/position reconciliation ─────────────────────────────────────
+    // ── 10. Balance/position reconciliation ──────────────────────────────────
     {
         use zk_oms_rs::models_v2::OmsActionV2;
         use zk_proto_rs::zk::gateway::v1::QueryAccountRequest;
@@ -251,7 +315,7 @@ async fn main() -> anyhow::Result<()> {
         info!("startup reconciliation complete");
     }
 
-    // ── 9. Start OMS writer task ──────────────────────────────────────────────
+    // ── 11. Start OMS writer task ────────────────────────────────────────────
     let (cmd_tx, cmd_rx) = mpsc::channel::<OmsCommand>(cfg.cmd_channel_buf);
 
     // Build initial snapshot from warm-started state.
@@ -306,7 +370,7 @@ async fn main() -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let shutdown_clone = shutdown.clone();
 
-    // ── Executor pools + latency feedback channel ───────────────────────────
+    // ── Executor pools + latency feedback channel ────────────────────────────
     let (latency_tx, latency_rx) = mpsc::channel::<LatencyEvent>(2048);
 
     // Build gw_id (u32) → gw_key (String) mapping from core metadata.
@@ -352,7 +416,7 @@ async fn main() -> anyhow::Result<()> {
         cfg.metrics_max_complete,
     );
 
-    // ── 10. Start gRPC server ─────────────────────────────────────────────────
+    // ── 12. Start gRPC server ────────────────────────────────────────────────
     let handler = OmsGrpcHandler {
         cmd_tx: cmd_tx.clone(),
         replica: replica.clone(),
@@ -384,7 +448,7 @@ async fn main() -> anyhow::Result<()> {
         info!("gRPC server stopped");
     });
 
-    // ── 11. Register in NATS KV with heartbeat ────────────────────────────────
+    // ── 13. Register in NATS KV with heartbeat ──────────────────────────────
     let kv_key = format!("svc.oms.{}", cfg.oms_id);
     let account_ids: Vec<i64> = confdata.account_routes.keys().copied().collect();
     let grpc_address = format!("{}:{}", cfg.grpc_host, cfg.grpc_port);
@@ -395,7 +459,25 @@ async fn main() -> anyhow::Result<()> {
     );
     let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg_proto);
 
-    let mut registration = if cfg.bootstrap_token.is_empty() {
+    let mut registration = if let Some(grant) = pilot_grant {
+        // Pilot mode: register now that the final discovery payload is known.
+        let reg = ServiceRegistration::register_kv_with_grant(
+            &nats_client,
+            &js,
+            &grant,
+            kv_value,
+            Duration::from_secs(cfg.kv_heartbeat_secs),
+        )
+        .await
+        .expect("failed to register in NATS KV via Pilot grant");
+        info!(
+            kv_key = reg.grant().kv_key,
+            session_id = reg.grant().owner_session_id,
+            "registered in NATS KV via Pilot grant"
+        );
+        reg
+    } else {
+        // Direct mode: register now.
         ServiceRegistration::register_direct(
             &js,
             kv_key,
@@ -404,23 +486,6 @@ async fn main() -> anyhow::Result<()> {
         )
         .await
         .expect("failed to register in NATS KV")
-    } else {
-        info!("registering via Pilot bootstrap");
-        let mut runtime_info = std::collections::HashMap::new();
-        runtime_info.insert("grpc_address".into(), grpc_address.clone());
-        ServiceRegistration::register_with_pilot(
-            &nats_client,
-            &js,
-            &cfg.bootstrap_token,
-            &cfg.oms_id,
-            &cfg.instance_type,
-            &cfg.env,
-            runtime_info,
-            kv_value,
-            Duration::from_secs(cfg.kv_heartbeat_secs),
-        )
-        .await
-        .expect("Pilot registration failed — is Pilot running?")
     };
     info!(
         kv_key = registration.grant().kv_key,
@@ -428,7 +493,7 @@ async fn main() -> anyhow::Result<()> {
         "registered in NATS KV"
     );
 
-    // ── 12. Start NATS subscribers ────────────────────────────────────────────
+    // ── 14. Start NATS subscribers ──────────────────────────────────────────
     let gw_ids: Vec<String> = confdata.gw_configs.keys().cloned().collect();
     let mut sub_handles = Vec::new();
 
@@ -442,7 +507,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // ── 13. Periodic tasks ────────────────────────────────────────────────────
+    // ── 15. Periodic tasks ──────────────────────────────────────────────────
     let cleanup_tx = cmd_tx.clone();
     let cleanup_secs = cfg.cleanup_interval_secs;
     tokio::spawn(async move {
@@ -465,7 +530,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // ── 14. Await shutdown signal or KV fencing ───────────────────────────────
+    // ── 16. Await shutdown signal or KV fencing ─────────────────────────────
     info!("zk-oms-svc running — press Ctrl-C to stop");
     let fenced = tokio::select! {
         _ = tokio::signal::ctrl_c() => {

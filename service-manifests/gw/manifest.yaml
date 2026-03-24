@@ -1,5 +1,5 @@
 schema_id: svc/gw
-version: 1
+version: 2
 config_schema: schemas/gw_svc_config.schema.json
 field_descriptors:
   - path: /grpc_port
@@ -11,10 +11,6 @@ field_descriptors:
   - path: /exec_queue_capacity
     reloadable: false
   - path: /nats_url
-    reloadable: false
-  - path: /admin_grpc_port
-    reloadable: false
-  - path: /enable_admin_controls
     reloadable: false
   - path: /bootstrap_token
     reloadable: false

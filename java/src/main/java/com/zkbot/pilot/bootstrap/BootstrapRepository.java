@@ -203,8 +203,14 @@ public class BootstrapRepository {
                 logicalId);
     }
 
-    // ── Runtime config ─────────────────────────────────────────────────────
+    // ── Runtime config (legacy — use DesiredConfigRepository instead) ─────
 
+    /**
+     * @deprecated Use {@link com.zkbot.pilot.config.DesiredConfigRepository} which reads
+     * provided_config from service-specific tables. This method reads runtime_config from
+     * cfg.logical_instance which is no longer the config authority.
+     */
+    @Deprecated(forRemoval = true)
     public String getRuntimeConfig(String logicalId) {
         return jdbc.query(
                 "SELECT runtime_config::text FROM cfg.logical_instance WHERE logical_id = ?",
@@ -212,6 +218,12 @@ public class BootstrapRepository {
                 logicalId);
     }
 
+    /**
+     * @deprecated Use {@link com.zkbot.pilot.config.DesiredConfigRepository} which writes
+     * provided_config to service-specific tables. This method writes runtime_config to
+     * cfg.logical_instance which is no longer the config authority.
+     */
+    @Deprecated(forRemoval = true)
     public void setRuntimeConfig(String logicalId, String configJson) {
         jdbc.update(
                 "UPDATE cfg.logical_instance SET runtime_config = ?::jsonb, updated_at = now() WHERE logical_id = ?",

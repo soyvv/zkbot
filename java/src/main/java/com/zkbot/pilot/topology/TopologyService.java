@@ -1,10 +1,14 @@
 package com.zkbot.pilot.topology;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zkbot.pilot.bootstrap.TokenService;
 import com.zkbot.pilot.config.ConfigDriftService;
 import com.zkbot.pilot.config.PilotProperties;
 import com.zkbot.pilot.discovery.DiscoveryCache;
 import com.zkbot.pilot.ops.dto.RegistrationAuditEntry;
+import com.zkbot.pilot.schema.SchemaService;
+import com.zkbot.pilot.schema.dto.SchemaResourceEntry;
 import com.zkbot.pilot.topology.dto.*;
 import io.nats.client.Connection;
 import org.slf4j.Logger;
@@ -28,25 +32,37 @@ public class TopologyService {
     private static final Set<String> OMS_WORKSPACE_TYPES = Set.of("OMS", "GW", "ENGINE", "REFDATA");
     private static final String TYPE_MDGW = "MDGW";
 
+    private static final Map<String, String> KIND_TO_CAPABILITY = Map.of(
+            "GW", "gw",
+            "MDGW", "rtmd",
+            "REFDATA", "refdata"
+    );
+
     private final TopologyRepository repository;
     private final DiscoveryCache discoveryCache;
     private final TokenService tokenService;
     private final PilotProperties props;
     private final Connection natsConnection;
     private final ConfigDriftService configDriftService;
+    private final SchemaService schemaService;
+    private final ObjectMapper objectMapper;
 
     public TopologyService(TopologyRepository repository,
                            DiscoveryCache discoveryCache,
                            TokenService tokenService,
                            PilotProperties props,
                            Connection natsConnection,
-                           ConfigDriftService configDriftService) {
+                           ConfigDriftService configDriftService,
+                           SchemaService schemaService,
+                           ObjectMapper objectMapper) {
         this.repository = repository;
         this.discoveryCache = discoveryCache;
         this.tokenService = tokenService;
         this.props = props;
         this.natsConnection = natsConnection;
         this.configDriftService = configDriftService;
+        this.schemaService = schemaService;
+        this.objectMapper = objectMapper;
     }
 
     public TopologyView getTopology(String omsId) {
@@ -257,10 +273,16 @@ public class TopologyService {
 
     // --- Service onboarding ---
 
-    private static final Set<String> KNOWN_SERVICE_KINDS = Set.of("OMS", "GW", "MDGW", "ENGINE", "REFDATA");
+    private static final Set<String> KNOWN_SERVICE_KINDS = Set.of("OMS", "GW", "MDGW", "ENGINE");
 
     public CreateServiceResponse createService(String serviceKind, CreateServiceRequest request) {
         String normalizedKind = serviceKind.toUpperCase();
+
+        if ("REFDATA".equals(normalizedKind)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Use POST /v1/topology/refdata-venues for REFDATA instances");
+        }
+
         if (!KNOWN_SERVICE_KINDS.contains(normalizedKind)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Unknown service kind: " + serviceKind + ". Known: " + KNOWN_SERVICE_KINDS);
@@ -276,20 +298,36 @@ public class TopologyService {
                     "Logical instance already exists: " + logicalId);
         }
 
+        // Logical instance row: identity only, no config
         repository.createLogicalInstance(logicalId, normalizedKind, props.env(),
-                request.metadata(), request.runtimeConfig(), request.enabled());
+                request.metadata(), request.enabled());
+
+        String providedConfigJson = toJson(request.providedConfig());
+
+        // Resolve schema provenance from active schema_resource
+        var hostProv = resolveSchemaProvenance("service_kind", normalizedKind.toLowerCase());
 
         switch (normalizedKind) {
-            case "OMS" -> repository.createOmsInstance(logicalId);
+            case "OMS" -> repository.createOmsInstance(logicalId, providedConfigJson,
+                    prt(hostProv), prk(hostProv), pv(hostProv), ph(hostProv));
             case "GW" -> {
-                String venue = extractVenue(request.runtimeConfig());
-                repository.createGatewayInstance(logicalId, venue);
+                String venue = resolveVenue(request);
+                var venueProv = resolveSchemaProvenance("venue_capability",
+                        venue + "/" + KIND_TO_CAPABILITY.get("GW"));
+                repository.createGatewayInstance(logicalId, venue, providedConfigJson,
+                        prt(hostProv), prk(hostProv), pv(hostProv), ph(hostProv),
+                        prk(venueProv), pv(venueProv), ph(venueProv));
             }
             case "MDGW" -> {
-                String venue = extractVenue(request.runtimeConfig());
-                repository.createMdgwInstance(logicalId, venue);
+                String venue = resolveVenue(request);
+                var venueProv = resolveSchemaProvenance("venue_capability",
+                        venue + "/" + KIND_TO_CAPABILITY.get("MDGW"));
+                repository.createMdgwInstance(logicalId, venue, providedConfigJson,
+                        prt(hostProv), prk(hostProv), pv(hostProv), ph(hostProv),
+                        prk(venueProv), pv(venueProv), ph(venueProv));
             }
-            case "ENGINE" -> repository.createEngineInstance(logicalId);
+            case "ENGINE" -> repository.createEngineInstance(logicalId, providedConfigJson,
+                    prt(hostProv), prk(hostProv), pv(hostProv), ph(hostProv));
         }
 
         if (request.bindings() != null) {
@@ -306,11 +344,117 @@ public class TopologyService {
         return new CreateServiceResponse("created", logicalId, normalizedKind, token);
     }
 
-    private static String extractVenue(Map<String, Object> runtimeConfig) {
-        if (runtimeConfig != null && runtimeConfig.containsKey("venue")) {
-            return runtimeConfig.get("venue").toString();
+    // --- Refdata venue instances ---
+
+    public RefdataVenueInstanceEntry createRefdataVenueInstance(CreateRefdataVenueRequest request) {
+        if (request.logicalId() == null || request.logicalId().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "logicalId is required");
+        }
+        if (request.venue() == null || request.venue().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "venue is required");
+        }
+
+        // Check UNIQUE (env, venue) constraint before insert
+        String existingOwner = repository.findRefdataVenueOwner(props.env(), request.venue());
+        if (existingOwner != null && !existingOwner.equals(request.logicalId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Venue '" + request.venue() + "' in env '" + props.env()
+                            + "' is already owned by logical_id '" + existingOwner + "'");
+        }
+
+        String providedConfigJson = toJson(request.providedConfig());
+        String capability = KIND_TO_CAPABILITY.getOrDefault("REFDATA", "refdata");
+        var prov = resolveSchemaProvenance("venue_capability",
+                request.venue() + "/" + capability);
+
+        // Create matching logical_instance row so REFDATA participates in topology
+        boolean enabled = request.enabled() != null ? request.enabled() : true;
+        repository.createLogicalInstance(request.logicalId(), "REFDATA", props.env(), null, enabled);
+
+        repository.createRefdataVenueInstance(request.logicalId(), props.env(), request.venue(),
+                request.description(), enabled,
+                providedConfigJson, prk(prov), pv(prov), ph(prov));
+
+        var row = repository.getRefdataVenueInstance(request.logicalId());
+        return toRefdataVenueEntry(row);
+    }
+
+    public List<RefdataVenueInstanceEntry> listRefdataVenueInstances() {
+        return repository.listRefdataVenueInstances().stream()
+                .map(TopologyService::toRefdataVenueEntry)
+                .toList();
+    }
+
+    public RefdataVenueInstanceEntry getRefdataVenueInstance(String logicalId) {
+        var row = repository.getRefdataVenueInstance(logicalId);
+        if (row == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Refdata venue instance not found: " + logicalId);
+        }
+        return toRefdataVenueEntry(row);
+    }
+
+    // --- Schema provenance resolution ---
+
+    private SchemaResourceEntry resolveSchemaProvenance(String resourceType, String resourceKey) {
+        if (resourceType == null || resourceKey == null) return null;
+        try {
+            if ("service_kind".equals(resourceType)) {
+                return schemaService.getActiveServiceKindManifest(resourceKey);
+            } else if ("venue_capability".equals(resourceType)) {
+                String[] parts = resourceKey.split("/", 2);
+                if (parts.length == 2) {
+                    return schemaService.getActiveVenueCapabilityManifest(parts[0], parts[1]);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not resolve schema provenance for {}/{}: {}", resourceType, resourceKey, e.getMessage());
+        }
+        return null;
+    }
+
+    private static String prt(SchemaResourceEntry e) { return e != null ? e.resourceType() : null; }
+    private static String prk(SchemaResourceEntry e) { return e != null ? e.resourceKey() : null; }
+    private static Integer pv(SchemaResourceEntry e) { return e != null ? e.version() : null; }
+    private static String ph(SchemaResourceEntry e) { return e != null ? e.contentHash() : null; }
+
+    private String resolveVenue(CreateServiceRequest request) {
+        if (request.venue() != null && !request.venue().isBlank()) {
+            return request.venue();
+        }
+        return extractVenue(request.providedConfig());
+    }
+
+    private static String extractVenue(Map<String, Object> config) {
+        if (config != null && config.containsKey("venue")) {
+            return config.get("venue").toString();
         }
         return "unknown";
+    }
+
+    @SuppressWarnings("unchecked")
+    private static RefdataVenueInstanceEntry toRefdataVenueEntry(Map<String, Object> row) {
+        return new RefdataVenueInstanceEntry(
+                (String) row.get("logical_id"),
+                (String) row.get("env"),
+                (String) row.get("venue"),
+                (String) row.get("description"),
+                Boolean.TRUE.equals(row.get("enabled")),
+                row.get("provided_config") != null ? row.get("provided_config").toString() : "{}",
+                row.get("config_version") != null ? ((Number) row.get("config_version")).intValue() : 1,
+                (String) row.get("config_hash"),
+                toInstant(row.get("created_at")),
+                toInstant(row.get("updated_at"))
+        );
+    }
+
+    private String toJson(Map<String, Object> map) {
+        if (map == null || map.isEmpty()) return "{}";
+        try {
+            return objectMapper.writeValueAsString(map);
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
     }
 
     // --- OMS workspace scope builder ---

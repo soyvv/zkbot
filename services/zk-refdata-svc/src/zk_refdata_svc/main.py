@@ -1,7 +1,22 @@
 """zk-refdata-svc entrypoint.
 
-Starts gRPC server, applies migrations, registers in NATS KV with CAS
-heartbeat, and runs periodic venue refresh jobs.
+Startup sequence (direct mode):
+1. Load bootstrap config from env
+2. Assemble runtime config (provided configs from JSON file + secret resolution)
+3. Initialize infra clients (PG, NATS, gRPC)
+4. Run initial refresh for enabled venues
+5. Register readiness (NATS KV) — only after step 4 succeeds
+6. Enter steady state
+
+Startup sequence (pilot mode):
+1. Load bootstrap config from env
+2. Connect NATS (needed for bootstrap RPC)
+3. Bootstrap register with Pilot → get session grant + venue configs
+4. Assemble runtime config (provided configs from Pilot + secret resolution)
+5. Initialize remaining infra (PG, gRPC)
+6. Run initial refresh for enabled venues
+7. Register readiness (NATS KV using Pilot-assigned kv_key)
+8. Enter steady state
 """
 
 import asyncio
@@ -14,7 +29,9 @@ import nats
 from loguru import logger
 
 from zk_refdata_svc import refdata_pb2_grpc
-from zk_refdata_svc.config import Config
+from zk_refdata_svc.config import load_config
+from zk_refdata_svc.config_loader import ConfigAssemblyError
+from zk_refdata_svc.config_model import RefdataBootstrapConfig
 from zk_refdata_svc.jobs.refresh_refdata import refresh_refdata
 from zk_refdata_svc.jobs.refresh_sessions import refresh_sessions
 from zk_refdata_svc.jobs.scheduler import run_periodic
@@ -37,24 +54,73 @@ async def _apply_migrations(repo: RefdataRepo) -> None:
 
 
 async def _main() -> None:
-    cfg = Config()
+    bootstrap = RefdataBootstrapConfig.from_env()
+    grant = None
+    nc = None
+    kv_key_override = None
+
+    if bootstrap.mode == "pilot":
+        # -- Pilot mode: connect NATS first for bootstrap RPC --
+        from zk_refdata_svc.bootstrap_client import (
+            BootstrapError,
+            bootstrap_register,
+            bootstrap_deregister,
+        )
+
+        if not bootstrap.bootstrap_token:
+            logger.error("ZK_BOOTSTRAP_TOKEN required for pilot mode")
+            sys.exit(1)
+
+        nc = await nats.connect(bootstrap.nats_url)
+        logger.info(f"nats connected to {bootstrap.nats_url} (for bootstrap)")
+
+        try:
+            grant = await bootstrap_register(
+                nc,
+                token=bootstrap.bootstrap_token,
+                logical_id=bootstrap.logical_id,
+                env=bootstrap.env,
+            )
+        except BootstrapError as exc:
+            logger.error(f"bootstrap registration failed: {exc}")
+            await nc.drain()
+            sys.exit(1)
+
+        kv_key_override = grant.kv_key
+
+        # Assemble runtime config using venue configs from Pilot
+        try:
+            cfg = load_config(bootstrap_runtime_config=grant.runtime_config)
+        except (ConfigAssemblyError, KeyError) as exc:
+            logger.error(f"config assembly failed: {exc}")
+            await bootstrap_deregister(
+                nc, grant.owner_session_id, bootstrap.logical_id, bootstrap.env
+            )
+            await nc.drain()
+            sys.exit(1)
+    else:
+        # -- Direct mode: config assembly first --
+        try:
+            cfg = load_config()
+        except (ConfigAssemblyError, KeyError) as exc:
+            logger.error(f"config assembly failed, refusing to start: {exc}")
+            sys.exit(1)
 
     logger.info(f"zk-refdata-svc starting | id={cfg.logical_id} port={cfg.grpc_port}")
+    logger.debug(f"effective config (redacted): {cfg.redacted_dict()}")
 
-    # -- PostgreSQL -----------------------------------------------------------
+    # -- Initialize infra clients -----------------------------------------------
     pg_pool = await asyncpg.create_pool(cfg.pg_url, min_size=2, max_size=10)
     logger.info("postgres pool connected")
 
     repo = RefdataRepo(pg_pool)
-
-    # -- Migrations -----------------------------------------------------------
     await _apply_migrations(repo)
 
-    # -- NATS -----------------------------------------------------------------
-    nc = await nats.connect(cfg.nats_url)
-    logger.info(f"nats connected to {cfg.nats_url}")
+    if nc is None:
+        nc = await nats.connect(cfg.nats_url)
+        logger.info(f"nats connected to {cfg.nats_url}")
 
-    # -- gRPC server ----------------------------------------------------------
+    # gRPC server
     servicer = RefdataServicer(repo)
     server = grpc.aio.server()
     refdata_pb2_grpc.add_RefdataServiceServicer_to_server(servicer, server)
@@ -62,7 +128,48 @@ async def _main() -> None:
     await server.start()
     logger.info(f"gRPC server listening on :{cfg.grpc_port}")
 
-    # -- KV registration with CAS heartbeat -----------------------------------
+    # -- Initial refresh for enabled venues -------------------------------------
+    background_tasks: list[asyncio.Task] = []
+    enabled = cfg.enabled_venues()
+
+    if enabled:
+        logger.info(f"configured venues: {enabled}")
+
+        # Build venue_configs dict from runtime config (resolved secrets)
+        venue_configs = {v: cfg.venue_resolved_config(v) for v in enabled}
+
+        try:
+            await refresh_refdata(repo, nc, enabled, venue_configs=venue_configs)
+        except Exception:
+            logger.exception("initial refdata refresh failed (will retry on schedule)")
+
+        background_tasks.append(
+            asyncio.create_task(
+                run_periodic(
+                    cfg.refresh_interval_s,
+                    refresh_refdata,
+                    repo,
+                    nc,
+                    enabled,
+                    venue_configs=venue_configs,
+                )
+            )
+        )
+        background_tasks.append(
+            asyncio.create_task(
+                run_periodic(
+                    cfg.refresh_interval_s,
+                    refresh_sessions,
+                    repo,
+                    enabled,
+                    venue_configs=venue_configs,
+                )
+            )
+        )
+    else:
+        logger.info("no venues configured, refresh jobs disabled")
+
+    # -- Register readiness — ONLY after initial refresh ------------------------
     registry = ServiceRegistry(
         service_type="refdata",
         service_id=cfg.logical_id,
@@ -77,47 +184,12 @@ async def _main() -> None:
         ],
         heartbeat_interval_s=cfg.heartbeat_interval_s,
         lease_ttl_s=cfg.lease_ttl_s,
+        kv_key=kv_key_override,
     )
     await registry.start(nc)
+    logger.info("service registered in NATS KV (ready)")
 
-    # -- Initial refresh + periodic jobs --------------------------------------
-    background_tasks: list[asyncio.Task] = []
-
-    if cfg.venues:
-        logger.info(f"configured venues: {cfg.venues}")
-        # Run initial refresh before entering steady-state.
-        try:
-            await refresh_refdata(repo, nc, cfg.venues, venue_configs=cfg.venue_configs)
-        except Exception:
-            logger.exception("initial refdata refresh failed (will retry on schedule)")
-
-        background_tasks.append(
-            asyncio.create_task(
-                run_periodic(
-                    cfg.refresh_interval_s,
-                    refresh_refdata,
-                    repo,
-                    nc,
-                    cfg.venues,
-                    venue_configs=cfg.venue_configs,
-                )
-            )
-        )
-        background_tasks.append(
-            asyncio.create_task(
-                run_periodic(
-                    cfg.refresh_interval_s,
-                    refresh_sessions,
-                    repo,
-                    cfg.venues,
-                    venue_configs=cfg.venue_configs,
-                )
-            )
-        )
-    else:
-        logger.info("no venues configured, refresh jobs disabled")
-
-    # -- Wait for termination or fencing --------------------------------------
+    # -- Wait for termination or fencing ----------------------------------------
     fenced_event = registry.wait_fenced()
 
     try:
@@ -137,6 +209,12 @@ async def _main() -> None:
             except asyncio.CancelledError:
                 pass
         await registry.deregister()
+        if grant is not None:
+            from zk_refdata_svc.bootstrap_client import bootstrap_deregister
+
+            await bootstrap_deregister(
+                nc, grant.owner_session_id, cfg.logical_id, bootstrap.env
+            )
         await server.stop(grace=5)
         await nc.drain()
         await pg_pool.close()

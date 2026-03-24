@@ -1245,6 +1245,18 @@ wheels = [
 ]
 
 [[package]]
+name = "hvac"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e2/57/b46c397fb3842cfb02a44609aa834c887f38dd75f290c2fc5a34da4b2fee/hvac-2.4.0.tar.gz", hash = "sha256:e0056ad9064e7923e874e6769015b032580b639e29246f5ab1044f7959c1c7e0", size = 332543 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/55/33/71e45a6bd6875f44a26f99da31c63b6840123e88bedf2c0b1ce429b8be12/hvac-2.4.0-py3-none-any.whl", hash = "sha256:008db5efd8c2f77bd37d2368ea5f713edceae1c65f11fd608393179478649e0f", size = 155921 },
+]
+
+[[package]]
 name = "hyperframe"
 version = "6.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3524,9 +3536,11 @@ version = "0.1.0"
 source = { editable = "services/zk-refdata-svc" }
 dependencies = [
     { name = "asyncpg" },
+    { name = "betterproto" },
     { name = "grpcio" },
     { name = "grpcio-tools" },
     { name = "httpx" },
+    { name = "hvac" },
     { name = "jsonschema" },
     { name = "loguru" },
     { name = "nats-py" },
@@ -3549,9 +3563,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.29" },
+    { name = "betterproto", specifier = ">=2.0.0b7" },
     { name = "grpcio", specifier = ">=1.62" },
     { name = "grpcio-tools", specifier = ">=1.62" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "hvac", specifier = ">=2.4.0" },
     { name = "jsonschema", specifier = ">=4.20" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "nats-py", specifier = ">=2.6" },

@@ -49,7 +49,11 @@ public class SchemaController {
     }
 
     @GetMapping(value = "/service-kinds/{serviceKind}/config", produces = MediaType.APPLICATION_JSON_VALUE)
-    public String getServiceKindConfigSchema(@PathVariable String serviceKind) {
+    public String getServiceKindConfigSchema(@PathVariable String serviceKind,
+                                               @RequestParam(required = false) String venue) {
+        if (venue != null && !venue.isBlank()) {
+            return service.getMergedConfigSchema(serviceKind, venue);
+        }
         String schema = service.getConfigSchema("service_kind", serviceKind.toLowerCase());
         if (schema == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,

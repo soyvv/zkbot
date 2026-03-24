@@ -53,10 +53,36 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
+use crate::bootstrap::{PilotPayload, PilotRegistration};
 use crate::nats_kv::{KvRegistryClient, REGISTRY_BUCKET};
 use zk_proto_rs::zk::pilot::v1::{
     BootstrapDeregisterRequest, BootstrapRegisterRequest, BootstrapRegisterResponse,
 };
+
+// ── Pilot bootstrap grant (split-phase) ─────────────────────────────────────
+
+/// Grant returned by [`ServiceRegistration::pilot_request`].
+///
+/// Contains the Pilot-issued KV key, lock key, and config payload. Used as
+/// input to [`ServiceRegistration::register_kv_with_grant`] after the service
+/// has assembled its runtime config (and therefore knows the full KV payload).
+#[derive(Debug)]
+pub struct PilotBootstrapGrant {
+    /// KV key assigned by Pilot (e.g. `svc.gw.gw_okx_1`).
+    pub kv_key: String,
+    /// Lock key for CAS fencing.
+    pub lock_key: String,
+    /// Lease TTL in ms (informational; enforced by KV bucket `max_age`).
+    pub lease_ttl_ms: u64,
+    /// Unique session ID for this registration (from Pilot).
+    pub owner_session_id: String,
+    /// Scoped NATS credential (empty string if not issued).
+    pub scoped_credential: String,
+    /// Pilot-assigned Snowflake worker ID (engines only; 0 otherwise).
+    pub instance_id: i32,
+    /// Pilot-returned config payload (runtime_config JSON, secret refs, metadata).
+    pub payload: PilotPayload,
+}
 
 // ── Grant ─────────────────────────────────────────────────────────────────────
 
@@ -152,27 +178,23 @@ impl ServiceRegistration {
 
     // ── Pilot-bootstrap mode ─────────────────────────────────────────────────
 
-    /// Register via Pilot bootstrap NATS request/reply.
+    /// Phase 1 of split-phase Pilot registration: send NATS request, get grant.
     ///
-    /// 1. Sends `BootstrapRegisterRequest` proto to `zk.bootstrap.register`.
-    /// 2. Receives `BootstrapRegisterResponse` from Pilot.
-    /// 3. On `status == "OK"`: writes KV using the kv_key from the grant,
-    ///    starts CAS heartbeat loop.
+    /// Sends `BootstrapRegisterRequest` to `zk.bootstrap.register` and returns
+    /// a [`PilotBootstrapGrant`] containing the Pilot-issued KV key, session,
+    /// and config payload. **No KV write happens here.**
     ///
-    /// `value` is the serialised [`ServiceRegistration`] proto payload for KV.
-    ///
-    /// [`ServiceRegistration`]: zk_proto_rs::zk::discovery::v1::ServiceRegistration
-    pub async fn register_with_pilot(
+    /// Use this when the service needs the Pilot payload to assemble its
+    /// runtime config before it can build the full KV registration proto.
+    /// Follow with [`register_kv_with_grant`](Self::register_kv_with_grant).
+    pub async fn pilot_request(
         nats: &async_nats::Client,
-        js: &jetstream::Context,
         token: &str,
         logical_id: &str,
         instance_type: &str,
         env: &str,
         runtime_info: std::collections::HashMap<String, String>,
-        value: Bytes,
-        heartbeat_interval: Duration,
-    ) -> Result<Self, RegistrationError> {
+    ) -> Result<PilotBootstrapGrant, RegistrationError> {
         let req = BootstrapRegisterRequest {
             token: token.to_string(),
             logical_id: logical_id.to_string(),
@@ -197,28 +219,58 @@ impl ServiceRegistration {
             });
         }
 
-        let ttl = Duration::from_millis(resp.lease_ttl_ms as u64);
-        let kv = Arc::new(KvRegistryClient::create(js, REGISTRY_BUCKET, ttl).await?);
-        let revision = kv.put(&resp.kv_key, value.clone()).await?;
-        info!(
-            kv_key = resp.kv_key,
-            owner_session_id = resp.owner_session_id,
-            revision,
-            "registered via Pilot"
-        );
+        let pilot_payload = PilotPayload {
+            runtime_config_json: resp.runtime_config,
+            config_metadata: resp.config_metadata,
+            secret_refs: resp.secret_refs,
+            server_time_ms: resp.server_time_ms,
+        };
 
-        let grant = RegistrationGrant {
-            owner_session_id: resp.owner_session_id,
-            kv_key: resp.kv_key.clone(),
+        Ok(PilotBootstrapGrant {
+            kv_key: resp.kv_key,
             lock_key: resp.lock_key,
             lease_ttl_ms: resp.lease_ttl_ms as u64,
-            scoped_credential: if resp.scoped_credential.is_empty() {
+            owner_session_id: resp.owner_session_id,
+            scoped_credential: resp.scoped_credential,
+            instance_id: resp.instance_id,
+            payload: pilot_payload,
+        })
+    }
+
+    /// Phase 2 of split-phase Pilot registration: write KV entry and start heartbeat.
+    ///
+    /// Takes a [`PilotBootstrapGrant`] from [`pilot_request`](Self::pilot_request)
+    /// and the fully-assembled KV registration proto. Writes to NATS KV and
+    /// starts the CAS heartbeat loop.
+    pub async fn register_kv_with_grant(
+        nats: &async_nats::Client,
+        js: &jetstream::Context,
+        grant: &PilotBootstrapGrant,
+        value: Bytes,
+        heartbeat_interval: Duration,
+    ) -> Result<Self, RegistrationError> {
+        let ttl = Duration::from_millis(grant.lease_ttl_ms);
+        let kv = Arc::new(KvRegistryClient::create(js, REGISTRY_BUCKET, ttl).await?);
+        let revision = kv.put(&grant.kv_key, value.clone()).await?;
+        info!(
+            kv_key = grant.kv_key,
+            owner_session_id = grant.owner_session_id,
+            revision,
+            "registered via Pilot (split-phase KV write)"
+        );
+
+        let reg_grant = RegistrationGrant {
+            owner_session_id: grant.owner_session_id.clone(),
+            kv_key: grant.kv_key.clone(),
+            lock_key: grant.lock_key.clone(),
+            lease_ttl_ms: grant.lease_ttl_ms,
+            scoped_credential: if grant.scoped_credential.is_empty() {
                 None
             } else {
-                Some(resp.scoped_credential)
+                Some(grant.scoped_credential.clone())
             },
-            instance_id: if resp.instance_id != 0 {
-                Some(resp.instance_id)
+            instance_id: if grant.instance_id != 0 {
+                Some(grant.instance_id)
             } else {
                 None
             },
@@ -226,7 +278,7 @@ impl ServiceRegistration {
 
         let (fenced_tx, fenced_rx) = watch::channel(false);
         let hb = Arc::clone(&kv).heartbeat_loop(
-            resp.kv_key,
+            grant.kv_key.clone(),
             value,
             heartbeat_interval,
             revision,
@@ -235,10 +287,45 @@ impl ServiceRegistration {
 
         Ok(Self {
             kv,
-            grant,
+            grant: reg_grant,
             _hb: hb,
             nats: Some(nats.clone()),
             fenced: fenced_rx,
+        })
+    }
+
+    /// Register via Pilot bootstrap NATS request/reply (one-shot convenience).
+    ///
+    /// Combines [`pilot_request`](Self::pilot_request) +
+    /// [`register_kv_with_grant`](Self::register_kv_with_grant) into a single
+    /// call. Use this when the KV registration proto can be built before
+    /// knowing the Pilot payload (e.g. OMS).
+    ///
+    /// For services that need the Pilot payload to build the KV proto (e.g.
+    /// gateway, where venue/account come from Pilot), use the split-phase API.
+    ///
+    /// `value` is the serialised [`ServiceRegistration`] proto payload for KV.
+    ///
+    /// [`ServiceRegistration`]: zk_proto_rs::zk::discovery::v1::ServiceRegistration
+    pub async fn register_with_pilot(
+        nats: &async_nats::Client,
+        js: &jetstream::Context,
+        token: &str,
+        logical_id: &str,
+        instance_type: &str,
+        env: &str,
+        runtime_info: std::collections::HashMap<String, String>,
+        value: Bytes,
+        heartbeat_interval: Duration,
+    ) -> Result<PilotRegistration, RegistrationError> {
+        let grant =
+            Self::pilot_request(nats, token, logical_id, instance_type, env, runtime_info).await?;
+        let registration =
+            Self::register_kv_with_grant(nats, js, &grant, value, heartbeat_interval).await?;
+
+        Ok(PilotRegistration {
+            registration,
+            payload: grant.payload,
         })
     }
 

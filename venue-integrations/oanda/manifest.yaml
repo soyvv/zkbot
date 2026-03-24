@@ -30,6 +30,16 @@ capabilities:
     language: python
     entrypoint: python:oanda.refdata:OandaRefdataLoader
     config_schema: schemas/refdata_config.schema.json
+    field_descriptors:
+      - path: /secret_ref
+        secret_ref: true
+        reloadable: false
+      - path: /environment
+        reloadable: false
+      - path: /account_id
+        reloadable: false
+      - path: /api_base_url
+        reloadable: false
 metadata:
   supports_tradfi_sessions: true
   notes:
