@@ -1,5 +1,5 @@
 schema_id: svc/gw
-version: 2
+version: 3
 config_schema: schemas/gw_svc_config.schema.json
 field_descriptors:
   - path: /grpc_port
@@ -7,6 +7,8 @@ field_descriptors:
   - path: /grpc_host
     reloadable: false
   - path: /exec_shard_count
+    reloadable: false
+  - path: /exch_account_id
     reloadable: false
   - path: /exec_queue_capacity
     reloadable: false

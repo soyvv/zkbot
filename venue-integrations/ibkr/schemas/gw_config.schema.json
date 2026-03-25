@@ -1,25 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "IBKR Gateway Config",
+  "description": "Venue-specific configuration for the IBKR trading gateway adaptor.",
   "type": "object",
   "properties": {
     "mode": {
       "type": "string",
-      "enum": ["paper", "live"]
+      "enum": ["paper", "live"],
+      "description": "IBKR connection mode. This is metadata for operator intent; host and port still determine the actual TWS or IB Gateway endpoint."
     },
     "host": {
-      "type": "string"
+      "type": "string",
+      "description": "Hostname or IP address of the target TWS or IB Gateway session."
     },
     "port": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "description": "TCP port of the target TWS or IB Gateway session."
     },
     "client_id": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "IBKR API client ID used for the session."
     },
     "account_code": {
-      "type": "string"
+      "type": "string",
+      "default": "",
+      "description": "Optional IBKR account code to scope account updates and normalization. Empty means use the default or all visible accounts."
     },
     "read_only": {
       "type": "boolean",
@@ -30,7 +37,7 @@
       "type": "number",
       "minimum": 1,
       "default": 40,
-      "description": "Sustained outbound message rate limit (msg/s). IBKR hard ceiling is 50."
+      "description": "Sustained outbound message rate limit in messages per second. IBKR hard ceiling is 50."
     },
     "reconnect_delay_s": {
       "type": "number",
@@ -48,7 +55,7 @@
       "type": "number",
       "minimum": 1,
       "default": 10,
-      "description": "Timeout in seconds waiting for nextValidId handshake after connect."
+      "description": "Timeout in seconds waiting for the nextValidId handshake after connect."
     }
   },
   "required": ["mode", "host", "port", "client_id"],

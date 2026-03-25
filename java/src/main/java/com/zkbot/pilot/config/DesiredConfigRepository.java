@@ -69,7 +69,10 @@ public class DesiredConfigRepository {
      * Set provided config in the service-specific table.
      * The config_version trigger auto-bumps version and recomputes hash on provided_config change.
      * Throws IllegalArgumentException for unsupported instance types.
+     * @deprecated Use TopologyService.updateService() or updateRefdataVenueConfig() instead,
+     *             which also refresh schema provenance and enforce offline gate.
      */
+    @Deprecated(forRemoval = true)
     public void setDesiredConfig(String logicalId, String instanceType, String configJson) {
         String upper = instanceType.toUpperCase();
         String sql = switch (upper) {

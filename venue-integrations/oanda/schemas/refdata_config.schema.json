@@ -1,20 +1,27 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OANDA Refdata Config",
+  "description": "Venue-specific configuration for the OANDA refdata loader.",
   "type": "object",
   "properties": {
     "environment": {
       "type": "string",
-      "enum": ["practice", "live"]
+      "enum": ["practice", "live"],
+      "default": "practice",
+      "description": "OANDA environment to query for instrument metadata."
     },
     "account_id": {
-      "type": "string"
+      "type": "string",
+      "description": "OANDA account identifier used when requesting instrument metadata."
     },
     "api_base_url": {
-      "type": "string"
+      "type": "string",
+      "description": "Optional override for the OANDA REST API base URL. If omitted, the loader derives the default from environment."
     },
     "secret_ref": {
-      "type": "string"
+      "type": "string",
+      "x-zk-secret-ref": true,
+      "description": "Pilot/Vault logical reference for the OANDA API bearer token."
     }
   },
   "required": ["environment", "account_id", "secret_ref"],

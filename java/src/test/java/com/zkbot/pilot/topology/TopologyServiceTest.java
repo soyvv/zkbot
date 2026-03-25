@@ -5,12 +5,9 @@ import com.zkbot.pilot.bootstrap.TokenService;
 import com.zkbot.pilot.config.ConfigDriftService;
 import com.zkbot.pilot.config.PilotProperties;
 import com.zkbot.pilot.discovery.DiscoveryCache;
+import com.zkbot.pilot.schema.ConfigSchemaLocator;
 import com.zkbot.pilot.schema.SchemaService;
-import com.zkbot.pilot.topology.dto.CreateServiceRequest;
-import com.zkbot.pilot.topology.dto.CreateServiceResponse;
-import com.zkbot.pilot.topology.dto.BootstrapTokenResponse;
-import com.zkbot.pilot.topology.dto.ServiceNode;
-import com.zkbot.pilot.topology.dto.TopologyView;
+import com.zkbot.pilot.topology.dto.*;
 import io.nats.client.Connection;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -40,13 +37,15 @@ class TopologyServiceTest {
     @Mock Connection natsConnection;
     @Mock ConfigDriftService configDriftService;
     @Mock SchemaService schemaService;
+    @Mock ConfigSchemaLocator configSchemaLocator;
 
     TopologyService service;
 
     @BeforeEach
     void setUp() {
         service = new TopologyService(repository, discoveryCache, tokenService, props,
-                natsConnection, configDriftService, schemaService, new ObjectMapper());
+                natsConnection, configDriftService, schemaService, configSchemaLocator,
+                new ObjectMapper());
     }
 
     // ── Workspace scoping ─────────────────────────────────────────────────
@@ -398,6 +397,36 @@ class TopologyServiceTest {
         }
 
         @Test
+        void creates_mdgw_with_selected_venue_in_provided_config() {
+            when(props.env()).thenReturn("dev");
+            when(repository.getLogicalInstance("mdgw_okx_1")).thenReturn(null);
+            when(tokenService.generateToken(eq("mdgw_okx_1"), eq("MDGW"), eq("dev"), eq(30)))
+                    .thenReturn(new BootstrapTokenResponse("jti", "tok", null));
+
+            var request = new CreateServiceRequest(
+                    "mdgw_okx_1",
+                    true,
+                    Map.of("sub_lease_ttl_s", 90, "venue_config", Map.of("demo_mode", true)),
+                    "okx",
+                    null,
+                    null
+            );
+
+            CreateServiceResponse resp = service.createService("MDGW", request);
+
+            assertThat(resp.status()).isEqualTo("created");
+            verify(repository).createLogicalInstance("mdgw_okx_1", "MDGW", "dev", null, true);
+            verify(repository).createMdgwInstance(
+                    eq("mdgw_okx_1"),
+                    eq("okx"),
+                    argThat(json -> json.contains("\"venue\":\"okx\"")
+                            && json.contains("\"sub_lease_ttl_s\":90")
+                            && json.contains("\"venue_config\":{\"demo_mode\":true}")),
+                    any(), any(), any(), any(), any(), any(), any()
+            );
+        }
+
+        @Test
         void rejects_duplicate_logical_id() {
             when(repository.getLogicalInstance("oms_1")).thenReturn(
                     Map.of("logical_id", "oms_1", "instance_type", "OMS"));
@@ -407,6 +436,150 @@ class TopologyServiceTest {
             assertThatThrownBy(() -> service.createService("OMS", request))
                     .isInstanceOf(ResponseStatusException.class)
                     .hasMessageContaining("already exists");
+        }
+    }
+
+    // ── Update service config ──────────────────────────────────────────────
+
+    @Nested
+    class UpdateServiceConfig {
+
+        @Test
+        void updates_oms_config_with_provenance() {
+            when(repository.getLogicalInstance("oms_1")).thenReturn(
+                    Map.of("logical_id", "oms_1", "instance_type", "OMS", "enabled", true));
+            when(discoveryCache.getAll()).thenReturn(Map.of());
+
+            var request = new UpdateServiceRequest(null, Map.of("grpc_port", 50051));
+            service.updateService("OMS", "oms_1", request);
+
+            verify(repository).updateOmsConfig(eq("oms_1"), contains("grpc_port"),
+                    any(), any(), any(), any());
+        }
+
+        @Test
+        void updates_gw_config_resolves_venue_from_existing_row() {
+            when(repository.getLogicalInstance("gw_1")).thenReturn(
+                    Map.of("logical_id", "gw_1", "instance_type", "GW", "enabled", true));
+            when(repository.getGatewayInstance("gw_1")).thenReturn(
+                    Map.of("gw_id", "gw_1", "venue", "okx"));
+            when(discoveryCache.getAll()).thenReturn(Map.of());
+
+            var request = new UpdateServiceRequest(null, Map.of("key", "value"));
+            service.updateService("GW", "gw_1", request);
+
+            verify(repository).updateGatewayConfig(eq("gw_1"), contains("key"),
+                    any(), any(), any(), any(), any(), any(), any());
+            // Verify venue was looked up from existing row, not from request body
+            verify(repository).getGatewayInstance("gw_1");
+        }
+
+        @Test
+        void rejects_refdata_with_400() {
+            assertThatThrownBy(() -> service.updateService("REFDATA", "refdata_1",
+                    new UpdateServiceRequest(null, Map.of())))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("refdata-venues");
+        }
+
+        @Test
+        void returns_404_for_unknown_service() {
+            when(repository.getLogicalInstance("nonexistent")).thenReturn(null);
+
+            assertThatThrownBy(() -> service.updateService("OMS", "nonexistent",
+                    new UpdateServiceRequest(null, Map.of())))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("not found");
+        }
+
+        @Test
+        void returns_404_for_kind_mismatch() {
+            when(repository.getLogicalInstance("gw_1")).thenReturn(
+                    Map.of("logical_id", "gw_1", "instance_type", "GW", "enabled", true));
+
+            assertThatThrownBy(() -> service.updateService("OMS", "gw_1",
+                    new UpdateServiceRequest(null, Map.of())))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("not found");
+        }
+
+        @Test
+        void rejects_online_service_with_409() {
+            when(repository.getLogicalInstance("oms_1")).thenReturn(
+                    Map.of("logical_id", "oms_1", "instance_type", "OMS", "enabled", true));
+            var reg = ServiceRegistration.newBuilder()
+                    .setServiceId("oms_1")
+                    .setServiceType("OMS")
+                    .setEndpoint(TransportEndpoint.newBuilder().setAddress("localhost:9090"))
+                    .build();
+            when(discoveryCache.getAll()).thenReturn(Map.of("svc.oms.oms_1", reg));
+
+            assertThatThrownBy(() -> service.updateService("OMS", "oms_1",
+                    new UpdateServiceRequest(null, Map.of("k", "v"))))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("online");
+        }
+
+        @Test
+        void rejects_invalid_config_with_400() {
+            when(repository.getLogicalInstance("oms_1")).thenReturn(
+                    Map.of("logical_id", "oms_1", "instance_type", "OMS", "enabled", true));
+            when(discoveryCache.getAll()).thenReturn(Map.of());
+            when(configSchemaLocator.resolveConfigSchema("oms_1", "OMS")).thenReturn("""
+                    {"type":"object","properties":{"port":{"type":"integer"}},"required":["port"]}
+                    """);
+
+            assertThatThrownBy(() -> service.updateService("OMS", "oms_1",
+                    new UpdateServiceRequest(null, Map.of("wrong_field", "value"))))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("validation failed");
+        }
+    }
+
+    // ── Update refdata venue config ──────────────────────────────────────
+
+    @Nested
+    class UpdateRefdataVenueConfig {
+
+        @Test
+        void updates_refdata_config_with_venue_provenance() {
+            when(repository.getRefdataVenueInstance("refdata_okx_1")).thenReturn(
+                    Map.of("logical_id", "refdata_okx_1", "venue", "okx",
+                            "env", "dev", "enabled", true,
+                            "config_version", 1, "config_hash", "abc"));
+            when(discoveryCache.getAll()).thenReturn(Map.of());
+
+            service.updateRefdataVenueConfig("refdata_okx_1", Map.of("key", "val"));
+
+            verify(repository).updateRefdataVenueConfig(eq("refdata_okx_1"),
+                    contains("key"), any(), any(), any());
+        }
+
+        @Test
+        void returns_404_for_missing_instance() {
+            when(repository.getRefdataVenueInstance("nonexistent")).thenReturn(null);
+
+            assertThatThrownBy(() -> service.updateRefdataVenueConfig("nonexistent", Map.of()))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("not found");
+        }
+
+        @Test
+        void rejects_online_refdata_with_409() {
+            when(repository.getRefdataVenueInstance("refdata_1")).thenReturn(
+                    Map.of("logical_id", "refdata_1", "venue", "okx",
+                            "env", "dev", "enabled", true,
+                            "config_version", 1, "config_hash", "abc"));
+            var reg = ServiceRegistration.newBuilder()
+                    .setServiceId("refdata_1")
+                    .setServiceType("REFDATA")
+                    .setEndpoint(TransportEndpoint.newBuilder().setAddress("localhost:9090"))
+                    .build();
+            when(discoveryCache.getAll()).thenReturn(Map.of("svc.refdata.refdata_1", reg));
+
+            assertThatThrownBy(() -> service.updateRefdataVenueConfig("refdata_1", Map.of("k", "v")))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("online");
         }
     }
 

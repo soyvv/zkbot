@@ -58,7 +58,7 @@ class OkxRefdataLoader(VenueLoader):
                 base_asset, quote_asset = str(data["instFamily"]).split("-", maxsplit=1)
                 settlement_asset = data["settleCcy"]
                 type_suffix = "-P"
-                venue = "OKXDM"
+                venue = "OKX"
                 tick_size = float(data["tickSz"])
                 lot_size = float(data["lotSz"])
                 contract_size = float(data["ctVal"])

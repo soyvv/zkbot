@@ -23,8 +23,13 @@ use zk_oms_rs::{config::ConfdataManager, models::OmsOrder, oms_core_v2::OmsCoreV
 use zk_proto_rs::{
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     zk::{
+        common::v1::Rejection,
         common::v1::InstrumentRefData,
-        oms::v1::{oms_response, OmsErrorType, OmsResponse, OrderRequest},
+        exch_gw::v1::{
+            order_report_entry::Report, BalanceUpdate, ExecReport, ExchExecType, OrderReport,
+            OrderReportEntry, OrderReportType, PositionReport,
+        },
+        oms::v1::{oms_response, OmsErrorType, OmsResponse, OrderRequest, OrderStatus},
     },
 };
 
@@ -311,6 +316,52 @@ async fn test_duplicate_order_id_rejected_by_core() {
         "first order must be accepted"
     );
 
+    shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_gateway_exec_reject_by_order_id_marks_order_rejected() {
+    let shutdown = CancellationToken::new();
+    let confdata = test_confdata("oms_test_gw_reject");
+    let (cmd_tx, replica) = spawn_test_actor(confdata, shutdown.clone()).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    let order_id = 2101;
+    let _resp = send_cmd(&cmd_tx, |reply| OmsCommand::PlaceOrder {
+        oms_received_ns: 0,
+        req: test_order_req(order_id, 9001),
+        reply,
+    })
+    .await;
+
+    let report = OrderReport {
+        exchange: "gw_mock_1".into(),
+        account_id: 9001,
+        order_id,
+        update_timestamp: 12345,
+        order_report_entries: vec![OrderReportEntry {
+            report_type: OrderReportType::OrderRepTypeExec as i32,
+            report: Some(Report::ExecReport(ExecReport {
+                exec_type: ExchExecType::Rejected as i32,
+                rejection_info: Some(Rejection {
+                    error_message: "venue rejected order".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })),
+        }],
+        ..Default::default()
+    };
+
+    cmd_tx
+        .send(OmsCommand::GatewayOrderReport(report))
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let snap = replica.load();
+    let order = snap.orders.get(&order_id).expect("order missing");
+    assert_eq!(order.order_status, OrderStatus::Rejected as i32);
     shutdown.cancel();
 }
 
@@ -802,6 +853,33 @@ fn test_unknown_exch_overflow_buckets() {
             .map(|p| p.position_state.clone()),
     );
     assert_eq!(positions.len(), 3); // 1 resolved + 2 unknown
+}
+
+#[test]
+fn test_build_exch_balances_preserves_unknown_assets_from_core() {
+    use zk_proto_rs::zk::common::v1::InstrumentType;
+
+    let conf = test_confdata("oms_test_unknown_balance");
+    let mut core = OmsCoreV2::new(&conf, false, true, false, 1024);
+    core.process_message(zk_oms_rs::models::OmsMessage::BalanceUpdate(BalanceUpdate {
+        balances: vec![PositionReport {
+            instrument_code: "MYSTERY_COIN".into(),
+            instrument_type: InstrumentType::InstTypeSpot as i32,
+            exch_account_code: "TEST_ACCT".into(),
+            qty: 42.0,
+            avail_qty: 40.0,
+            update_timestamp: 123,
+            ..Default::default()
+        }],
+    }));
+
+    let (resolved, unknown) = oms_actor::build_exch_balances(&core);
+    assert!(resolved.is_empty());
+    assert_eq!(unknown.len(), 1);
+    assert_eq!(unknown[0].account_id, 9001);
+    assert_eq!(unknown[0].asset, "MYSTERY_COIN");
+    assert_eq!(unknown[0].balance_state.asset, "MYSTERY_COIN");
+    assert_eq!(unknown[0].balance_state.total_qty, 42.0);
 }
 
 /// Duplicate order_refs in query_order_details produce no duplicate output rows.

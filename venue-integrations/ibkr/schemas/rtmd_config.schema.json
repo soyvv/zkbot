@@ -1,27 +1,67 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "IBKR RTMD Config",
+  "description": "Venue-specific configuration for the IBKR RTMD adaptor.",
   "type": "object",
   "properties": {
     "mode": {
       "type": "string",
-      "enum": ["paper", "live"]
+      "enum": ["paper", "live"],
+      "default": "paper",
+      "description": "IBKR connection mode. This is metadata for operator intent; host and port still determine the actual TWS or IB Gateway endpoint."
     },
     "host": {
-      "type": "string"
+      "type": "string",
+      "default": "127.0.0.1",
+      "description": "Hostname or IP address of the target TWS or IB Gateway session."
     },
     "port": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "default": 7497,
+      "description": "TCP port of the target TWS or IB Gateway session."
     },
     "client_id": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "default": 10,
+      "description": "IBKR API client ID used for the RTMD session."
     },
     "market_data_type": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 4
+      "maximum": 4,
+      "default": 1,
+      "description": "IBKR market data type: 1=live, 2=frozen, 3=delayed, 4=delayed-frozen."
+    },
+    "read_only": {
+      "type": "boolean",
+      "default": true,
+      "description": "RTMD adaptor safety default. Present for parity with the shared IBKR config model."
+    },
+    "max_msg_rate": {
+      "type": "number",
+      "minimum": 1,
+      "default": 40,
+      "description": "Sustained outbound message rate limit in messages per second."
+    },
+    "reconnect_delay_s": {
+      "type": "number",
+      "minimum": 0.1,
+      "default": 2,
+      "description": "Initial reconnect backoff delay in seconds."
+    },
+    "reconnect_max_delay_s": {
+      "type": "number",
+      "minimum": 1,
+      "default": 60,
+      "description": "Maximum reconnect backoff delay in seconds."
+    },
+    "next_valid_id_timeout_s": {
+      "type": "number",
+      "minimum": 1,
+      "default": 10,
+      "description": "Timeout in seconds waiting for the nextValidId handshake after connect."
     }
   },
   "required": ["mode", "host", "port", "client_id"],

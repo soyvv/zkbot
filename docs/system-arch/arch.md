@@ -20,6 +20,7 @@ Topic-specific design notes live alongside it:
 - [Operations](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/ops.md)
 - [Registry Security](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/registry_security.md)
 - [Topology Registration](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/topology_registration.md)
+- [HA Considerations](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/ha_considerations.md)
 - [Service Architecture Docs](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/services/README.md)
 
 ## 1. Objectives

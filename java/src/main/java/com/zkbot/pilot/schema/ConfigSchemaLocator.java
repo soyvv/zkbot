@@ -36,6 +36,7 @@ public class ConfigSchemaLocator {
      * GW and MDGW have both a service_kind manifest and a venue_capability manifest.
      */
     private static final Set<String> VENUE_BACKED_TYPES = Set.of("GW", "MDGW");
+    private static final Set<String> INLINE_VENUES = Set.of("simulator");
 
     /**
      * Instance types that are venue-scoped but not composite (no service_kind layer).
@@ -109,10 +110,12 @@ public class ConfigSchemaLocator {
             return svcDescriptors;
         }
 
+        var normalizedVenueDescriptors = normalizeVenueDescriptorPaths(venueDescriptors, venue);
+
         // Merge: service_kind first, then venue_capability
-        var merged = new ArrayList<Map<String, Object>>(svcDescriptors.size() + venueDescriptors.size());
+        var merged = new ArrayList<Map<String, Object>>(svcDescriptors.size() + normalizedVenueDescriptors.size());
         merged.addAll(svcDescriptors);
-        merged.addAll(venueDescriptors);
+        merged.addAll(normalizedVenueDescriptors);
         return merged;
     }
 
@@ -128,8 +131,13 @@ public class ConfigSchemaLocator {
 
     /**
      * Resolve the config schema JSON for a service instance.
-     * For venue-backed types, prefers venue_capability schema; falls back to service_kind.
-     * For venue-only types (REFDATA), resolves from venue_capability only.
+     *
+     * For venue-backed types (GW, MDGW): returns the merged schema
+     * (service_kind + venue_capability nested under venue_config) so the
+     * validator sees the same structure as the actual providedConfig payload.
+     * Falls back to service_kind schema if venue is unknown or merge fails.
+     *
+     * For venue-only types (REFDATA): resolves from venue_capability only.
      */
     public String resolveConfigSchema(String logicalId, String instanceType) {
         String upper = instanceType.toUpperCase();
@@ -146,13 +154,39 @@ public class ConfigSchemaLocator {
         if (VENUE_BACKED_TYPES.contains(upper)) {
             String venue = lookupVenue(logicalId, upper);
             if (venue != null) {
-                String capability = TYPE_TO_CAPABILITY.getOrDefault(upper, upper.toLowerCase());
-                String schema = schemaService.getConfigSchema("venue_capability", venue + "/" + capability);
-                if (schema != null) return schema;
+                try {
+                    return schemaService.getMergedConfigSchema(upper.toLowerCase(), venue);
+                } catch (Exception e) {
+                    log.warn("schema-locator: failed to merge schema for {}/{}, falling back to service_kind: {}",
+                            logicalId, upper, e.getMessage());
+                }
             }
         }
 
         return schemaService.getConfigSchema("service_kind", upper.toLowerCase());
+    }
+
+    private List<Map<String, Object>> normalizeVenueDescriptorPaths(List<Map<String, Object>> descriptors, String venue) {
+        if (venue == null || INLINE_VENUES.contains(venue.toLowerCase())) {
+            return descriptors;
+        }
+
+        var normalized = new ArrayList<Map<String, Object>>(descriptors.size());
+        for (var descriptor : descriptors) {
+            String path = (String) descriptor.get("path");
+            if (path == null) {
+                normalized.add(descriptor);
+                continue;
+            }
+
+            String normalizedPath = path.startsWith("/venue_config/")
+                    ? path
+                    : (path.startsWith("/") ? "/venue_config" + path : "/venue_config/" + path);
+            var copy = new java.util.LinkedHashMap<String, Object>(descriptor);
+            copy.put("path", normalizedPath);
+            normalized.add(copy);
+        }
+        return normalized;
     }
 
     /**

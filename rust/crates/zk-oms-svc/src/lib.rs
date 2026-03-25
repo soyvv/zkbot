@@ -15,4 +15,5 @@ pub mod oms_actor;
 pub mod persist_executor;
 pub mod proto;
 pub mod publish_executor;
+pub mod reconcile;
 pub mod redis_writer;

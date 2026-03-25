@@ -1,26 +1,33 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OKX Gateway Config",
+  "description": "Venue-specific configuration for the OKX trading gateway. This object is stored under provided_config.venue_config and consumed by the native OKX Rust adaptor.",
   "type": "object",
   "properties": {
+    "demo_mode": {
+      "type": "boolean",
+      "default": false,
+      "description": "Use OKX demo trading endpoints. When true, default WebSocket URLs resolve to the wspap.okx.com demo hosts."
+    },
     "api_base_url": {
-      "type": "string"
+      "type": "string",
+      "default": "https://www.okx.com",
+      "description": "Base HTTPS URL for OKX REST API requests."
     },
     "ws_public_url": {
-      "type": "string"
+      "type": "string",
+      "description": "Optional override for the OKX public WebSocket endpoint. If omitted, the runtime derives the default from demo_mode."
     },
     "ws_private_url": {
-      "type": "string"
-    },
-    "passphrase_ref": {
       "type": "string",
-      "x-zk-secret-ref": true
+      "description": "Optional override for the OKX private WebSocket endpoint. If omitted, the runtime derives the default from demo_mode."
     },
     "secret_ref": {
       "type": "string",
-      "x-zk-secret-ref": true
+      "x-zk-secret-ref": true,
+      "description": "Pilot/Vault path for the OKX credential bundle. The runtime reads `apikey`, `secretkey`, and `passphrase` from this secret."
     }
   },
-  "required": ["secret_ref", "passphrase_ref"],
+  "required": ["secret_ref"],
   "additionalProperties": true
 }

@@ -239,6 +239,52 @@ For the current phase, the UI should assume:
   - stop or detach the relevant live scope first
   - then edit
 
+### Account Binding Update Interaction
+
+Updating account binding should be documented as a normal account-detail edit flow, not as a
+separate topology-binding editor.
+
+Binding-specific rule:
+
+- the operator updates desired `OMS` and `GW` bindings from the account detail page
+- the UI must show both:
+  - desired control-plane binding
+  - current runtime-resolved binding
+- the UI must block binding edits when the account already resolves to a live runtime scope
+
+Recommended interaction:
+
+1. Operator opens one account detail page.
+2. UI loads:
+   - `GET /v1/accounts/{account_id}`
+   - `GET /v1/accounts/{account_id}/runtime-binding`
+   - `GET /v1/meta?domains=accounts,topology`
+3. UI renders:
+   - account summary fields
+   - desired `OMS` binding selector
+   - desired `GW` binding selector if relevant for the venue/runtime model
+   - runtime-binding status panel showing the currently resolved live route
+4. UI checks whether editing is allowed:
+   - if runtime binding resolves to a live `OMS` scope, disable binding selectors and `Save`
+   - show a reason such as `Binding changes require the account runtime scope to be offline`
+5. If the account is not live-bound:
+   - enable binding selectors
+   - allow operator to change desired `OMS` / `GW` targets
+6. UI submits the updated account payload:
+   - `PUT /v1/accounts/{account_id}`
+7. UI refreshes:
+   - `GET /v1/accounts/{account_id}`
+   - `GET /v1/accounts/{account_id}/runtime-binding`
+8. UI shows the post-save state as:
+   - desired binding updated
+   - runtime binding unresolved until the relevant services are live
+   - or runtime binding resolved if the target scope is already online and now matches
+
+Explicit non-goal:
+
+- the normal operator path should not require opening `/v1/topology/bindings` or editing generic
+  logical topology edges just to move an account between `OMS` / `GW` routes
+
 ## Sequence 2: OMS Onboarding
 
 ### Goal
@@ -343,6 +389,7 @@ This applies to service kinds such as:
    - explain that the service must be offline before editing
 5. If service is offline:
    - enable `Edit Config`
+   - resolve the current active schema resources for that service
    - render the same schema-driven form used for onboarding
 6. Operator submits updated desired config.
 7. UI submits the appropriate service update request.
@@ -353,10 +400,44 @@ This applies to service kinds such as:
 - editing and reloading are separate operations
 - offline edit changes desired state
 - restart/rebootstrap is required for the changed desired state to become live
+- normal edit flows should bind config to the latest active schema resources automatically
+- schema version selection should not be a normal operator-facing control
 - UI should show:
   - current live status
   - desired config changed
   - runtime restart/bootstrap required
+
+### Schema Resolution During Config Editing
+
+Normal service config editing should resolve schemas at edit time from the active schema registry
+state, not from stale provenance stored on the existing service row.
+
+Recommended rule:
+
+- OMS and ENGINE:
+  - resolve the latest active service-kind schema
+- GW and MDGW:
+  - resolve the latest active service-kind schema
+  - resolve the latest active venue-capability schema for the selected venue
+- REFDATA:
+  - resolve the latest active venue-capability schema for the selected venue
+
+The UI should:
+
+- render the edit form from those active schema resources
+- show the resolved schema versions as read-only metadata
+- avoid making schema version a selectable control in the normal edit flow
+
+The save path should persist:
+
+- updated `provided_config`
+- schema provenance for the service-kind schema
+- venue schema provenance where applicable
+
+This keeps service rows aligned with the schema contract actually used to validate the edit.
+
+If the platform later needs compatibility pinning or staged rollouts, version selection can exist as
+an admin-only advanced workflow, but not as the default edit path.
 
 ### OMS Editing
 
@@ -367,7 +448,9 @@ Recommended interaction:
    - disable editing
    - allow only read-only inspection plus operational actions like reload where supported
 3. If OMS is offline:
+   - resolve the latest active OMS service-kind schema
    - render OMS service-kind schema form
+   - show the resolved schema version as read-only metadata
    - allow binding updates
 4. After save, UI should offer:
    - issue new bootstrap token if needed
@@ -381,13 +464,26 @@ Recommended interaction:
 2. If GW is online:
    - disable editing
 3. If GW is offline:
+   - resolve:
+     - latest active GW service-kind schema
+     - latest active venue-capability schema for the selected venue
    - render composite edit form:
      - service-kind host config
      - venue capability config
      - bindings
+   - show both resolved schema versions as read-only metadata
 4. After save, UI should mark:
    - desired config updated
    - runtime restart/bootstrap required
+
+### GW Editing Notes
+
+- The normal UI path should not ask the operator to choose schema versions.
+- For GW, two schema layers are involved:
+  - service-kind schema for the gateway host/runtime config
+  - venue-capability schema for venue-specific config
+- The operator should edit against the currently active pair, and the saved GW row should update
+  provenance for both schema layers.
 
 ### MDGW Editing
 
@@ -397,7 +493,11 @@ Recommended interaction:
 2. If MDGW is online:
    - disable editing
 3. If MDGW is offline:
+   - resolve:
+     - latest active MDGW service-kind schema
+     - latest active venue-capability schema for the selected venue
    - render composite edit form
+   - show both resolved schema versions as read-only metadata
 4. After save, UI should show:
    - config updated
    - runtime not yet restarted
@@ -446,6 +546,8 @@ it online so OMS/account/manual flows can use it.
 - GW onboarding should visibly distinguish:
   - host/service config
   - venue adaptor config
+- GW onboarding should show the resolved service-kind schema version and venue-capability schema
+  version as read-only metadata
 - if required secret refs are missing, UI should not mark the service as bootstrap-ready
 - if GW is configured but offline, account pages should show bound-but-not-live
 
@@ -487,6 +589,8 @@ Define MDGW runtime config and bring it online so OMS/GW/bot scopes can consume 
   - configured
   - online
   - currently subscribed / actively used
+- MDGW onboarding should show the resolved service-kind schema version and venue-capability schema
+  version as read-only metadata
 
 ## Sequence 5: Refdata Venue Onboarding
 
@@ -518,6 +622,8 @@ Create one venue-scoped refdata control-plane row for a shared refdata runtime.
 - Refdata venue onboarding is not the same path as `POST /v1/topology/services/{kind}`.
 - The UI should present refdata as a venue-scoped control-plane entity, not as a generic service-kind
   create form.
+- Refdata config editing should resolve the latest active venue-capability schema for the selected
+  venue and show the resolved version as read-only metadata.
 
 ## Sequence 5: Bind OMS, GW, Accounts Into A Live Trading Scope
 

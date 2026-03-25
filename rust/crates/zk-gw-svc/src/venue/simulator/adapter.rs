@@ -115,6 +115,26 @@ async fn check_error_injection(
     Ok(None)
 }
 
+fn sim_order_to_venue_fact(o: &zk_sim_core::models::SimOrder) -> VenueOrderFact {
+    let status = if o.remaining_qty <= 0.0 {
+        VenueOrderStatus::Filled
+    } else if o.filled_qty > 0.0 {
+        VenueOrderStatus::PartiallyFilled
+    } else {
+        VenueOrderStatus::Booked
+    };
+    VenueOrderFact {
+        order_id: o.req.correlation_id,
+        exch_order_ref: o.exch_order_id.clone(),
+        instrument: o.req.instrument.clone(),
+        status,
+        filled_qty: o.filled_qty,
+        unfilled_qty: o.remaining_qty,
+        avg_price: 0.0, // simulator does not track avg price on cached orders
+        timestamp: o.update_ts,
+    }
+}
+
 #[async_trait]
 impl VenueAdapter for SimulatorVenueAdapter {
     async fn connect(&self) -> anyhow::Result<()> {
@@ -308,15 +328,40 @@ impl VenueAdapter for SimulatorVenueAdapter {
             .collect())
     }
 
-    async fn query_order(&self, _req: VenueOrderQuery) -> anyhow::Result<Vec<VenueOrderFact>> {
-        Ok(vec![])
+    async fn query_order(&self, req: VenueOrderQuery) -> anyhow::Result<Vec<VenueOrderFact>> {
+        let state = self.state.lock().await;
+        let mut results = Vec::new();
+        for order in state.sim_core.order_cache().values() {
+            let matches = req
+                .order_id
+                .map_or(false, |id| order.req.correlation_id == id)
+                || req
+                    .exch_order_ref
+                    .as_deref()
+                    .map_or(false, |r| r == order.exch_order_id)
+                || req
+                    .instrument
+                    .as_deref()
+                    .map_or(false, |i| i == order.req.instrument);
+            if matches {
+                results.push(sim_order_to_venue_fact(order));
+            }
+        }
+        Ok(results)
     }
 
     async fn query_open_orders(
         &self,
         _req: VenueOpenOrdersQuery,
     ) -> anyhow::Result<Vec<VenueOrderFact>> {
-        Ok(vec![])
+        let state = self.state.lock().await;
+        Ok(state
+            .sim_core
+            .order_cache()
+            .values()
+            .filter(|o| o.remaining_qty > 0.0)
+            .map(sim_order_to_venue_fact)
+            .collect())
     }
 
     async fn query_trades(&self, _req: VenueTradeQuery) -> anyhow::Result<Vec<VenueTradeFact>> {

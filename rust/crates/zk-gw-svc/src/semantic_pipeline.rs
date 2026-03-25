@@ -20,16 +20,17 @@ pub struct SemanticPipeline {
     /// Set of (instrument, side) keys with non-zero published positions.
     /// Used to detect → 0 transitions.
     published_position_keys: HashSet<String>,
-    /// Account ID for building proto messages.
-    account_id: i64,
+    /// Exchange-side account code for balance/position publications.
+    /// OMS uses this to link exchange-owned state to the managed account.
+    exch_account_code: String,
 }
 
 impl SemanticPipeline {
-    pub fn new(account_id: i64) -> Self {
+    pub fn new(exch_account_code: String) -> Self {
         Self {
             published_trade_ids: HashSet::new(),
             published_position_keys: HashSet::new(),
-            account_id,
+            exch_account_code,
         }
     }
 
@@ -103,7 +104,7 @@ impl SemanticPipeline {
                 instrument_type: zk_proto_rs::zk::common::v1::InstrumentType::InstTypeSpot as i32,
                 qty: f.total_qty,
                 avail_qty: f.avail_qty,
-                account_id: self.account_id,
+                exch_account_code: self.exch_account_code.clone(),
                 ..Default::default()
             })
             .collect();
@@ -130,7 +131,7 @@ impl SemanticPipeline {
                 instrument_code: fact.instrument.clone(),
                 qty: fact.qty,
                 avail_qty: fact.avail_qty,
-                account_id: fact.account_id,
+                exch_account_code: self.exch_account_code.clone(),
                 ..Default::default()
             });
         }
@@ -151,7 +152,7 @@ impl SemanticPipeline {
                     instrument_code: parts[0].to_string(),
                     qty: 0.0,
                     avail_qty: 0.0,
-                    account_id: self.account_id,
+                    exch_account_code: self.exch_account_code.clone(),
                     ..Default::default()
                 });
             }

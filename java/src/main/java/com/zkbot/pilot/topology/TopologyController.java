@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/v1/topology")
@@ -90,6 +91,13 @@ public class TopologyController {
         return service.issueBootstrapToken(serviceKind, logicalId);
     }
 
+    @PutMapping("/services/{serviceKind}/{logicalId}")
+    public TopologyActionResponse updateService(@PathVariable String serviceKind,
+                                                 @PathVariable String logicalId,
+                                                 @RequestBody UpdateServiceRequest request) {
+        return service.updateService(serviceKind, logicalId, request);
+    }
+
     @PostMapping("/services/{serviceKind}/{logicalId}/reload")
     public TopologyActionResponse reloadService(@PathVariable String serviceKind,
                                               @PathVariable String logicalId) {
@@ -116,5 +124,11 @@ public class TopologyController {
     @PostMapping("/refdata-venues")
     public RefdataVenueInstanceEntry createRefdataVenue(@RequestBody CreateRefdataVenueRequest request) {
         return service.createRefdataVenueInstance(request);
+    }
+
+    @PutMapping("/refdata-venues/{logicalId}/config")
+    public RefdataVenueInstanceEntry updateRefdataVenueConfig(@PathVariable String logicalId,
+                                                               @RequestBody Map<String, Object> providedConfig) {
+        return service.updateRefdataVenueConfig(logicalId, providedConfig);
     }
 }

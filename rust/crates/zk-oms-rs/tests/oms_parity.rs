@@ -711,6 +711,32 @@ fn test_gw_spot_entry_routes_to_balance_mgr() {
     );
 }
 
+/// Unknown SPOT assets should still be surfaced in OMS balance queries/events.
+#[test]
+fn test_gw_unknown_spot_asset_preserved_in_balance_update() {
+    let mut oms = build_oms();
+
+    let actions = oms.process_message(OmsMessage::BalanceUpdate(BalanceUpdate {
+        balances: vec![PositionReport {
+            instrument_code: "MYSTERY_COIN".into(),
+            instrument_type: InstrumentType::InstTypeSpot as i32,
+            exch_account_code: EXCH_ACCOUNT_1.into(),
+            qty: 123.0,
+            avail_qty: 120.0,
+            update_timestamp: 1_081,
+            ..Default::default()
+        }],
+    }));
+
+    let bue = find_balance_update(&actions).expect("expected PublishBalanceUpdate");
+    assert_eq!(bue.account_id, ACCOUNT_1);
+    assert_eq!(bue.balance_snapshots.len(), 1);
+    let bal = &bue.balance_snapshots[0];
+    assert_eq!(bal.asset, "MYSTERY_COIN");
+    assert!((bal.total_qty - 123.0).abs() < f64::EPSILON);
+    assert!((bal.avail_qty - 120.0).abs() < f64::EPSILON);
+}
+
 /// Mixed SPOT + PERP entries in one gateway message → both updates produced.
 #[test]
 fn test_gw_mixed_entries_route_both() {

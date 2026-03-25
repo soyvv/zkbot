@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use zk_infra_rs::bootstrap::{BootstrapConfigError, PilotPayload, ServiceBootstrap};
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -75,6 +76,11 @@ pub struct GwProvidedConfig {
     pub venue: String,
     /// Trading account ID (required, no default).
     pub account_id: i64,
+    /// Exchange-side account identifier (e.g. OKX sub-account ID).
+    /// Used by the semantic pipeline to set `exch_account_code` on outbound
+    /// balance/position publications so OMS can link exchange-owned state.
+    #[serde(default)]
+    pub exch_account_id: String,
     /// Opaque venue-specific config blob.
     #[serde(default = "default_venue_config")]
     pub venue_config: serde_json::Value,
@@ -130,6 +136,7 @@ pub struct GwRuntimeConfig {
     // From provided
     pub venue: String,
     pub account_id: i64,
+    pub exch_account_id: String,
     pub venue_config: serde_json::Value,
     pub venue_root: Option<String>,
     pub exec_shard_count: usize,
@@ -161,7 +168,9 @@ impl ServiceBootstrap for GwBootstrap {
     fn decode_pilot_config(
         payload: &PilotPayload,
     ) -> Result<Self::ProvidedConfig, BootstrapConfigError> {
-        let cfg: GwProvidedConfig = serde_json::from_str(&payload.runtime_config_json)?;
+        let mut raw: Value = serde_json::from_str(&payload.runtime_config_json)?;
+        normalize_simulator_pilot_config(&mut raw);
+        let cfg: GwProvidedConfig = serde_json::from_value(raw)?;
         Ok(cfg)
     }
 
@@ -178,6 +187,9 @@ impl ServiceBootstrap for GwBootstrap {
             .map_err(|e| {
                 BootstrapConfigError::Validation(format!("invalid ZK_ACCOUNT_ID: {e}"))
             })?;
+
+        let exch_account_id =
+            std::env::var("ZK_EXCH_ACCOUNT_ID").unwrap_or_default();
 
         let venue_config_str =
             std::env::var("ZK_VENUE_CONFIG").unwrap_or_else(|_| "{}".into());
@@ -221,6 +233,7 @@ impl ServiceBootstrap for GwBootstrap {
         Ok(GwProvidedConfig {
             venue,
             account_id,
+            exch_account_id,
             venue_config,
             venue_root,
             exec_shard_count,
@@ -274,12 +287,45 @@ impl ServiceBootstrap for GwBootstrap {
             env: bootstrap.env.clone(),
             venue: provided.venue,
             account_id: provided.account_id,
+            exch_account_id: provided.exch_account_id,
             venue_config: provided.venue_config,
             venue_root: provided.venue_root,
             exec_shard_count: provided.exec_shard_count,
             exec_queue_capacity: provided.exec_queue_capacity,
             simulator,
         })
+    }
+}
+
+fn normalize_simulator_pilot_config(raw: &mut Value) {
+    let Some(obj) = raw.as_object_mut() else {
+        return;
+    };
+
+    let venue = obj
+        .get("venue")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if venue != "simulator" || obj.contains_key("simulator") {
+        return;
+    }
+
+    let mut simulator = Map::new();
+    move_if_present(obj, &mut simulator, "mock_balances");
+    move_if_present(obj, &mut simulator, "fill_delay_ms");
+    move_if_present(obj, &mut simulator, "match_policy");
+    move_if_present(obj, &mut simulator, "admin_grpc_port");
+    move_if_present(obj, &mut simulator, "enable_admin_controls");
+
+    if !simulator.is_empty() {
+        obj.insert("simulator".to_string(), Value::Object(simulator));
+    }
+}
+
+fn move_if_present(root: &mut Map<String, Value>, target: &mut Map<String, Value>, key: &str) {
+    if let Some(value) = root.remove(key) {
+        target.insert(key.to_string(), value);
     }
 }
 

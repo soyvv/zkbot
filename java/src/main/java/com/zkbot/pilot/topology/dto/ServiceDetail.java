@@ -15,5 +15,7 @@ public record ServiceDetail(
     Instant lastSeenAt,
     String configDrift,
     List<Map<String, Object>> bindings,
-    List<Map<String, Object>> sessions
+    List<Map<String, Object>> sessions,
+    Map<String, Object> providedConfig,
+    String venue
 ) {}

@@ -166,7 +166,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     adapter.connect().await?;
 
     // ── Semantic pipeline + publisher ────────────────────────────────────
-    let pipeline = Arc::new(Mutex::new(SemanticPipeline::new(runtime_cfg.account_id)));
+    let pipeline = Arc::new(Mutex::new(SemanticPipeline::new(
+        runtime_cfg.exch_account_id.clone(),
+    )));
 
     let publisher = if let Some(ref nats) = nats_client {
         Some(Arc::new(NatsPublisher::new(

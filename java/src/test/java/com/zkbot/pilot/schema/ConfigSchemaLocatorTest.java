@@ -75,8 +75,8 @@ class ConfigSchemaLocatorTest {
         // Service-kind first, then venue-capability
         assertThat(result.get(0).get("path")).isEqualTo("/grpc_port");
         assertThat(result.get(1).get("path")).isEqualTo("/bootstrap_token");
-        assertThat(result.get(2).get("path")).isEqualTo("/secret_ref");
-        assertThat(result.get(3).get("path")).isEqualTo("/api_base_url");
+        assertThat(result.get(2).get("path")).isEqualTo("/venue_config/secret_ref");
+        assertThat(result.get(3).get("path")).isEqualTo("/venue_config/api_base_url");
     }
 
     @SuppressWarnings("unchecked")
@@ -99,7 +99,7 @@ class ConfigSchemaLocatorTest {
         var result = locator.resolveFieldDescriptors("mdgw_oanda_1", "MDGW");
         assertThat(result).hasSize(3);
         assertThat(result.get(0).get("path")).isEqualTo("/grpc_port");
-        assertThat(result.get(2).get("path")).isEqualTo("/secret_ref");
+        assertThat(result.get(2).get("path")).isEqualTo("/venue_config/secret_ref");
     }
 
     // ── Venue-backed: no venue found → service_kind only (with warning) ──

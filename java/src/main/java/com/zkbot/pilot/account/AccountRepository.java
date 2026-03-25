@@ -68,6 +68,18 @@ public class AccountRepository {
                 status, accountId);
     }
 
+    public void upsertAccountBinding(long accountId, String omsId, String gwId) {
+        jdbc.update("""
+                INSERT INTO cfg.account_binding (account_id, oms_id, gw_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT (account_id, oms_id, gw_id) DO NOTHING
+                """, accountId, omsId, gwId);
+    }
+
+    public void deleteAccountBindings(long accountId) {
+        jdbc.update("DELETE FROM cfg.account_binding WHERE account_id = ?", accountId);
+    }
+
     public Map<String, Object> getAccountBinding(long accountId) {
         var rows = jdbc.queryForList("""
                 SELECT ab.*, oi.oms_id AS oms_logical_id, gi.gw_id AS gw_logical_id

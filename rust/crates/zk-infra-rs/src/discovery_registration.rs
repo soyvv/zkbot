@@ -27,6 +27,11 @@ pub fn encode_registration(reg: &SvcRegProto) -> Bytes {
     Bytes::from(reg.encode_to_vec())
 }
 
+/// Decode a `ServiceRegistration` proto from KV bytes.
+pub fn decode_registration(bytes: &[u8]) -> Result<SvcRegProto, prost::DecodeError> {
+    SvcRegProto::decode(bytes)
+}
+
 /// Build an engine service registration.
 pub fn engine_registration(
     engine_id: &str,

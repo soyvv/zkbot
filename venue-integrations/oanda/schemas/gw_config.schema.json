@@ -1,24 +1,31 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OANDA Gateway Config",
+  "description": "Venue-specific configuration for the OANDA trading gateway adaptor.",
   "type": "object",
   "properties": {
     "environment": {
       "type": "string",
-      "enum": ["practice", "live"]
+      "enum": ["practice", "live"],
+      "default": "practice",
+      "description": "OANDA environment to connect to. Practice uses the demo endpoints; live uses the production endpoints."
     },
     "account_id": {
-      "type": "string"
+      "type": "string",
+      "description": "OANDA account identifier used for orders, balances, positions, and transaction streaming."
     },
     "api_base_url": {
-      "type": "string"
+      "type": "string",
+      "description": "Optional override for the OANDA REST API base URL. If omitted, the adaptor derives the default from environment."
     },
     "stream_base_url": {
-      "type": "string"
+      "type": "string",
+      "description": "Optional override for the OANDA transaction stream base URL. If omitted, the adaptor derives the default from environment."
     },
     "secret_ref": {
       "type": "string",
-      "x-zk-secret-ref": true
+      "x-zk-secret-ref": true,
+      "description": "Pilot/Vault logical reference for the OANDA API bearer token."
     }
   },
   "required": ["environment", "account_id", "secret_ref"],

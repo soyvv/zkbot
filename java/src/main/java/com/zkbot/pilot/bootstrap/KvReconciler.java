@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
+import com.zkbot.pilot.discovery.DiscoveryCache;
 
 import java.util.List;
 import java.util.Map;
@@ -27,15 +28,17 @@ public class KvReconciler implements SmartLifecycle {
 
     private final Connection natsConnection;
     private final BootstrapRepository repository;
+    private final DiscoveryCache discoveryCache;
     private final Set<String> live = ConcurrentHashMap.newKeySet();
     private final CountDownLatch readyLatch = new CountDownLatch(1);
 
     private volatile boolean running;
     private Thread watchThread;
 
-    public KvReconciler(Connection natsConnection, BootstrapRepository repository) {
+    public KvReconciler(Connection natsConnection, BootstrapRepository repository, DiscoveryCache discoveryCache) {
         this.natsConnection = natsConnection;
         this.repository = repository;
+        this.discoveryCache = discoveryCache;
     }
 
     public boolean isKvLive(String kvKey) {
@@ -188,6 +191,7 @@ public class KvReconciler implements SmartLifecycle {
 
     private void onKvLost(String kvKey) {
         try {
+            discoveryCache.remove(kvKey);
             Map<String, Object> row = repository.findActiveSessionByKvKey(kvKey);
             if (row == null) {
                 return;

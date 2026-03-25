@@ -8,6 +8,11 @@
       "type": "integer",
       "description": "Primary account identifier exposed by this gateway runtime."
     },
+    "exch_account_id": {
+      "type": "string",
+      "default": "",
+      "description": "Exchange-side account identifier (e.g. OKX sub-account ID). The semantic pipeline sets this as exch_account_code on outbound balance/position publications so OMS can link exchange-owned state to the managed account."
+    },
     "venue": {
       "type": "string",
       "description": "Venue adaptor to load, for example simulator, okx, ibkr, or oanda."

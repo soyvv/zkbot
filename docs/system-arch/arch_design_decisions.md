@@ -139,6 +139,37 @@ Rules:
 - drift detection compares desired config from service-specific table vs live effective config
   from runtime introspection
 
+### Config editing binds to latest active schema by default (2026-03-24)
+
+Normal control-plane config editing should resolve schema versions at edit time from the active
+schema registry state, not from stale schema provenance stored on an existing instance row.
+
+Rules:
+
+- OMS and ENGINE config editing uses the latest active service-kind schema
+- GW and MDGW config editing uses:
+  - the latest active service-kind schema
+  - the latest active venue-capability schema for the selected venue
+- REFDATA config editing uses the latest active venue-capability schema for the selected venue
+- the normal UI flow should show resolved schema versions as read-only metadata
+- schema version selection should not be part of the normal operator-facing edit flow
+
+Persistence rule:
+
+- when desired config is edited and saved, Pilot should update both:
+  - `provided_config`
+  - schema provenance fields (`schema_resource_key`, `schema_version`, `schema_content_hash`,
+    and venue-schema provenance where applicable)
+
+Rationale:
+
+- operators edit config, not schema release topology
+- using the latest active schema keeps editing aligned with current control-plane policy
+- showing resolved versions preserves auditability without exposing a confusing version matrix in the
+  UI
+- manual schema pinning may exist later as an advanced admin-only workflow, but it is not the
+  default design
+
 ## zk-trading-sdk-rs (Phase 7)
 
 ### service_type case: case-insensitive matching with lowercase contract

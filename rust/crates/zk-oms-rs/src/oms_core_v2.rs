@@ -146,8 +146,12 @@ impl OmsCoreV2 {
             if let Some(sym) = asset_sym {
                 if let Some(&asset_id) = self.metadata.asset_by_symbol.get(&sym) {
                     self.balances.set_balance(snap.account_id, asset_id, snap);
+                    continue;
                 }
             }
+            let asset = snap.asset.clone();
+            self.balances
+                .set_unknown_balance(snap.account_id, &asset, snap);
         }
     }
 
@@ -1055,24 +1059,32 @@ impl OmsCoreV2 {
                             _ => ExecType::Unspecified,
                         };
                         if oms_exec_type != ExecType::Unspecified {
-                            if let Some(err_info) = &exec_report.error_info {
-                                let msg = format!(
+                            let rejection =
+                                exec_report.rejection_info.clone().unwrap_or_default();
+                            let msg = if let Some(err_info) = &exec_report.error_info {
+                                format!(
                                     "err from gw: code={}, msg={}",
                                     err_info.error_code, err_info.error_message
-                                );
-                                let (live, detail) =
-                                    self.orders.get_live_and_detail_mut(order_id).unwrap();
-                                OrderStoreV2::apply_oms_error(
-                                    live,
-                                    detail,
-                                    &msg,
-                                    ts,
-                                    oms_exec_type as i32,
-                                    exec_report.rejection_info.clone().unwrap_or_default(),
-                                );
-                                new_exec_msg = true;
-                                original_order_updated = true;
-                            }
+                                )
+                            } else if !rejection.error_message.is_empty() {
+                                rejection.error_message.clone()
+                            } else if !exec_report.exec_message.is_empty() {
+                                exec_report.exec_message.clone()
+                            } else {
+                                "gateway execution rejected request".to_string()
+                            };
+                            let (live, detail) =
+                                self.orders.get_live_and_detail_mut(order_id).unwrap();
+                            OrderStoreV2::apply_oms_error(
+                                live,
+                                detail,
+                                &msg,
+                                ts,
+                                oms_exec_type as i32,
+                                rejection,
+                            );
+                            new_exec_msg = true;
+                            original_order_updated = true;
                         }
                     }
                 }
@@ -1294,6 +1306,7 @@ impl OmsCoreV2 {
                     .and_then(|s| self.metadata.asset_by_symbol.get(&s).copied());
 
                 if let Some(asset_id) = asset_id {
+                    self.balances.remove_unknown_balance(account_id, asset);
                     let snap = self.balances.get_or_create_balance(account_id, asset_id);
                     snap.symbol_exch = Some(entry.instrument_code.clone());
                     snap.balance_state.account_id = account_id;
@@ -1312,6 +1325,26 @@ impl OmsCoreV2 {
                         account_id,
                         asset_id,
                     });
+                } else {
+                    let snap = ExchBalanceSnapshot {
+                        account_id,
+                        asset: asset.clone(),
+                        symbol_exch: Some(entry.instrument_code.clone()),
+                        balance_state: Balance {
+                            account_id,
+                            asset: asset.clone(),
+                            total_qty: entry.qty,
+                            frozen_qty: entry.qty - entry.avail_qty,
+                            avail_qty: entry.avail_qty,
+                            sync_timestamp: ts,
+                            update_timestamp: entry.update_timestamp,
+                            is_from_exch: true,
+                            exch_data_raw: entry.message_raw.clone(),
+                        },
+                        exch_data_raw: entry.message_raw.clone(),
+                        sync_ts: ts,
+                    };
+                    self.balances.set_unknown_balance(account_id, asset, snap);
                 }
             }
         }
@@ -1536,12 +1569,18 @@ impl OmsCoreV2 {
         } else {
             gen_timestamp_ms()
         };
-        let balances: Vec<Balance> = self
+        let mut balances: Vec<Balance> = self
             .balances
             .get_balances_for_account(account_id)
             .iter()
             .map(|snap| snap.balance_state.clone())
             .collect();
+        balances.extend(
+            self.balances
+                .get_unknown_balances_for_account(account_id)
+                .iter()
+                .map(|snap| snap.balance_state.clone()),
+        );
         Some(BalanceUpdateEvent {
             account_id,
             balance_snapshots: balances,

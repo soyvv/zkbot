@@ -18,7 +18,8 @@ use tracing::{info, warn};
 use crate::proto::gw_svc::gateway_service_client::GatewayServiceClient;
 use zk_proto_rs::zk::gateway::v1::{
     AccountResponse, BatchCancelOrdersRequest, BatchSendOrdersRequest, CancelOrderRequest,
-    GatewayResponse, QueryAccountRequest, SendOrderRequest,
+    GatewayResponse, OrderDetailResponse, QueryAccountRequest, QueryOpenOrderRequest,
+    QueryOrderDetailRequest, SendOrderRequest,
 };
 
 pub type GatewayClient = GatewayServiceClient<Channel>;
@@ -46,7 +47,7 @@ impl GwClientPool {
         addr: &str,
     ) -> Result<(), tonic::transport::Error> {
         let endpoint = Endpoint::from_shared(addr.to_string())
-            .expect("invalid gateway address")
+            ?
             .connect_timeout(Duration::from_secs(5))
             .tcp_keepalive(Some(Duration::from_secs(30)));
 
@@ -161,6 +162,38 @@ impl GwClientPool {
             .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
         let resp = client
             .query_account_balance(tonic::Request::new(req))
+            .await
+            .map_err(GwError::Rpc)?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn query_order_details(
+        &mut self,
+        gw_key: &str,
+        req: QueryOrderDetailRequest,
+    ) -> Result<OrderDetailResponse, GwError> {
+        let client = self
+            .clients
+            .get_mut(gw_key)
+            .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
+        let resp = client
+            .query_order_details(tonic::Request::new(req))
+            .await
+            .map_err(GwError::Rpc)?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn query_open_orders(
+        &mut self,
+        gw_key: &str,
+        req: QueryOpenOrderRequest,
+    ) -> Result<OrderDetailResponse, GwError> {
+        let client = self
+            .clients
+            .get_mut(gw_key)
+            .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
+        let resp = client
+            .query_open_orders(tonic::Request::new(req))
             .await
             .map_err(GwError::Rpc)?;
         Ok(resp.into_inner())

@@ -114,6 +114,8 @@ pub enum OmsCommand {
     RecheckOrder(OrderRecheckRequest),
     RecheckCancel(CancelRecheckRequest),
     PositionRecheck,
+    /// Periodic order reconciliation against gateways.
+    OrderReconcile,
     /// Gateway worker failed to send order (gRPC error). Feedback from gw_worker.
     GatewaySendFailed {
         order_id: i64,
@@ -203,6 +205,19 @@ async fn oms_writer_loop(
                     info!("OMS command channel closed");
                     break;
                 };
+                // Handle OrderReconcile in async context (needs gateway queries).
+                if matches!(cmd, OmsCommand::OrderReconcile) {
+                    run_order_reconcile(
+                        &mut core,
+                        &mut writer,
+                        &replica,
+                        &mut redis,
+                        &mut gw_pool,
+                        &mut persist_executor,
+                        &mut publish_executor,
+                    )
+                    .await;
+                } else {
                 process_command(
                     cmd,
                     &mut core,
@@ -216,6 +231,7 @@ async fn oms_writer_loop(
                     &mut publish_executor,
                     &mut tracker,
                 );
+                }
 
                 // Drain latency events inline — the biased select starves
                 // lower-priority branches while the cmd channel has work.
@@ -377,6 +393,7 @@ fn process_command(
         OmsCommand::RecheckOrder(r) => (OmsMessage::RecheckOrder(r), None),
         OmsCommand::RecheckCancel(r) => (OmsMessage::RecheckCancel(r), None),
         OmsCommand::PositionRecheck => (OmsMessage::PositionRecheck, None),
+        OmsCommand::OrderReconcile => return, // handled in writer loop (async context)
         OmsCommand::GatewaySendFailed {
             order_id,
             gw_id,
@@ -871,8 +888,236 @@ fn build_persist_position(
     })
 }
 
+// ── Periodic order reconciliation ────────────────────────────────────────────
+
+async fn run_order_reconcile(
+    core: &mut OmsCoreV2,
+    writer: &mut OmsSnapshotWriterV2,
+    replica: &ReadReplica,
+    redis: &mut RedisWriter,
+    gw_pool: &mut GwClientPool,
+    persist_executor: &mut PersistExecutorPool,
+    publish_executor: &mut PublishExecutorPool,
+) {
+    use crate::reconcile;
+    use zk_proto_rs::zk::gateway::v1::{
+        QueryOpenOrderRequest, QueryOrderDetailRequest, SingleOrderQuery,
+    };
+
+    let snapshots = reconcile::extract_open_order_snapshots(core);
+    if snapshots.is_empty() {
+        return;
+    }
+
+    let now_ms = zk_oms_rs::utils::gen_timestamp_ms();
+    let gw_keys: Vec<String> = gw_pool.gw_keys().map(String::from).collect();
+    let mut any_changes = false;
+
+    for gw_key in &gw_keys {
+        // Phase 1: QueryOpenOrders
+        let req = QueryOpenOrderRequest {
+            exch_account_code: String::new(),
+        };
+        let gw_result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            gw_pool.query_open_orders(gw_key, req),
+        )
+        .await;
+        let gw_open_orders = match gw_result {
+            Ok(Ok(resp)) => resp.orders,
+            Ok(Err(e)) => {
+                warn!(gw_key, error = %e, "order reconcile: open orders query failed, skipping");
+                continue;
+            }
+            Err(_) => {
+                warn!(gw_key, "order reconcile: open orders query timed out, skipping");
+                continue;
+            }
+        };
+
+        let (reports, needs_detail, stats) = reconcile::reconcile_orders_against_gateway(
+            &snapshots,
+            &gw_open_orders,
+            gw_key,
+            now_ms,
+        );
+        if stats.orders_updated > 0 || stats.orders_need_detail > 0 || stats.orders_rejected > 0 {
+            info!(
+                gw_key,
+                matched = stats.orders_matched,
+                updated = stats.orders_updated,
+                need_detail = stats.orders_need_detail,
+                rejected = stats.orders_rejected,
+                "periodic order reconcile phase 1",
+            );
+        } else {
+            tracing::debug!(
+                gw_key,
+                matched = stats.orders_matched,
+                "periodic order reconcile: no changes",
+            );
+        }
+
+        // Apply immediate reports (state divergence + no-exch-ref rejects).
+        for report in reports {
+            dispatch_reconcile_report(
+                report, core, writer, redis, persist_executor, publish_executor,
+            )
+            .await;
+            any_changes = true;
+        }
+
+        // Phase 2: QueryOrderDetails for orders absent from open set.
+        if !needs_detail.is_empty() {
+            let queries: Vec<SingleOrderQuery> = needs_detail
+                .iter()
+                .map(|snap| SingleOrderQuery {
+                    exch_order_ref: snap.exch_order_ref.clone().unwrap_or_default(),
+                    order_id: snap.order_id,
+                    symbol: snap.instrument.clone(),
+                    ..Default::default()
+                })
+                .collect();
+            let detail_req = QueryOrderDetailRequest {
+                order_queries: queries,
+            };
+            let detail_result = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                gw_pool.query_order_details(gw_key, detail_req),
+            )
+            .await;
+            let detail_orders = match detail_result {
+                Ok(Ok(resp)) => resp.orders,
+                Ok(Err(e)) => {
+                    warn!(gw_key, error = %e, "order reconcile: detail query failed, using fallback");
+                    vec![]
+                }
+                Err(_) => {
+                    warn!(gw_key, "order reconcile: detail query timed out, using fallback");
+                    vec![]
+                }
+            };
+
+            for snap in &needs_detail {
+                let report = reconcile::resolve_missing_order(snap, &detail_orders, now_ms);
+                dispatch_reconcile_report(
+                    report, core, writer, redis, persist_executor, publish_executor,
+                )
+                .await;
+                any_changes = true;
+            }
+            info!(
+                gw_key,
+                terminated = needs_detail.len(),
+                detail_found = detail_orders.len(),
+                "periodic order reconcile phase 2",
+            );
+        }
+    }
+
+    if any_changes {
+        publish_snapshot(core, writer, replica, true, false);
+    }
+}
+
+/// Feed a synthetic reconciliation report through the core state machine
+/// and dispatch the resulting persist/publish actions.
+async fn dispatch_reconcile_report(
+    report: OrderReport,
+    core: &mut OmsCoreV2,
+    writer: &mut OmsSnapshotWriterV2,
+    redis: &mut RedisWriter,
+    persist_executor: &mut PersistExecutorPool,
+    publish_executor: &mut PublishExecutorPool,
+) {
+    let actions =
+        core.process_message(zk_oms_rs::models::OmsMessage::GatewayOrderReport(report));
+
+    for action in &actions {
+        match action {
+            OmsActionV2::PersistOrder {
+                order_id,
+                set_expire,
+                set_closed,
+            } => {
+                if let Some(live) = core.orders.get_live(*order_id) {
+                    let snap_order =
+                        build_snapshot_order_from_live(live, &core.orders.dyn_strings);
+                    writer.apply_order_update(snap_order, *set_closed);
+                }
+                if let Some(live) = core.orders.get_live(*order_id) {
+                    if let Some(detail) = core.orders.get_detail(*order_id) {
+                        let snap_detail = build_snapshot_detail_from_core(
+                            *order_id,
+                            live,
+                            detail,
+                            &core.metadata,
+                            &core.orders.dyn_strings,
+                        );
+                        writer.apply_order_detail(snap_detail);
+                    }
+                }
+                if let Some(persisted) = build_persisted_order(core, *order_id) {
+                    let pa = PersistAction::Order {
+                        order: persisted,
+                        set_expire: *set_expire,
+                        set_closed: *set_closed,
+                    };
+                    persist_executor.try_dispatch(pa);
+                }
+            }
+            OmsActionV2::PersistBalance {
+                account_id,
+                asset_id,
+            } => {
+                persist_balance_to_redis(core, redis, *account_id, *asset_id).await;
+            }
+            OmsActionV2::PublishOrderUpdate {
+                order_id,
+                include_last_trade,
+                include_last_fee,
+                include_exec_message,
+                include_inferred_trade,
+            } => {
+                if let Some(event) = core.build_order_update_event(
+                    *order_id,
+                    *include_last_trade,
+                    *include_last_fee,
+                    *include_exec_message,
+                    *include_inferred_trade,
+                ) {
+                    let pa = PublishAction::OrderUpdate {
+                        event,
+                        latency_ctx: None,
+                    };
+                    publish_executor.dispatch(*order_id, pa);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 // ── Shared Redis persistence helpers ─────────────────────────────────────────
 // Used by both the writer loop and startup reconciliation in main.rs.
+
+/// Persist an order to Redis (used by startup reconciliation).
+pub async fn persist_order_to_redis(
+    core: &OmsCoreV2,
+    redis: &mut RedisWriter,
+    order_id: i64,
+) {
+    if let Some(persisted) = build_persisted_order(core, order_id) {
+        let is_terminal = core
+            .orders
+            .get_live(order_id)
+            .map(|l| l.is_in_terminal_state())
+            .unwrap_or(false);
+        if let Err(e) = redis.write_order(&persisted, is_terminal, is_terminal).await {
+            warn!(order_id, error = %e, "Redis write_order failed (reconcile)");
+        }
+    }
+}
 
 /// Persist a balance snapshot to Redis.
 pub async fn persist_balance_to_redis(
@@ -1021,7 +1266,7 @@ pub fn build_exch_balances(
     Vec<ExchBalanceSnapshot>,
 ) {
     let mut resolved = HashMap::new();
-    let mut unknown = Vec::new();
+    let mut unknown: Vec<ExchBalanceSnapshot> = core.balances.all_unknown_balances().cloned().collect();
     for snap in core.balances.all_balances() {
         let asset_sym = core.metadata.strings.lookup(&snap.asset);
         let asset_id = asset_sym.and_then(|s| core.metadata.asset_by_symbol.get(&s).copied());

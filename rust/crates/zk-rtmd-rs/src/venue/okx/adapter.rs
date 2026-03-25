@@ -337,6 +337,7 @@ async fn ws_supervisor_loop(
             &mut shutdown_rx,
             &active_subs,
             &reverse_map,
+            ready_tx.take(),
         )
         .await
         {
@@ -350,11 +351,7 @@ async fn ws_supervisor_loop(
                 error!(error = %error, "OKX public WS session failed");
 
                 if established {
-                    // Session connected then dropped — signal readiness (first time)
-                    // and reset backoff.
-                    if let Some(tx) = ready_tx.take() {
-                        let _ = tx.send(Ok(()));
-                    }
+                    // Session connected then dropped — reset backoff.
                     backoff_ms = 1000;
                 } else if let Some(tx) = ready_tx.take() {
                     // First connect attempt failed — tell connect() caller.
@@ -377,6 +374,7 @@ async fn run_ws_session(
     shutdown_rx: &mut watch::Receiver<bool>,
     active_subs: &Arc<Mutex<HashMap<StreamKey, SubMeta>>>,
     reverse_map: &Arc<DashMap<(String, String), String>>,
+    ready_tx: Option<oneshot::Sender<Result<(), String>>>,
 ) -> SessionOutcome {
     // 1. Connect
     let (ws_stream, _) = match tokio_tungstenite::connect_async(ws_url).await {
@@ -411,6 +409,11 @@ async fn run_ws_session(
         if !subs.is_empty() {
             debug!(count = subs.len(), "re-subscribed active channels");
         }
+    }
+
+    // Signal readiness (first session only).
+    if let Some(tx) = ready_tx {
+        let _ = tx.send(Ok(()));
     }
 
     // 3. Read loop

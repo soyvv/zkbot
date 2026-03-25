@@ -1,19 +1,31 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OKX RTMD Config",
+  "description": "Venue-specific configuration for the OKX RTMD gateway. Public market data can run with defaults only; secret refs remain optional for authenticated/private extensions.",
   "type": "object",
   "properties": {
+    "demo_mode": {
+      "type": "boolean",
+      "default": false,
+      "description": "Use OKX demo market-data endpoints. When true, the runtime derives default WebSocket URLs from the demo wspap.okx.com hosts."
+    },
     "api_base_url": {
-      "type": "string"
+      "type": "string",
+      "default": "https://www.okx.com",
+      "description": "Base HTTPS URL for OKX REST market-data requests."
     },
     "ws_public_url": {
-      "type": "string"
+      "type": "string",
+      "description": "Optional override for the OKX public WebSocket endpoint. If omitted, the runtime derives the default from demo_mode."
     },
     "ws_private_url": {
-      "type": "string"
+      "type": "string",
+      "description": "Optional override for the OKX private WebSocket endpoint. Included for parity with the shared OKX config, though the current RTMD adaptor uses the public WebSocket path."
     },
     "secret_ref": {
-      "type": "string"
+      "type": "string",
+      "x-zk-secret-ref": true,
+      "description": "Optional Pilot/Vault path for the OKX credential bundle. The runtime reads `apikey`, `secretkey`, and `passphrase` from this secret."
     }
   },
   "required": [],

@@ -4,7 +4,9 @@ use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 use tracing::{info, warn};
 
-use zk_proto_rs::zk::exch_gw::v1::BalanceUpdate;
+use zk_proto_rs::zk::exch_gw::v1::{
+    BalanceUpdate, ExchangeOrderStatus, OrderReportEntry, OrderReportType, OrderStateReport,
+};
 
 use crate::gw_executor::{GwExecAction, GwExecPool};
 use crate::proto::zk_gw_v1::gateway_service_server::GatewayService;
@@ -313,9 +315,52 @@ impl GatewayService for GrpcHandler {
 
     async fn query_order_details(
         &self,
-        _request: Request<QueryOrderDetailRequest>,
+        request: Request<QueryOrderDetailRequest>,
     ) -> Result<Response<OrderDetailResponse>, Status> {
-        Ok(Response::new(OrderDetailResponse { orders: vec![] }))
+        let req = request.into_inner();
+        let mut orders = Vec::new();
+        for q in req.order_queries {
+            let venue_req = VenueOrderQuery {
+                exch_order_ref: if q.exch_order_ref.is_empty() {
+                    None
+                } else {
+                    Some(q.exch_order_ref)
+                },
+                order_id: if q.order_id == 0 {
+                    None
+                } else {
+                    Some(q.order_id)
+                },
+                instrument: if q.symbol.is_empty() {
+                    None
+                } else {
+                    Some(q.symbol)
+                },
+            };
+            match self.adapter.query_order(venue_req).await {
+                Ok(facts) => {
+                    for f in facts {
+                        orders.push(venue_order_fact_to_exch_order(&f));
+                    }
+                }
+                Err(e) => warn!(error = %e, "query_order failed for single query"),
+            }
+        }
+        Ok(Response::new(OrderDetailResponse { orders }))
+    }
+
+    async fn query_open_orders(
+        &self,
+        _request: Request<QueryOpenOrderRequest>,
+    ) -> Result<Response<OrderDetailResponse>, Status> {
+        let venue_req = VenueOpenOrdersQuery::default();
+        match self.adapter.query_open_orders(venue_req).await {
+            Ok(facts) => {
+                let orders = facts.iter().map(venue_order_fact_to_exch_order).collect();
+                Ok(Response::new(OrderDetailResponse { orders }))
+            }
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn query_account_fees(
@@ -359,6 +404,50 @@ impl GatewayService for GrpcHandler {
                 uptime_ms: 0,
             },
         ))
+    }
+}
+
+// ── Conversion helpers ──────────────────────────────────────────────────────
+
+fn venue_order_status_to_exch(s: &VenueOrderStatus) -> i32 {
+    match s {
+        VenueOrderStatus::Booked => ExchangeOrderStatus::ExchOrderStatusBooked as i32,
+        VenueOrderStatus::PartiallyFilled => {
+            ExchangeOrderStatus::ExchOrderStatusPartialFilled as i32
+        }
+        VenueOrderStatus::Filled => ExchangeOrderStatus::ExchOrderStatusFilled as i32,
+        VenueOrderStatus::Cancelled => ExchangeOrderStatus::ExchOrderStatusCancelled as i32,
+        VenueOrderStatus::Rejected => ExchangeOrderStatus::ExchOrderStatusExchRejected as i32,
+    }
+}
+
+fn venue_order_fact_to_exch_order(f: &VenueOrderFact) -> ExchOrder {
+    let state_report = OrderStateReport {
+        exch_order_status: venue_order_status_to_exch(&f.status),
+        filled_qty: f.filled_qty,
+        unfilled_qty: f.unfilled_qty,
+        avg_price: f.avg_price,
+        ..Default::default()
+    };
+    let entry = OrderReportEntry {
+        report_type: OrderReportType::OrderRepTypeState as i32,
+        report: Some(
+            zk_proto_rs::zk::exch_gw::v1::order_report_entry::Report::OrderStateReport(
+                state_report,
+            ),
+        ),
+    };
+    ExchOrder {
+        order_ref: f.exch_order_ref.clone(),
+        instrument: f.instrument.clone(),
+        order_report: Some(zk_proto_rs::zk::exch_gw::v1::OrderReport {
+            exch_order_ref: f.exch_order_ref.clone(),
+            order_id: f.order_id,
+            order_report_entries: vec![entry],
+            ..Default::default()
+        }),
+        timestamp: f.timestamp,
+        ..Default::default()
     }
 }
 

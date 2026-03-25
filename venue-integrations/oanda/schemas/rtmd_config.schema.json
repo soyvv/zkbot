@@ -1,20 +1,31 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OANDA RTMD Config",
+  "description": "Venue-specific configuration for the OANDA RTMD adaptor.",
   "type": "object",
   "properties": {
     "environment": {
       "type": "string",
-      "enum": ["practice", "live"]
+      "enum": ["practice", "live"],
+      "default": "practice",
+      "description": "OANDA environment to connect to. Practice uses the demo endpoints; live uses the production endpoints."
     },
     "account_id": {
-      "type": "string"
+      "type": "string",
+      "description": "OANDA account identifier used to authorize pricing and candle queries."
+    },
+    "api_base_url": {
+      "type": "string",
+      "description": "Optional override for the OANDA REST API base URL used for historical candle and snapshot queries."
     },
     "stream_base_url": {
-      "type": "string"
+      "type": "string",
+      "description": "Optional override for the OANDA pricing stream base URL. If omitted, the adaptor derives the default from environment."
     },
     "secret_ref": {
-      "type": "string"
+      "type": "string",
+      "x-zk-secret-ref": true,
+      "description": "Pilot/Vault logical reference for the OANDA API bearer token."
     }
   },
   "required": ["environment", "account_id", "secret_ref"],

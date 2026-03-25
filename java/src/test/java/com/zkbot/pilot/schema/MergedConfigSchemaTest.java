@@ -57,10 +57,9 @@ class MergedConfigSchemaTest {
               "type": "object",
               "properties": {
                 "api_base_url": { "type": "string" },
-                "secret_ref": { "type": "string", "x-zk-secret-ref": true },
-                "passphrase_ref": { "type": "string", "x-zk-secret-ref": true }
+                "secret_ref": { "type": "string", "x-zk-secret-ref": true }
               },
-              "required": ["secret_ref", "passphrase_ref"]
+              "required": ["secret_ref"]
             }
             """;
 
@@ -130,7 +129,7 @@ class MergedConfigSchemaTest {
         assertThat(venueConfig.get("title").asText()).isEqualTo("OKX Gateway Config");
         assertThat(venueConfig.at("/properties/api_base_url/type").asText()).isEqualTo("string");
         assertThat(venueConfig.at("/properties/secret_ref/x-zk-secret-ref").asBoolean()).isTrue();
-        assertThat(venueConfig.at("/properties/passphrase_ref/x-zk-secret-ref").asBoolean()).isTrue();
+        assertThat(venueConfig.at("/properties/passphrase_ref").isMissingNode()).isTrue();
 
         // OKX fields NOT at top level
         assertThat(root.at("/properties/api_base_url").isMissingNode()).isTrue();

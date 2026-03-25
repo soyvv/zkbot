@@ -70,7 +70,7 @@ public class TopologyRepository {
     }
 
     public Map<String, Object> getGatewayInstance(String gwId) {
-        var rows = jdbc.queryForList("SELECT gw_id, venue, broker_type, account_type FROM cfg.gateway_instance WHERE gw_id = ?", gwId);
+        var rows = jdbc.queryForList("SELECT gw_id, venue, broker_type, account_type, provided_config FROM cfg.gateway_instance WHERE gw_id = ?", gwId);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
@@ -116,6 +116,109 @@ public class TopologyRepository {
                 """, mdgwId, venue, providedConfigJson,
                 schemaResourceType, schemaResourceKey, schemaVersion, schemaContentHash,
                 venueSchemaResourceKey, venueSchemaVersion, venueSchemaContentHash);
+    }
+
+    // --- Read service config by kind ---
+
+    public Map<String, Object> getOmsInstance(String omsId) {
+        var rows = jdbc.queryForList(
+                "SELECT oms_id, provided_config FROM cfg.oms_instance WHERE oms_id = ?", omsId);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    public Map<String, Object> getEngineInstance(String engineId) {
+        var rows = jdbc.queryForList(
+                "SELECT engine_id, provided_config FROM cfg.engine_instance WHERE engine_id = ?", engineId);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    public Map<String, Object> getMdgwInstance(String mdgwId) {
+        var rows = jdbc.queryForList(
+                "SELECT mdgw_id, venue, provided_config FROM cfg.mdgw_instance WHERE mdgw_id = ?", mdgwId);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    // --- Update service config by kind ---
+
+    public void updateOmsConfig(String omsId, String providedConfigJson,
+                                 String schemaResourceType, String schemaResourceKey,
+                                 Integer schemaVersion, String schemaContentHash) {
+        jdbc.update("""
+                UPDATE cfg.oms_instance SET provided_config = ?::jsonb,
+                    schema_resource_type = ?, schema_resource_key = ?,
+                    schema_version = ?, schema_content_hash = ?
+                WHERE oms_id = ?
+                """, providedConfigJson,
+                schemaResourceType, schemaResourceKey, schemaVersion, schemaContentHash,
+                omsId);
+    }
+
+    public void updateGatewayConfig(String gwId, String providedConfigJson,
+                                     String schemaResourceType, String schemaResourceKey,
+                                     Integer schemaVersion, String schemaContentHash,
+                                     String venueSchemaResourceKey, Integer venueSchemaVersion,
+                                     String venueSchemaContentHash) {
+        jdbc.update("""
+                UPDATE cfg.gateway_instance SET provided_config = ?::jsonb,
+                    schema_resource_type = ?, schema_resource_key = ?,
+                    schema_version = ?, schema_content_hash = ?,
+                    venue_schema_resource_key = ?, venue_schema_version = ?,
+                    venue_schema_content_hash = ?
+                WHERE gw_id = ?
+                """, providedConfigJson,
+                schemaResourceType, schemaResourceKey, schemaVersion, schemaContentHash,
+                venueSchemaResourceKey, venueSchemaVersion, venueSchemaContentHash,
+                gwId);
+    }
+
+    public void updateEngineConfig(String engineId, String providedConfigJson,
+                                    String schemaResourceType, String schemaResourceKey,
+                                    Integer schemaVersion, String schemaContentHash) {
+        jdbc.update("""
+                UPDATE cfg.engine_instance SET provided_config = ?::jsonb,
+                    schema_resource_type = ?, schema_resource_key = ?,
+                    schema_version = ?, schema_content_hash = ?
+                WHERE engine_id = ?
+                """, providedConfigJson,
+                schemaResourceType, schemaResourceKey, schemaVersion, schemaContentHash,
+                engineId);
+    }
+
+    public void updateMdgwConfig(String mdgwId, String providedConfigJson,
+                                  String schemaResourceType, String schemaResourceKey,
+                                  Integer schemaVersion, String schemaContentHash,
+                                  String venueSchemaResourceKey, Integer venueSchemaVersion,
+                                  String venueSchemaContentHash) {
+        jdbc.update("""
+                UPDATE cfg.mdgw_instance SET provided_config = ?::jsonb,
+                    schema_resource_type = ?, schema_resource_key = ?,
+                    schema_version = ?, schema_content_hash = ?,
+                    venue_schema_resource_key = ?, venue_schema_version = ?,
+                    venue_schema_content_hash = ?
+                WHERE mdgw_id = ?
+                """, providedConfigJson,
+                schemaResourceType, schemaResourceKey, schemaVersion, schemaContentHash,
+                venueSchemaResourceKey, venueSchemaVersion, venueSchemaContentHash,
+                mdgwId);
+    }
+
+    public void updateRefdataVenueConfig(String logicalId, String providedConfigJson,
+                                          String schemaResourceKey, Integer schemaVersion,
+                                          String schemaContentHash) {
+        jdbc.update("""
+                UPDATE cfg.refdata_venue_instance
+                SET provided_config = ?::jsonb,
+                    schema_resource_key = ?, schema_version = ?,
+                    schema_content_hash = ?
+                WHERE logical_id = ?
+                """, providedConfigJson,
+                schemaResourceKey, schemaVersion, schemaContentHash,
+                logicalId);
+    }
+
+    public void updateLogicalInstanceEnabled(String logicalId, boolean enabled) {
+        jdbc.update("UPDATE cfg.logical_instance SET enabled = ? WHERE logical_id = ?",
+                enabled, logicalId);
     }
 
     // --- Refdata venue instances ---

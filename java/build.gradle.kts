@@ -45,6 +45,7 @@ dependencies {
 
     implementation("io.micrometer:micrometer-registry-prometheus")
     implementation("com.fasterxml.jackson.core:jackson-databind")
+    implementation("com.networknt:json-schema-validator:1.5.6")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")

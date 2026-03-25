@@ -203,6 +203,7 @@ service GatewayService {
     rpc QueryAccountBalance(QueryAccountRequest) returns (AccountResponse);
     rpc QueryPosition(QueryPositionRequest) returns (PositionResponse);
     rpc QueryOrderDetails(QueryOrderDetailRequest) returns (OrderDetailResponse);
+    rpc QueryOpenOrders(QueryOpenOrderRequest) returns (OrderDetailResponse);
     rpc QueryAccountFees(QueryFeeRequest) returns (FeeResponse);
     rpc QueryOrderTrades(QueryOrderTradesRequest) returns (OrderTradesResponse);
 

@@ -70,12 +70,22 @@ public class AccountService {
     }
 
     public AccountSummaryResponse updateAccount(long accountId, UpdateAccountRequest req) {
-        repository.updateAccount(accountId, req.status());
         Map<String, Object> account = repository.getAccount(accountId);
         if (account == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Account not found: " + accountId);
         }
-        return toAccountSummary(account, null, null);
+        repository.updateAccount(accountId, req.status());
+
+        if (req.omsId() != null && req.gwId() != null) {
+            repository.deleteAccountBindings(accountId);
+            repository.upsertAccountBinding(accountId, req.omsId(), req.gwId());
+        }
+
+        Map<String, Object> binding = repository.getAccountBinding(accountId);
+        AccountBindingResponse bindingDto = binding != null ? toBindingResponse(binding) : null;
+        // re-read account in case status changed
+        account = repository.getAccount(accountId);
+        return toAccountSummary(account, bindingDto, null);
     }
 
     public List<BalanceEntry> getBalances(long accountId) {

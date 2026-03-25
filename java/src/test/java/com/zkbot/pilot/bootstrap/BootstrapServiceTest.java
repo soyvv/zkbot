@@ -292,22 +292,23 @@ class BootstrapServiceTest {
         when(tokenService.validate("token", "gw_okx_1", "GW", "test")).thenReturn("jti-1");
         when(repository.findSessionForLogical("gw_okx_1", "GW")).thenReturn(null);
 
-        String venueConfig = "{\"secret_ref\":\"okx/main\",\"passphrase_ref\":\"okx/main\",\"api_base_url\":\"https://example.com\"}";
+        String venueConfig = """
+                {"venue":"okx","venue_config":{"secret_ref":"okx/main","api_base_url":"https://example.com"}}
+                """;
         when(desiredConfigRepo.getDesiredConfig("gw_okx_1", "GW"))
                 .thenReturn(new DesiredConfigRepository.DesiredConfig(venueConfig, 1, "abc"));
 
         // Schema locator returns venue_capability descriptors with secret_ref fields
         when(schemaLocator.resolveFieldDescriptors("gw_okx_1", "GW")).thenReturn(List.of(
-                Map.of("path", "/secret_ref", "secret_ref", true, "reloadable", false),
-                Map.of("path", "/passphrase_ref", "secret_ref", true, "reloadable", false),
-                Map.of("path", "/api_base_url", "reloadable", false)
+                Map.of("path", "/venue_config/secret_ref", "secret_ref", true, "reloadable", false),
+                Map.of("path", "/venue_config/api_base_url", "reloadable", false)
         ));
 
         invokeHandleRegister(msg);
 
         var response = captureRegisterResponse(msg);
         assertThat(response.getStatus()).isEqualTo("OK");
-        assertThat(response.getSecretRefsList()).hasSize(2);
+        assertThat(response.getSecretRefsList()).hasSize(1);
         assertThat(response.getSecretRefsList().get(0).getLogicalRef()).isEqualTo("okx/main");
         assertThat(response.getSecretRefsList().get(0).getFieldKey()).isEqualTo("secret_ref");
     }

@@ -789,7 +789,7 @@ fn build_error_event(order: &OmsOrder) -> OrderUpdateEvent {
     event
 }
 
-fn map_order_status(gw_status: ExchangeOrderStatus) -> OrderStatus {
+pub fn map_order_status(gw_status: ExchangeOrderStatus) -> OrderStatus {
     match gw_status {
         ExchangeOrderStatus::ExchOrderStatusBooked => OrderStatus::Booked,
         ExchangeOrderStatus::ExchOrderStatusPartialFilled => OrderStatus::PartiallyFilled,

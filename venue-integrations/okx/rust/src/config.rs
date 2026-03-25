@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use serde_json::Value;
 
 fn default_api_base() -> String {
     "https://www.okx.com".to_string()
@@ -21,6 +22,10 @@ pub struct OkxConfig {
     #[serde(default)]
     pub passphrase: String,
     #[serde(default)]
+    pub secret_ref: String,
+    #[serde(default)]
+    pub passphrase_ref: String,
+    #[serde(default)]
     pub demo_mode: bool,
     #[serde(default = "default_api_base")]
     pub api_base_url: String,
@@ -35,26 +40,38 @@ pub struct OkxConfig {
 impl OkxConfig {
     /// Resolve `env:VAR_NAME` references in credential fields and fill WS URL default.
     pub fn resolve_secrets(mut self) -> anyhow::Result<Self> {
+        if (!self.secret_ref.is_empty()) && (self.api_key.is_empty() || self.secret_key.is_empty() || self.passphrase.is_empty()) {
+            let secret_doc = read_vault_secret(&self.secret_ref)?;
+            if self.api_key.is_empty() {
+                self.api_key = read_secret_field(&secret_doc, &self.secret_ref, "apikey")?;
+            }
+            if self.secret_key.is_empty() {
+                self.secret_key = read_secret_field(&secret_doc, &self.secret_ref, "secretkey")?;
+            }
+            if self.passphrase.is_empty() && self.passphrase_ref.is_empty() {
+                self.passphrase = read_secret_field(&secret_doc, &self.secret_ref, "passphrase")?;
+            }
+        }
+
+        if self.passphrase.is_empty() && !self.passphrase_ref.is_empty() {
+            let passphrase_doc = read_vault_secret(&self.passphrase_ref)?;
+            self.passphrase = read_secret_field(&passphrase_doc, &self.passphrase_ref, "passphrase")?;
+        }
+
         self.api_key = resolve_env_ref(&self.api_key, "api_key")?;
         self.secret_key = resolve_env_ref(&self.secret_key, "secret_key")?;
         self.passphrase = resolve_env_ref(&self.passphrase, "passphrase")?;
 
-        // Fill WS URL default based on demo_mode if not explicitly set.
-        if self.ws_private_url.is_none() {
-            self.ws_private_url = Some(if self.demo_mode {
-                "wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999".to_string()
-            } else {
-                "wss://ws.okx.com:8443/ws/v5/private".to_string()
-            });
-        }
-
-        if self.ws_public_url.is_none() {
-            self.ws_public_url = Some(if self.demo_mode {
-                "wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999".to_string()
-            } else {
-                "wss://ws.okx.com:8443/ws/v5/public".to_string()
-            });
-        }
+        self.ws_private_url = Some(resolve_ws_url(
+            self.ws_private_url.take(),
+            self.demo_mode,
+            WsChannel::Private,
+        ));
+        self.ws_public_url = Some(resolve_ws_url(
+            self.ws_public_url.take(),
+            self.demo_mode,
+            WsChannel::Public,
+        ));
 
         Ok(self)
     }
@@ -79,11 +96,31 @@ impl OkxConfig {
             api_key: String::new(),
             secret_key: String::new(),
             passphrase: String::new(),
+            secret_ref: String::new(),
+            passphrase_ref: String::new(),
             demo_mode,
             api_base_url: default_api_base(),
             ws_private_url: None,
             ws_public_url: None,
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum WsChannel {
+    Private,
+    Public,
+}
+
+fn resolve_ws_url(url: Option<String>, demo_mode: bool, channel: WsChannel) -> String {
+    match url {
+        Some(value) if !value.trim().is_empty() => value,
+        _ => match (demo_mode, channel) {
+            (true, WsChannel::Private) => "wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999".to_string(),
+            (false, WsChannel::Private) => "wss://ws.okx.com:8443/ws/v5/private".to_string(),
+            (true, WsChannel::Public) => "wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999".to_string(),
+            (false, WsChannel::Public) => "wss://ws.okx.com:8443/ws/v5/public".to_string(),
+        },
     }
 }
 
@@ -97,6 +134,53 @@ fn resolve_env_ref(value: &str, field_name: &str) -> anyhow::Result<String> {
     } else {
         Ok(value.to_string())
     }
+}
+
+fn normalize_vault_path(path: &str) -> String {
+    if path.starts_with("kv/") {
+        path.to_string()
+    } else {
+        format!("kv/{path}")
+    }
+}
+
+fn read_vault_secret(secret_path: &str) -> anyhow::Result<Value> {
+    let vault_addr = std::env::var("VAULT_ADDR")
+        .map_err(|_| anyhow::anyhow!("VAULT_ADDR is required to resolve OKX secret_ref `{secret_path}`"))?;
+    let vault_token = std::env::var("VAULT_TOKEN")
+        .map_err(|_| anyhow::anyhow!("VAULT_TOKEN is required to resolve OKX secret_ref `{secret_path}`"))?;
+
+    let normalized = normalize_vault_path(secret_path);
+    let (mount, rest) = normalized
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("invalid Vault path `{secret_path}`"))?;
+    let url = format!("{}/v1/{}/data/{}", vault_addr.trim_end_matches('/'), mount, rest);
+
+    let response = reqwest::blocking::Client::new()
+        .get(url)
+        .header("X-Vault-Token", vault_token)
+        .send()
+        .map_err(|e| anyhow::anyhow!("failed to read Vault secret `{secret_path}`: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "failed to read Vault secret `{secret_path}`: HTTP {}",
+            response.status()
+        ));
+    }
+
+    response
+        .json::<Value>()
+        .map_err(|e| anyhow::anyhow!("failed to parse Vault response for `{secret_path}`: {e}"))
+}
+
+fn read_secret_field(doc: &Value, secret_path: &str, field: &str) -> anyhow::Result<String> {
+    doc.get("data")
+        .and_then(|v| v.get("data"))
+        .and_then(|v| v.get(field))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow::anyhow!("Vault secret `{secret_path}` missing field `{field}`"))
 }
 
 #[cfg(test)]
@@ -171,11 +255,41 @@ mod tests {
     }
 
     #[test]
+    fn test_blank_private_ws_url_defaults_from_demo_mode() {
+        let json = r#"{"api_key":"k","secret_key":"s","passphrase":"p","demo_mode":true,"ws_private_url":""}"#;
+        let cfg: OkxConfig = serde_json::from_str(json).unwrap();
+        let cfg = cfg.resolve_secrets().unwrap();
+        assert_eq!(cfg.ws_url(), "wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999");
+    }
+
+    #[test]
+    fn test_blank_public_ws_url_defaults_from_demo_mode() {
+        let json = r#"{"api_key":"k","secret_key":"s","passphrase":"p","demo_mode":true,"ws_public_url":"   "}"#;
+        let cfg: OkxConfig = serde_json::from_str(json).unwrap();
+        let cfg = cfg.resolve_secrets().unwrap();
+        assert_eq!(cfg.ws_public_url(), "wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999");
+    }
+
+    #[test]
     fn test_public_only() {
         let cfg = OkxConfig::public_only(true);
         assert!(cfg.demo_mode);
         assert!(cfg.api_key.is_empty());
         let cfg = cfg.resolve_secrets().unwrap();
         assert!(cfg.ws_public_url().contains("wspap.okx.com"));
+    }
+
+    #[test]
+    fn test_normalize_vault_path() {
+        assert_eq!(normalize_vault_path("trading/gw/8002"), "kv/trading/gw/8002");
+        assert_eq!(normalize_vault_path("kv/trading/gw/8002"), "kv/trading/gw/8002");
+    }
+
+    #[test]
+    fn test_read_secret_field() {
+        let doc: Value = serde_json::from_str(r#"{"data":{"data":{"apikey":"a","secretkey":"b","passphrase":"c"}}}"#).unwrap();
+        assert_eq!(read_secret_field(&doc, "trading/gw/8002", "apikey").unwrap(), "a");
+        assert_eq!(read_secret_field(&doc, "trading/gw/8002", "secretkey").unwrap(), "b");
+        assert_eq!(read_secret_field(&doc, "trading/gw/8002", "passphrase").unwrap(), "c");
     }
 }

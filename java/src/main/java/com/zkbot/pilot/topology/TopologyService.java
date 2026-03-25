@@ -1,12 +1,18 @@
 package com.zkbot.pilot.topology;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.networknt.schema.JsonSchema;
+import com.networknt.schema.JsonSchemaFactory;
+import com.networknt.schema.SpecVersion;
+import com.networknt.schema.ValidationMessage;
 import com.zkbot.pilot.bootstrap.TokenService;
 import com.zkbot.pilot.config.ConfigDriftService;
 import com.zkbot.pilot.config.PilotProperties;
 import com.zkbot.pilot.discovery.DiscoveryCache;
 import com.zkbot.pilot.ops.dto.RegistrationAuditEntry;
+import com.zkbot.pilot.schema.ConfigSchemaLocator;
 import com.zkbot.pilot.schema.SchemaService;
 import com.zkbot.pilot.schema.dto.SchemaResourceEntry;
 import com.zkbot.pilot.topology.dto.*;
@@ -45,6 +51,7 @@ public class TopologyService {
     private final Connection natsConnection;
     private final ConfigDriftService configDriftService;
     private final SchemaService schemaService;
+    private final ConfigSchemaLocator configSchemaLocator;
     private final ObjectMapper objectMapper;
 
     public TopologyService(TopologyRepository repository,
@@ -54,6 +61,7 @@ public class TopologyService {
                            Connection natsConnection,
                            ConfigDriftService configDriftService,
                            SchemaService schemaService,
+                           ConfigSchemaLocator configSchemaLocator,
                            ObjectMapper objectMapper) {
         this.repository = repository;
         this.discoveryCache = discoveryCache;
@@ -62,6 +70,7 @@ public class TopologyService {
         this.natsConnection = natsConnection;
         this.configDriftService = configDriftService;
         this.schemaService = schemaService;
+        this.configSchemaLocator = configSchemaLocator;
         this.objectMapper = objectMapper;
     }
 
@@ -157,6 +166,38 @@ public class TopologyService {
             }
         }
 
+        // Load provided_config and venue from kind-specific table
+        Map<String, Object> providedConfig = null;
+        String venue = null;
+        switch (storedType.toUpperCase()) {
+            case "OMS" -> {
+                var omsRow = repository.getOmsInstance(logicalId);
+                if (omsRow != null) {
+                    providedConfig = parseJsonField(omsRow.get("provided_config"));
+                }
+            }
+            case "GW" -> {
+                var gwRow = repository.getGatewayInstance(logicalId);
+                if (gwRow != null) {
+                    venue = (String) gwRow.get("venue");
+                    providedConfig = parseJsonField(gwRow.get("provided_config"));
+                }
+            }
+            case "MDGW" -> {
+                var mdgwRow = repository.getMdgwInstance(logicalId);
+                if (mdgwRow != null) {
+                    venue = (String) mdgwRow.get("venue");
+                    providedConfig = parseJsonField(mdgwRow.get("provided_config"));
+                }
+            }
+            case "ENGINE" -> {
+                var engRow = repository.getEngineInstance(logicalId);
+                if (engRow != null) {
+                    providedConfig = parseJsonField(engRow.get("provided_config"));
+                }
+            }
+        }
+
         return new ServiceDetail(
                 logicalId,
                 storedType,
@@ -168,7 +209,9 @@ public class TopologyService {
                 lastSeenAt,
                 configDrift,
                 bindings,
-                sessions
+                sessions,
+                providedConfig,
+                venue
         );
     }
 
@@ -182,6 +225,80 @@ public class TopologyService {
         return repository.listRegistrationAudit(logicalId, limit).stream()
                 .map(TopologyService::toAuditEntry)
                 .toList();
+    }
+
+    public TopologyActionResponse updateService(String serviceKind, String logicalId,
+                                                    UpdateServiceRequest request) {
+        String normalizedKind = serviceKind.toUpperCase();
+        if ("REFDATA".equals(normalizedKind)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Use PUT /v1/topology/refdata-venues/{logicalId}/config for REFDATA instances.");
+        }
+
+        var instance = repository.getLogicalInstance(logicalId);
+        if (instance == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Service not found: " + logicalId);
+        }
+
+        String storedType = (String) instance.get("instance_type");
+        if (!normalizedKind.equalsIgnoreCase(storedType)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Service not found: " + serviceKind + "/" + logicalId);
+        }
+
+        // Block editing when online
+        var liveState = discoveryCache.getAll();
+        ServiceRegistration reg = findLiveRegistration(logicalId, liveState);
+        if (reg != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Service is online. Stop the service before editing configuration.");
+        }
+
+        // Update enabled flag if provided
+        if (request.enabled() != null) {
+            repository.updateLogicalInstanceEnabled(logicalId, request.enabled());
+        }
+
+        // Update provided_config if provided
+        if (request.providedConfig() != null) {
+            // Validate config against active schema before persisting
+            validateConfigAgainstSchema(logicalId, normalizedKind, request.providedConfig());
+
+            String configJson = toJson(request.providedConfig());
+            var hostProv = resolveSchemaProvenance("service_kind", normalizedKind.toLowerCase());
+
+            switch (normalizedKind) {
+                case "OMS" -> repository.updateOmsConfig(logicalId, configJson,
+                        prt(hostProv), prk(hostProv), pv(hostProv), ph(hostProv));
+                case "GW" -> {
+                    var gwRow = repository.getGatewayInstance(logicalId);
+                    String venue = gwRow != null ? (String) gwRow.get("venue") : "unknown";
+                    var venueProv = resolveSchemaProvenance("venue_capability",
+                            venue + "/" + KIND_TO_CAPABILITY.get("GW"));
+                    repository.updateGatewayConfig(logicalId, configJson,
+                            prt(hostProv), prk(hostProv), pv(hostProv), ph(hostProv),
+                            prk(venueProv), pv(venueProv), ph(venueProv));
+                }
+                case "MDGW" -> {
+                    var mdgwRow = repository.getMdgwInstance(logicalId);
+                    String venue = mdgwRow != null ? (String) mdgwRow.get("venue") : "unknown";
+                    var venueProv = resolveSchemaProvenance("venue_capability",
+                            venue + "/" + KIND_TO_CAPABILITY.get("MDGW"));
+                    repository.updateMdgwConfig(logicalId, configJson,
+                            prt(hostProv), prk(hostProv), pv(hostProv), ph(hostProv),
+                            prk(venueProv), pv(venueProv), ph(venueProv));
+                }
+                case "ENGINE" -> repository.updateEngineConfig(logicalId, configJson,
+                        prt(hostProv), prk(hostProv), pv(hostProv), ph(hostProv));
+                default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Unknown service kind for config update: " + normalizedKind);
+            }
+        }
+
+        log.info("Updated service config: {}/{}", serviceKind, logicalId);
+        return new TopologyActionResponse("updated", logicalId,
+                "Service config updated. Restart/bootstrap required for changes to take effect.");
     }
 
     public BootstrapTokenResponse issueBootstrapToken(String serviceKind, String logicalId) {
@@ -274,6 +391,7 @@ public class TopologyService {
     // --- Service onboarding ---
 
     private static final Set<String> KNOWN_SERVICE_KINDS = Set.of("OMS", "GW", "MDGW", "ENGINE");
+    private static final Set<String> INLINE_VENUES = Set.of("simulator");
 
     public CreateServiceResponse createService(String serviceKind, CreateServiceRequest request) {
         String normalizedKind = serviceKind.toUpperCase();
@@ -302,7 +420,8 @@ public class TopologyService {
         repository.createLogicalInstance(logicalId, normalizedKind, props.env(),
                 request.metadata(), request.enabled());
 
-        String providedConfigJson = toJson(request.providedConfig());
+        Map<String, Object> normalizedConfig = normalizeProvidedConfig(normalizedKind, request);
+        String providedConfigJson = toJson(normalizedConfig);
 
         // Resolve schema provenance from active schema_resource
         var hostProv = resolveSchemaProvenance("service_kind", normalizedKind.toLowerCase());
@@ -394,6 +513,37 @@ public class TopologyService {
         return toRefdataVenueEntry(row);
     }
 
+    public RefdataVenueInstanceEntry updateRefdataVenueConfig(String logicalId,
+                                                               Map<String, Object> providedConfig) {
+        var existing = repository.getRefdataVenueInstance(logicalId);
+        if (existing == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Refdata venue instance not found: " + logicalId);
+        }
+
+        // Block editing when online
+        var liveState = discoveryCache.getAll();
+        ServiceRegistration reg = findLiveRegistration(logicalId, liveState);
+        if (reg != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Service is online. Stop the service before editing configuration.");
+        }
+
+        // Validate config against active schema
+        validateConfigAgainstSchema(logicalId, "REFDATA", providedConfig);
+
+        String venue = (String) existing.get("venue");
+        String capability = KIND_TO_CAPABILITY.getOrDefault("REFDATA", "refdata");
+        var prov = resolveSchemaProvenance("venue_capability", venue + "/" + capability);
+
+        String configJson = toJson(providedConfig);
+        repository.updateRefdataVenueConfig(logicalId, configJson,
+                prk(prov), pv(prov), ph(prov));
+
+        var updated = repository.getRefdataVenueInstance(logicalId);
+        return toRefdataVenueEntry(updated);
+    }
+
     // --- Schema provenance resolution ---
 
     private SchemaResourceEntry resolveSchemaProvenance(String resourceType, String resourceKey) {
@@ -418,11 +568,58 @@ public class TopologyService {
     private static Integer pv(SchemaResourceEntry e) { return e != null ? e.version() : null; }
     private static String ph(SchemaResourceEntry e) { return e != null ? e.contentHash() : null; }
 
+    private void validateConfigAgainstSchema(String logicalId, String instanceType,
+                                              Map<String, Object> providedConfig) {
+        String schemaJson = configSchemaLocator.resolveConfigSchema(logicalId, instanceType);
+        if (schemaJson == null) return;
+
+        try {
+            JsonSchema schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7)
+                    .getSchema(schemaJson);
+            JsonNode configNode = objectMapper.valueToTree(providedConfig);
+            Set<ValidationMessage> errors = schema.validate(configNode);
+            if (!errors.isEmpty()) {
+                String msg = errors.stream().map(ValidationMessage::getMessage)
+                        .collect(Collectors.joining("; "));
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Config validation failed: " + msg);
+            }
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Schema validation error for {}/{}: {}", instanceType, logicalId, e.getMessage());
+        }
+    }
+
     private String resolveVenue(CreateServiceRequest request) {
         if (request.venue() != null && !request.venue().isBlank()) {
             return request.venue();
         }
         return extractVenue(request.providedConfig());
+    }
+
+    private Map<String, Object> normalizeProvidedConfig(String serviceKind, CreateServiceRequest request) {
+        Map<String, Object> config = request.providedConfig() != null
+                ? new LinkedHashMap<>(request.providedConfig())
+                : new LinkedHashMap<>();
+
+        if (!KIND_TO_CAPABILITY.containsKey(serviceKind)) {
+            return config;
+        }
+
+        String venue = resolveVenue(request);
+        if (venue != null && !"unknown".equalsIgnoreCase(venue)) {
+            config.put("venue", venue);
+        }
+
+        if (!INLINE_VENUES.contains(venue == null ? "" : venue.toLowerCase())) {
+            Object venueConfig = config.get("venue_config");
+            if (!(venueConfig instanceof Map<?, ?>)) {
+                config.put("venue_config", new LinkedHashMap<String, Object>());
+            }
+        }
+
+        return config;
     }
 
     private static String extractVenue(Map<String, Object> config) {
@@ -446,6 +643,18 @@ public class TopologyService {
                 toInstant(row.get("created_at")),
                 toInstant(row.get("updated_at"))
         );
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseJsonField(Object field) {
+        if (field == null) return Map.of();
+        if (field instanceof Map) return (Map<String, Object>) field;
+        try {
+            return objectMapper.readValue(field.toString(), Map.class);
+        } catch (Exception e) {
+            log.debug("Failed to parse JSON config field: {}", e.getMessage());
+            return Map.of();
+        }
     }
 
     private String toJson(Map<String, Object> map) {

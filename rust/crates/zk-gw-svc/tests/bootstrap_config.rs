@@ -68,6 +68,16 @@ const OKX_JSON: &str = r#"{
     "venue_config": {"api_key": "test_key", "mode": "demo"}
 }"#;
 
+const SIMULATOR_INLINE_JSON: &str = r#"{
+    "venue": "simulator",
+    "account_id": 9001,
+    "mock_balances": "BTC:5,USDT:50000",
+    "fill_delay_ms": 10,
+    "match_policy": "fcfs",
+    "admin_grpc_port": 51052,
+    "enable_admin_controls": true
+}"#;
+
 // ── 1. direct_mode_builds_runtime_from_env ──────────────────────────────────
 
 #[test]
@@ -211,6 +221,22 @@ fn simulator_payload_accepts_simulator_fields() {
     let outcome = bootstrap_runtime_config::<GwBootstrap>(&boot, mode).unwrap();
     assert_eq!(outcome.runtime_config.venue, "simulator");
     assert!(outcome.runtime_config.simulator.is_some());
+}
+
+#[test]
+fn simulator_payload_accepts_inline_simulator_fields() {
+    let boot = test_bootstrap();
+    let payload = pilot_payload(SIMULATOR_INLINE_JSON);
+    let provided = GwBootstrap::decode_pilot_config(&payload).unwrap();
+    let runtime = GwBootstrap::assemble_runtime_config(&boot, provided).unwrap();
+
+    let sim = runtime.simulator.as_ref().unwrap();
+    assert_eq!(runtime.account_id, 9001);
+    assert_eq!(sim.mock_balances, "BTC:5,USDT:50000");
+    assert_eq!(sim.fill_delay_ms, 10);
+    assert_eq!(sim.match_policy, "fcfs");
+    assert_eq!(sim.admin_grpc_port, 51052);
+    assert!(sim.enable_admin_controls);
 }
 
 // ── 8. non_simulator_rejects_simulator_config ───────────────────────────────

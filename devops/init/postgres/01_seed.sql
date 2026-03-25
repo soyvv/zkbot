@@ -13,10 +13,19 @@ insert into cfg.oms_instance (oms_id, namespace, description) values
 -- cfg.gateway_instance
 insert into cfg.gateway_instance (
   gw_id, venue, broker_type, account_type,
-  supports_batch_order, supports_batch_cancel
+  supports_batch_order, supports_batch_cancel, provided_config
 ) values (
-  'gw_sim_1', 'SIM', 'SIM', 'SPOT',
-  true, true
+  'gw_sim_1', 'simulator', 'SIM', 'SPOT',
+  true, true,
+  '{
+    "venue": "simulator",
+    "account_id": 9001,
+    "mock_balances": "BTC:10,USDT:100000,ETH:50",
+    "fill_delay_ms": 0,
+    "match_policy": "fcfs",
+    "admin_grpc_port": 51052,
+    "enable_admin_controls": true
+  }'::jsonb
 );
 
 -- cfg.account

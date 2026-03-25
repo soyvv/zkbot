@@ -30,6 +30,7 @@ use zk_oms_svc::{
     nats_handler,
     oms_actor,
     persist_executor::PersistExecutorPool,
+    reconcile,
     proto,
     publish_executor::PublishExecutorPool,
     redis_writer,
@@ -59,6 +60,22 @@ use zk_infra_rs::{
     tracing as zk_tracing,
 };
 use zk_oms_rs::{config::ConfdataManager, oms_core_v2::OmsCoreV2};
+
+fn gateway_addr_from_registration(value: &[u8]) -> anyhow::Result<String> {
+    let reg = zk_infra_rs::discovery_registration::decode_registration(value)?;
+    let endpoint = reg
+        .endpoint
+        .ok_or_else(|| anyhow::anyhow!("gateway registration missing endpoint"))?;
+    let addr = endpoint.address.trim();
+    if addr.is_empty() {
+        return Err(anyhow::anyhow!("gateway registration has empty endpoint address"));
+    }
+    if addr.starts_with("http://") || addr.starts_with("https://") {
+        Ok(addr.to_string())
+    } else {
+        Ok(format!("http://{addr}"))
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -223,11 +240,13 @@ async fn main() -> anyhow::Result<()> {
                         use zk_infra_rs::nats_kv::KvOperation;
                         if e.operation == KvOperation::Put {
                             let gw_id = e.key.trim_start_matches(&format!("{}.", cfg.gateway_kv_prefix)).to_string();
-                            if let Some(gw_cfg) = confdata.gw_configs.get(&gw_id) {
-                                let addr = db::gw_grpc_addr(gw_cfg);
-                                match gw_pool.connect(gw_id.clone(), &addr).await {
-                                    Ok(_) => info!(gw_id, addr, "gateway gRPC connected"),
-                                    Err(e) => warn!(gw_id, error = %e, "gateway gRPC connect failed"),
+                            if confdata.gw_configs.contains_key(&gw_id) {
+                                match gateway_addr_from_registration(e.value.as_ref()) {
+                                    Ok(addr) => match gw_pool.connect(gw_id.clone(), &addr).await {
+                                        Ok(_) => info!(gw_id, addr, "gateway gRPC connected"),
+                                        Err(e) => warn!(gw_id, error = %e, "gateway gRPC connect failed"),
+                                    },
+                                    Err(e) => warn!(gw_id, error = %e, "gateway registration missing usable KV endpoint"),
                                 }
                             }
                         }
@@ -241,17 +260,19 @@ async fn main() -> anyhow::Result<()> {
 
     // Fallback: directly probe KV for any configured gateways not yet connected.
     // The watch may miss already-registered entries due to JetStream consumer timing.
-    for (gw_id, gw_cfg) in &confdata.gw_configs {
+    for gw_id in confdata.gw_configs.keys() {
         if gw_pool.contains(gw_id) {
             continue;
         }
         let kv_key = format!("{}.{}", cfg.gateway_kv_prefix, gw_id);
         match kv_registry.get(&kv_key).await {
-            Ok(Some(_)) => {
-                let addr = db::gw_grpc_addr(gw_cfg);
-                match gw_pool.connect(gw_id.clone(), &addr).await {
-                    Ok(_) => info!(gw_id, addr, "gateway gRPC connected (direct KV probe)"),
-                    Err(e) => warn!(gw_id, error = %e, "gateway gRPC connect failed"),
+            Ok(Some(value)) => {
+                match gateway_addr_from_registration(value.as_ref()) {
+                    Ok(addr) => match gw_pool.connect(gw_id.clone(), &addr).await {
+                        Ok(_) => info!(gw_id, addr, "gateway gRPC connected (direct KV probe)"),
+                        Err(e) => warn!(gw_id, error = %e, "gateway gRPC connect failed"),
+                    },
+                    Err(e) => warn!(gw_id, kv_key, error = %e, "gateway KV entry missing usable endpoint"),
                 }
             }
             Ok(None) => warn!(
@@ -312,7 +333,140 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => warn!(gw_key, error = %e, "startup reconcile failed"),
             }
         }
-        info!("startup reconciliation complete");
+        info!("startup balance reconciliation complete");
+    }
+
+    // ── 10b. Order reconciliation (two-phase) ──────────────────────────────
+    {
+        use zk_oms_rs::models_v2::OmsActionV2;
+        use zk_proto_rs::zk::gateway::v1::{
+            QueryOpenOrderRequest, QueryOrderDetailRequest, SingleOrderQuery,
+        };
+
+        /// Apply a synthetic reconcile report: feed through core, persist results.
+        async fn apply_reconcile_report(
+            report: zk_proto_rs::zk::exch_gw::v1::OrderReport,
+            core: &mut zk_oms_rs::oms_core_v2::OmsCoreV2,
+            redis_writer: &mut redis_writer::RedisWriter,
+        ) {
+            let actions = core.process_message(
+                zk_oms_rs::models::OmsMessage::GatewayOrderReport(report),
+            );
+            for action in &actions {
+                match action {
+                    OmsActionV2::PersistOrder { order_id, .. } => {
+                        oms_actor::persist_order_to_redis(core, redis_writer, *order_id).await;
+                    }
+                    OmsActionV2::PersistBalance {
+                        account_id,
+                        asset_id,
+                    } => {
+                        oms_actor::persist_balance_to_redis(
+                            core,
+                            redis_writer,
+                            *account_id,
+                            *asset_id,
+                        )
+                        .await;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let snapshots = reconcile::extract_open_order_snapshots(&core);
+        if snapshots.is_empty() {
+            info!("startup order reconcile: no open orders to reconcile");
+        } else {
+            let now_ms = zk_oms_rs::utils::gen_timestamp_ms();
+            let gw_keys: Vec<String> = gw_pool.gw_keys().map(String::from).collect();
+
+            for gw_key in &gw_keys {
+                // Phase 1: QueryOpenOrders
+                let req = QueryOpenOrderRequest {
+                    exch_account_code: String::new(),
+                };
+                let gw_result = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    gw_pool.query_open_orders(gw_key, req),
+                )
+                .await;
+                let gw_open_orders = match gw_result {
+                    Ok(Ok(resp)) => resp.orders,
+                    Ok(Err(e)) => {
+                        warn!(gw_key, error = %e, "startup order reconcile: open orders query failed, skipping");
+                        continue;
+                    }
+                    Err(_) => {
+                        warn!(gw_key, "startup order reconcile: open orders query timed out, skipping");
+                        continue;
+                    }
+                };
+                let (reports, needs_detail, stats) = reconcile::reconcile_orders_against_gateway(
+                    &snapshots,
+                    &gw_open_orders,
+                    gw_key,
+                    now_ms,
+                );
+                info!(
+                    gw_key,
+                    matched = stats.orders_matched,
+                    updated = stats.orders_updated,
+                    need_detail = stats.orders_need_detail,
+                    rejected = stats.orders_rejected,
+                    "startup order reconcile phase 1",
+                );
+
+                // Apply immediate reports (state divergence + no-exch-ref rejects).
+                for report in reports {
+                    apply_reconcile_report(report, &mut core, &mut redis_writer).await;
+                }
+
+                // Phase 2: QueryOrderDetails for orders absent from open set.
+                if !needs_detail.is_empty() {
+                    let queries: Vec<SingleOrderQuery> = needs_detail
+                        .iter()
+                        .map(|snap| SingleOrderQuery {
+                            exch_order_ref: snap.exch_order_ref.clone().unwrap_or_default(),
+                            order_id: snap.order_id,
+                            symbol: snap.instrument.clone(),
+                            ..Default::default()
+                        })
+                        .collect();
+                    let detail_req = QueryOrderDetailRequest {
+                        order_queries: queries,
+                    };
+                    let detail_result = tokio::time::timeout(
+                        Duration::from_secs(10),
+                        gw_pool.query_order_details(gw_key, detail_req),
+                    )
+                    .await;
+                    let detail_orders = match detail_result {
+                        Ok(Ok(resp)) => resp.orders,
+                        Ok(Err(e)) => {
+                            warn!(gw_key, error = %e, "startup order reconcile: detail query failed, using fallback");
+                            vec![]
+                        }
+                        Err(_) => {
+                            warn!(gw_key, "startup order reconcile: detail query timed out, using fallback");
+                            vec![]
+                        }
+                    };
+
+                    for snap in &needs_detail {
+                        let report = reconcile::resolve_missing_order(snap, &detail_orders, now_ms);
+                        apply_reconcile_report(report, &mut core, &mut redis_writer).await;
+                    }
+                    info!(
+                        gw_key,
+                        terminated = needs_detail.len(),
+                        detail_found = detail_orders.len(),
+                        "startup order reconcile phase 2",
+                    );
+                }
+            }
+            info!("startup order reconciliation complete");
+        }
     }
 
     // ── 11. Start OMS writer task ────────────────────────────────────────────
@@ -527,6 +681,19 @@ async fn main() -> anyhow::Result<()> {
         loop {
             interval.tick().await;
             let _ = recheck_tx.send(OmsCommand::PositionRecheck).await;
+        }
+    });
+
+    let order_recheck_tx = cmd_tx.clone();
+    let order_recheck_secs = cfg.order_resync_interval_secs;
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(order_recheck_secs));
+        interval.tick().await; // skip first tick — startup reconcile already ran
+        loop {
+            interval.tick().await;
+            let _ = order_recheck_tx
+                .send(OmsCommand::OrderReconcile)
+                .await;
         }
     });
 

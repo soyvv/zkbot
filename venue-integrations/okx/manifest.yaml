@@ -1,6 +1,6 @@
 venue: okx
 schema_id: venue/okx
-version: 2
+version: 5
 capabilities:
   gw:
     language: rust
@@ -8,9 +8,6 @@ capabilities:
     config_schema: schemas/gw_config.schema.json
     field_descriptors:
       - path: /secret_ref
-        secret_ref: true
-        reloadable: false
-      - path: /passphrase_ref
         secret_ref: true
         reloadable: false
       - path: /api_base_url
@@ -27,8 +24,13 @@ capabilities:
       - path: /secret_ref
         secret_ref: true
         reloadable: false
-      - path: /passphrase_ref
-        secret_ref: true
+      - path: /demo_mode
+        reloadable: false
+      - path: /api_base_url
+        reloadable: false
+      - path: /ws_public_url
+        reloadable: false
+      - path: /ws_private_url
         reloadable: false
   refdata:
     language: python
@@ -36,5 +38,7 @@ capabilities:
     config_schema: schemas/refdata_config.schema.json
 metadata:
   supports_tradfi_sessions: false
+  requires_exch_account_id: true
   notes:
     - OKX is the preferred native Rust venue for gateway and RTMD adaptors.
+    - Gateway requires exch_account_id in top-level provided config for OMS balance/position linkage.

@@ -6,6 +6,8 @@ use crate::models::ExchBalanceSnapshot;
 pub struct BalanceStoreV2 {
     /// (account_id, asset_id) → exchange balance snapshot
     pub(crate) exch_balances: HashMap<(i64, u32), ExchBalanceSnapshot>,
+    /// (account_id, asset) → exchange balance snapshot for assets not in refdata.
+    pub(crate) unknown_exch_balances: HashMap<(i64, Box<str>), ExchBalanceSnapshot>,
     /// interned exch_account_sym → account_id (reverse map)
     pub(crate) account_id_by_exch_account_sym: HashMap<u32, i64>,
 }
@@ -14,6 +16,7 @@ impl BalanceStoreV2 {
     pub fn new() -> Self {
         Self {
             exch_balances: HashMap::new(),
+            unknown_exch_balances: HashMap::new(),
             account_id_by_exch_account_sym: HashMap::new(),
         }
     }
@@ -81,9 +84,23 @@ impl BalanceStoreV2 {
         self.exch_balances.values()
     }
 
+    /// Iterate all unresolved balance snapshots.
+    pub fn all_unknown_balances(&self) -> impl Iterator<Item = &ExchBalanceSnapshot> {
+        self.unknown_exch_balances.values()
+    }
+
     /// Collect all balances for a given account_id.
     pub fn get_balances_for_account(&self, account_id: i64) -> Vec<&ExchBalanceSnapshot> {
         self.exch_balances
+            .iter()
+            .filter(|((aid, _), _)| *aid == account_id)
+            .map(|(_, snap)| snap)
+            .collect()
+    }
+
+    /// Collect all unresolved balances for a given account_id.
+    pub fn get_unknown_balances_for_account(&self, account_id: i64) -> Vec<&ExchBalanceSnapshot> {
+        self.unknown_exch_balances
             .iter()
             .filter(|((aid, _), _)| *aid == account_id)
             .map(|(_, snap)| snap)
@@ -97,6 +114,22 @@ impl BalanceStoreV2 {
     /// Insert or overwrite a balance snapshot.
     pub fn set_balance(&mut self, account_id: i64, asset_id: u32, snap: ExchBalanceSnapshot) {
         self.exch_balances.insert((account_id, asset_id), snap);
+    }
+
+    /// Insert or overwrite an unresolved balance snapshot keyed by asset symbol.
+    pub fn set_unknown_balance(
+        &mut self,
+        account_id: i64,
+        asset: &str,
+        snap: ExchBalanceSnapshot,
+    ) {
+        self.unknown_exch_balances
+            .insert((account_id, asset.into()), snap);
+    }
+
+    /// Remove an unresolved balance once the asset can be resolved.
+    pub fn remove_unknown_balance(&mut self, account_id: i64, asset: &str) {
+        self.unknown_exch_balances.remove(&(account_id, asset.into()));
     }
 }
 
@@ -146,6 +179,15 @@ mod tests {
         snap2.sync_ts = 999;
         store.set_balance(1, 10, snap2);
         assert_eq!(store.get_balance(1, 10).unwrap().sync_ts, 999);
+
+        // unresolved balance CRUD
+        let mut unknown = make_snap(1);
+        unknown.asset = "MYSTERY".to_string();
+        store.set_unknown_balance(1, "MYSTERY", unknown.clone());
+        assert_eq!(store.get_unknown_balances_for_account(1).len(), 1);
+        assert_eq!(store.all_unknown_balances().count(), 1);
+        store.remove_unknown_balance(1, "MYSTERY");
+        assert!(store.get_unknown_balances_for_account(1).is_empty());
 
         // get_balances_for_account
         let all = store.get_balances_for_account(1);

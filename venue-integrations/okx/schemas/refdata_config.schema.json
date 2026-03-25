@@ -1,10 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OKX Refdata Config",
+  "description": "Venue-specific configuration for the OKX refdata loader.",
   "type": "object",
   "properties": {
     "api_base_url": {
-      "type": "string"
+      "type": "string",
+      "default": "https://www.okx.com",
+      "description": "Base HTTPS URL for OKX public instrument metadata requests."
     }
   },
   "required": [],
