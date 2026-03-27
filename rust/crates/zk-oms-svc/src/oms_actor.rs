@@ -60,7 +60,11 @@ use zk_oms_rs::{
 };
 use zk_proto_rs::zk::{
     exch_gw::v1::{BalanceUpdate, OrderReport},
-    oms::v1::{oms_response, ExecType, OmsErrorType, OmsResponse, OrderCancelRequest, OrderRequest, OrderStatus},
+    oms::v1::{
+        oms_response, ExecType, OmsErrorType, OmsResponse, OrderCancelRequest, OrderRequest,
+        OrderStatus,
+    },
+    recorder::v1::{RecorderTerminalOrder, RecorderTradeEvent},
 };
 
 use crate::{
@@ -69,6 +73,7 @@ use crate::{
     nats_handler::NatsPublisher,
     persist_executor::{PersistAction, PersistExecutorPool},
     publish_executor::{PublishAction, PublishExecutorPool, ReportLatencyCtx},
+    recorder_executor::{RecorderAction, RecorderExecutorPool},
     redis_writer::RedisWriter,
 };
 
@@ -243,6 +248,7 @@ pub fn spawn_writer(
     gw_executor: GwExecutorPool,
     persist_executor: PersistExecutorPool,
     publish_executor: PublishExecutorPool,
+    recorder_executor: RecorderExecutorPool,
     latency_rx: mpsc::Receiver<LatencyEvent>,
     shutdown: CancellationToken,
     metrics_interval: Duration,
@@ -260,6 +266,7 @@ pub fn spawn_writer(
         gw_executor,
         persist_executor,
         publish_executor,
+        recorder_executor,
         latency_rx,
         shutdown,
         metrics_interval,
@@ -280,6 +287,7 @@ async fn oms_writer_loop(
     gw_executor: GwExecutorPool,
     mut persist_executor: PersistExecutorPool,
     mut publish_executor: PublishExecutorPool,
+    mut recorder_executor: RecorderExecutorPool,
     mut latency_rx: mpsc::Receiver<LatencyEvent>,
     shutdown: CancellationToken,
     metrics_interval: Duration,
@@ -333,6 +341,7 @@ async fn oms_writer_loop(
                     &gw_executor,
                     &mut persist_executor,
                     &mut publish_executor,
+                    &mut recorder_executor,
                     &mut tracker,
                 );
                 }
@@ -458,12 +467,13 @@ fn process_command(
     core: &mut OmsCoreV2,
     writer: &mut OmsSnapshotWriterV2,
     replica: &ReadReplica,
-    _nats: &NatsPublisher,
+    nats: &NatsPublisher,
     _redis: &mut RedisWriter,
     _gw_pool: &mut GwClientPool,
     gw_executor: &GwExecutorPool,
     persist_executor: &mut PersistExecutorPool,
     publish_executor: &mut PublishExecutorPool,
+    recorder_executor: &mut RecorderExecutorPool,
     _tracker: &mut LatencyTracker,
 ) {
     let writer_start_ts = system_time_ns();
@@ -613,6 +623,14 @@ fn process_command(
                             set_closed: *set_closed,
                         };
                         persist_executor.try_dispatch(pa);
+                    }
+                }
+                // Recorder: publish terminal order snapshot to JetStream
+                if *set_closed {
+                    if let Some(event) =
+                        build_recorder_terminal_order(core, *order_id, &nats.oms_id)
+                    {
+                        recorder_executor.dispatch(event.account_id, RecorderAction::TerminalOrder(event));
                     }
                 }
             }
@@ -852,6 +870,31 @@ fn process_command(
                     *include_inferred_trade,
                 ) {
                     log_order_update_event(&event);
+                    // Recorder: dispatch trade events to JetStream
+                    if *include_last_trade {
+                        if let Some(trade) = &event.last_trade {
+                            if let Some(rec) = build_recorder_trade_event(
+                                core, *order_id, &nats.oms_id, trade, false,
+                            ) {
+                                recorder_executor.dispatch(
+                                    rec.account_id,
+                                    RecorderAction::Trade(rec),
+                                );
+                            }
+                        }
+                    }
+                    if *include_inferred_trade {
+                        if let Some(trade) = &event.order_inferred_trade {
+                            if let Some(rec) = build_recorder_trade_event(
+                                core, *order_id, &nats.oms_id, trade, true,
+                            ) {
+                                recorder_executor.dispatch(
+                                    rec.account_id,
+                                    RecorderAction::Trade(rec),
+                                );
+                            }
+                        }
+                    }
                     let latency_ctx =
                         report_latency_ctx.map(|(oid, t6, t4, t5)| ReportLatencyCtx {
                             order_id: oid,
@@ -926,6 +969,13 @@ fn process_command(
                     };
                     persist_executor.try_dispatch(pa);
                 }
+                if *set_closed {
+                    if let Some(event) =
+                        build_recorder_terminal_order(core, *order_id, &nats.oms_id)
+                    {
+                        recorder_executor.dispatch(event.account_id, RecorderAction::TerminalOrder(event));
+                    }
+                }
             }
             OmsActionV2::PublishOrderUpdate {
                 order_id,
@@ -942,6 +992,30 @@ fn process_command(
                     *include_inferred_trade,
                 ) {
                     log_order_update_event(&event);
+                    if *include_last_trade {
+                        if let Some(trade) = &event.last_trade {
+                            if let Some(rec) = build_recorder_trade_event(
+                                core, *order_id, &nats.oms_id, trade, false,
+                            ) {
+                                recorder_executor.dispatch(
+                                    rec.account_id,
+                                    RecorderAction::Trade(rec),
+                                );
+                            }
+                        }
+                    }
+                    if *include_inferred_trade {
+                        if let Some(trade) = &event.order_inferred_trade {
+                            if let Some(rec) = build_recorder_trade_event(
+                                core, *order_id, &nats.oms_id, trade, true,
+                            ) {
+                                recorder_executor.dispatch(
+                                    rec.account_id,
+                                    RecorderAction::Trade(rec),
+                                );
+                            }
+                        }
+                    }
                     let pa = PublishAction::OrderUpdate {
                         event,
                         latency_ctx: None,
@@ -1547,6 +1621,112 @@ pub fn err_response(error_type: OmsErrorType, msg: &str) -> OmsResponse {
 }
 
 // ── Utility: send command and await response ─────────────────────────────────
+
+// ── Recorder event builders ──────────────────────────────────────────────────
+
+/// Build a `RecorderTerminalOrder` from core state for a terminal order.
+fn build_recorder_terminal_order(
+    core: &OmsCoreV2,
+    order_id: i64,
+    oms_id: &str,
+) -> Option<RecorderTerminalOrder> {
+    let live = core.orders.get_live(order_id)?;
+    let detail = core.orders.get_detail(order_id);
+    let inst = core.metadata.instrument(live.instrument_id);
+    let gw = core.metadata.gw(live.gw_id);
+
+    Some(RecorderTerminalOrder {
+        order_id: live.order_id,
+        account_id: live.account_id,
+        oms_id: oms_id.to_string(),
+        gw_key: gw
+            .map(|g| core.metadata.str_resolve(g.gw_key_sym).to_string())
+            .unwrap_or_default(),
+        source_id: core
+            .metadata
+            .strings
+            .try_resolve(live.source_sym)
+            .unwrap_or("")
+            .to_string(),
+        instrument_code: inst
+            .map(|i| core.metadata.str_resolve(i.instrument_code_sym).to_string())
+            .unwrap_or_default(),
+        instrument_exch: inst
+            .map(|i| core.metadata.str_resolve(i.instrument_exch_sym).to_string())
+            .unwrap_or_default(),
+        side: live.buy_sell_type,
+        open_close: live.open_close_type,
+        order_type: live.order_type,
+        order_status: live.order_status,
+        price: live.price,
+        qty: live.qty,
+        filled_qty: live.filled_qty,
+        filled_avg_price: live.filled_avg_price,
+        ext_order_ref: live
+            .exch_order_ref_id
+            .map(|id| core.orders.dyn_strings.resolve(id).to_string())
+            .unwrap_or_default(),
+        error_msg: live.error_msg.clone(),
+        terminal_at_ms: live.terminal_at.unwrap_or(live.updated_at),
+        created_at_ms: live.created_at,
+        trades: detail
+            .map(|d| d.trades.clone())
+            .unwrap_or_default(),
+        inferred_trades: detail
+            .map(|d| d.inferred_trades.clone())
+            .unwrap_or_default(),
+        fees: detail
+            .map(|d| d.fees.clone())
+            .unwrap_or_default(),
+    })
+}
+
+/// Build a `RecorderTradeEvent` from a trade (explicit or inferred).
+fn build_recorder_trade_event(
+    core: &OmsCoreV2,
+    order_id: i64,
+    oms_id: &str,
+    trade: &zk_proto_rs::zk::oms::v1::Trade,
+    is_inferred: bool,
+) -> Option<RecorderTradeEvent> {
+    let live = core.orders.get_live(order_id)?;
+    let inst = core.metadata.instrument(live.instrument_id);
+    let gw = core.metadata.gw(live.gw_id);
+
+    Some(RecorderTradeEvent {
+        order_id: live.order_id,
+        account_id: live.account_id,
+        oms_id: oms_id.to_string(),
+        gw_key: gw
+            .map(|g| core.metadata.str_resolve(g.gw_key_sym).to_string())
+            .unwrap_or_default(),
+        source_id: core
+            .metadata
+            .strings
+            .try_resolve(live.source_sym)
+            .unwrap_or("")
+            .to_string(),
+        instrument_code: inst
+            .map(|i| core.metadata.str_resolve(i.instrument_code_sym).to_string())
+            .unwrap_or_default(),
+        instrument_exch: inst
+            .map(|i| core.metadata.str_resolve(i.instrument_exch_sym).to_string())
+            .unwrap_or_default(),
+        side: live.buy_sell_type,
+        open_close: live.open_close_type,
+        ext_order_ref: live
+            .exch_order_ref_id
+            .map(|id| core.orders.dyn_strings.resolve(id).to_string())
+            .unwrap_or_default(),
+        ext_trade_id: trade.ext_trade_id.clone(),
+        filled_qty: trade.filled_qty,
+        filled_price: trade.filled_price,
+        filled_ts_ms: trade.filled_ts,
+        fill_type: trade.fill_type,
+        fees: trade.fees.clone(),
+        is_inferred,
+    })
+}
 
 pub async fn send_cmd_await(
     cmd_tx: &mpsc::Sender<OmsCommand>,

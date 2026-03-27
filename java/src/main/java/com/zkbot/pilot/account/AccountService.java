@@ -1,6 +1,7 @@
 package com.zkbot.pilot.account;
 
 import com.zkbot.pilot.account.dto.*;
+import com.zkbot.pilot.common.PagedResponse;
 import com.zkbot.pilot.discovery.DiscoveryCache;
 import com.zkbot.pilot.grpc.OmsGrpcClient;
 import org.slf4j.Logger;
@@ -151,6 +152,25 @@ public class AccountService {
         return repository.listTradesForAccount(accountId, limit).stream()
                 .map(AccountService::toTradeEntry)
                 .toList();
+    }
+
+    public PagedResponse<OrderHistoryEntry> getOrderHistory(long accountId, int limit,
+                                                              String cursor, String instrumentId,
+                                                              String status) {
+        // fetch one extra to determine if there's a next page
+        var rows = repository.listOrderHistory(accountId, limit + 1, cursor, instrumentId, status);
+        boolean hasMore = rows.size() > limit;
+        var page = hasMore ? rows.subList(0, limit) : rows;
+
+        var entries = page.stream().map(AccountService::toOrderHistoryEntry).toList();
+
+        String nextCursor = null;
+        if (hasMore) {
+            Instant last = entries.getLast().terminalAt();
+            nextCursor = last.toString();
+        }
+
+        return new PagedResponse<>(entries, nextCursor, limit);
     }
 
     public List<ActivityEntry> getActivities(long accountId, int limit) {
@@ -350,6 +370,32 @@ public class AccountService {
             case LS_SHORT -> "SHORT";
             default -> s.name();
         };
+    }
+
+    private static OrderHistoryEntry toOrderHistoryEntry(Map<String, Object> row) {
+        return new OrderHistoryEntry(
+                ((Number) row.get("order_id")).longValue(),
+                ((Number) row.get("account_id")).longValue(),
+                (String) row.get("oms_id"),
+                (String) row.get("gw_id"),
+                (String) row.get("strategy_id"),
+                (String) row.get("execution_id"),
+                (String) row.get("source_id"),
+                (String) row.get("instrument_id"),
+                (String) row.get("instrument_exch"),
+                (String) row.get("side"),
+                (String) row.get("open_close"),
+                (String) row.get("order_type"),
+                (String) row.get("order_status"),
+                toBigDecimal(row.get("price")),
+                toBigDecimal(row.get("qty")),
+                toBigDecimal(row.get("filled_qty")),
+                toBigDecimal(row.get("filled_avg_price")),
+                (String) row.get("ext_order_ref"),
+                (String) row.get("error_msg"),
+                toInstant(row.get("terminal_at")),
+                toInstant(row.get("created_at"))
+        );
     }
 
     private static ActivityEntry toActivityEntry(Map<String, Object> row) {

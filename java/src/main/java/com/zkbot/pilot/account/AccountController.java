@@ -1,6 +1,7 @@
 package com.zkbot.pilot.account;
 
 import com.zkbot.pilot.account.dto.*;
+import com.zkbot.pilot.common.PagedResponse;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -62,6 +63,16 @@ public class AccountController {
     public List<TradeEntry> getTrades(@PathVariable long accountId,
                                       @RequestParam(defaultValue = "50") int limit) {
         return service.getTrades(accountId, limit);
+    }
+
+    @GetMapping("/{accountId}/orders/history")
+    public PagedResponse<OrderHistoryEntry> getOrderHistory(
+            @PathVariable long accountId,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) String instrument_id,
+            @RequestParam(required = false) String status) {
+        return service.getOrderHistory(accountId, Math.min(limit, 500), cursor, instrument_id, status);
     }
 
     @GetMapping("/{accountId}/activities")

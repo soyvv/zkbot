@@ -1125,6 +1125,10 @@ impl OmsCoreV2 {
             {
                 live.filled_avg_price = live.acc_trades_value / live.acc_trades_filled_qty;
             }
+            // Freeze terminal timestamp on first terminal transition
+            if live.is_in_terminal_state() && live.terminal_at.is_none() {
+                live.terminal_at = Some(live.updated_at);
+            }
             (
                 live.is_in_terminal_state(),
                 live.account_id,
@@ -1901,7 +1905,7 @@ impl OmsCoreV2 {
             .as_ref()
             .map(|r| self.orders.dyn_strings.intern(r));
 
-        let live = LiveOrder {
+        let mut live = LiveOrder {
             order_id: v1.order_id,
             account_id: v1.account_id,
             instrument_id,
@@ -1927,6 +1931,7 @@ impl OmsCoreV2 {
             cancel_attempts: v1.cancel_attempts,
             accounting_flags: OrderAccountingFlags::default(),
             error_msg: v1.order_state.error_msg.clone(),
+            terminal_at: None, // will be set below if already terminal
         };
 
         let detail = OrderDetailLog {
@@ -1939,6 +1944,11 @@ impl OmsCoreV2 {
             exec_msgs: v1.exec_msgs.clone(),
             fees: v1.fees.clone(),
         };
+
+        // Backfill terminal_at for already-terminal v1 orders (best-effort).
+        if live.is_in_terminal_state() && live.terminal_at.is_none() {
+            live.terminal_at = Some(live.updated_at);
+        }
 
         (live, detail)
     }

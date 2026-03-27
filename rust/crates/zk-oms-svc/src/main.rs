@@ -33,6 +33,7 @@ use zk_oms_svc::{
     reconcile,
     proto,
     publish_executor::PublishExecutorPool,
+    recorder_executor,
     redis_writer,
 };
 
@@ -722,10 +723,15 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Recorder JetStream streams are owned by the recorder service / infra setup.
+    // OMS only publishes to `zk.recorder.oms.<oms_id>.*.<account_id>` subjects.
+
     let persist_executor = PersistExecutorPool::new(1024, redis_writer.clone_writer());
 
-    let nats_publisher = NatsPublisher::new(nats_client.clone(), cfg.oms_id.clone());
+    let nats_publisher = NatsPublisher::new(nats_client.clone(), js.clone(), cfg.oms_id.clone());
     let publish_executor = PublishExecutorPool::new(256, nats_publisher.clone(), latency_tx);
+    let recorder_executor =
+        recorder_executor::RecorderExecutorPool::new(256, nats_publisher.clone());
 
     let writer_handle = oms_actor::spawn_writer(
         core,
@@ -738,6 +744,7 @@ async fn main() -> anyhow::Result<()> {
         gw_executor,
         persist_executor,
         publish_executor,
+        recorder_executor,
         latency_rx,
         shutdown_clone,
         Duration::from_secs(cfg.metrics_interval_secs),

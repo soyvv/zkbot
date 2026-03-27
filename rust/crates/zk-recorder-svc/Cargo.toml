@@ -1,0 +1,51 @@
+[package]
+name = "zk-recorder-svc"
+version = "0.1.0"
+edition = "2021"
+description = "Recorder service — persists terminal OMS orders and trades from JetStream into Postgres"
+
+[lib]
+name = "zk_recorder_svc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zk-recorder-svc"
+path = "src/main.rs"
+
+[dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# NATS + JetStream
+async-nats = "0.37"
+
+# serialization
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# PostgreSQL
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "chrono"] }
+
+# byte buffers
+bytes = "1"
+
+# async streams
+futures = "0.3"
+
+# date/time for partition naming
+chrono = { version = "0.4", features = ["serde"] }
+
+# tracing
+tracing = "0.1"
+
+# errors
+anyhow = "1"
+
+# config from env
+envy = "0.4"
+
+# infra + proto
+zk-infra-rs = { path = "../zk-infra-rs" }
+zk-proto-rs = { path = "../zk-proto-rs" }

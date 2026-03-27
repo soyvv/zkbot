@@ -6,7 +6,8 @@
         rtmd-sim-run rtmd-okx-demo rtmd-okx-demo-pilot \
         refdata-run pilot-run engine-run \
         pilot-java-build pilot-java-test pilot-java-run \
-        oms-run-pilot gw-run-pilot
+        oms-run-pilot gw-run-pilot \
+        recorder-check recorder-build recorder-run
 
 gen:
 	buf generate protos
@@ -140,6 +141,21 @@ oms-run-pilot: ## Run OMS with Pilot bootstrap (requires: make dev-up + make pil
 
 oms-redis-clear: ## Delete all oms:{OMS_ID}:* keys from dev Redis (OMS_ID default: oms_dev_1)
 	./scripts/clear_oms_redis.sh
+
+# ── Recorder service ────────────────────────────────────────────────────────
+recorder-check:
+	cd rust && cargo check -p zk-recorder-svc
+
+recorder-build:
+	cd rust && cargo build --release -p zk-recorder-svc
+
+recorder-run: ## Run recorder locally (requires dev stack: make dev-up)
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh recorder zsh -lc 'cd rust && ZK_RECORDER_ID=recorder_dev_1 \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_PG_URL=postgresql://zk:zk@localhost:5432/zkbot \
+	           ZK_PG_MAX_CONNECTIONS=5 \
+	           RUST_LOG=zk_recorder_svc=debug,info \
+	           cargo run -p zk-recorder-svc'
 
 # ── Gateway service ─────────────────────────────────────────────────────────
 gw-check:

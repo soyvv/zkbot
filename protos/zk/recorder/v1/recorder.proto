@@ -1,0 +1,61 @@
+syntax = "proto3";
+package zk.recorder.v1;
+
+import "zk/common/v1/common.proto";
+import "zk/oms/v1/oms.proto";
+
+// RecorderTerminalOrder carries the full terminal snapshot of an OMS order.
+// Maps to trd.order_oms. OMS fills linkage fields; recorder does enrichment
+// (strategy_id, execution_id, account name).
+message RecorderTerminalOrder {
+  int64  order_id        = 1;
+  int64  account_id      = 2;
+  string oms_id          = 3;
+  string gw_key          = 4;
+  string source_id       = 5;   // order source binding (e.g. strategy source_id)
+  string instrument_code = 6;
+  string instrument_exch = 7;   // exchange-specific instrument identifier
+
+  zk.common.v1.BuySellType   side       = 8;
+  zk.common.v1.OpenCloseType open_close = 9;
+  zk.common.v1.BasicOrderType order_type = 10;
+  zk.oms.v1.OrderStatus      order_status = 11;
+
+  double price           = 12;
+  double qty             = 13;
+  double filled_qty      = 14;
+  double filled_avg_price = 15;
+  string ext_order_ref   = 16;
+  string error_msg       = 17;
+  int64  terminal_at_ms  = 18;  // timestamp when order reached terminal state
+  int64  created_at_ms   = 19;  // order creation timestamp
+
+  repeated zk.oms.v1.Trade trades          = 20;  // all explicit fills
+  repeated zk.oms.v1.Trade inferred_trades = 21;  // all OMS-inferred fills
+  repeated zk.oms.v1.Fee   fees            = 22;  // all fees
+}
+
+// RecorderTradeEvent carries a single fill event for the recorder.
+// Maps to trd.trade_oms. Emitted once per explicit or inferred trade.
+message RecorderTradeEvent {
+  int64  order_id        = 1;
+  int64  account_id      = 2;
+  string oms_id          = 3;
+  string gw_key          = 4;
+  string source_id       = 5;
+  string instrument_code = 6;
+  string instrument_exch = 7;
+
+  zk.common.v1.BuySellType   side       = 8;
+  zk.common.v1.OpenCloseType open_close = 9;
+  string ext_order_ref   = 10;
+
+  // fill data
+  string ext_trade_id    = 11;
+  double filled_qty      = 12;
+  double filled_price    = 13;
+  int64  filled_ts_ms    = 14;
+  zk.common.v1.FillType fill_type = 15;
+  repeated zk.oms.v1.Fee fees     = 16;
+  bool   is_inferred     = 17;  // true if this was an OMS-inferred fill
+}

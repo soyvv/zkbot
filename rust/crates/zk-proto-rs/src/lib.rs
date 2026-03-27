@@ -76,4 +76,9 @@ pub mod zk {
             include!(concat!(env!("OUT_DIR"), "/zk.pilot.v1.rs"));
         }
     }
+    pub mod recorder {
+        pub mod v1 {
+            include!(concat!(env!("OUT_DIR"), "/zk.recorder.v1.rs"));
+        }
+    }
 }

@@ -103,6 +103,7 @@ async fn publish_worker(
                         t7_ns: t7,
                     });
                 }
+
             }
             PublishAction::BalanceUpdate { event } => {
                 nats.publish_balance_update(&event).await;

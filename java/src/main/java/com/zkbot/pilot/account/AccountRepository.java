@@ -97,6 +97,36 @@ public class AccountRepository {
                 accountId, limit);
     }
 
+    public List<Map<String, Object>> listOrderHistory(long accountId, int limit, String cursor,
+                                                       String instrumentId, String status) {
+        var params = new ArrayList<>();
+        var sb = new StringBuilder("""
+                SELECT order_id, account_id, oms_id, gw_id, strategy_id, execution_id, source_id,
+                       instrument_id, instrument_exch, side, open_close, order_type, order_status,
+                       price, qty, filled_qty, filled_avg_price, ext_order_ref, error_msg,
+                       terminal_at, created_at
+                FROM trd.order_oms WHERE account_id = ?""");
+        params.add(accountId);
+
+        if (instrumentId != null && !instrumentId.isBlank()) {
+            sb.append(" AND instrument_id = ?");
+            params.add(instrumentId);
+        }
+        if (status != null && !status.isBlank()) {
+            sb.append(" AND order_status = ?");
+            params.add(status);
+        }
+        if (cursor != null && !cursor.isBlank()) {
+            sb.append(" AND terminal_at < ?::timestamptz");
+            params.add(cursor);
+        }
+
+        sb.append(" ORDER BY terminal_at DESC LIMIT ?");
+        params.add(limit);
+
+        return jdbc.queryForList(sb.toString(), params.toArray());
+    }
+
     public List<Map<String, Object>> listActivitiesForAccount(long accountId, int limit) {
         return jdbc.queryForList("""
                 (SELECT 'trade' AS activity_type, filled_ts AS ts, order_id, instrument_id, side,

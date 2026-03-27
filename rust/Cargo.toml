@@ -24,6 +24,7 @@ members = [
     "crates/zk-rtmd-rs",
     "crates/zk-rtmd-gw-svc",
     "crates/zk-core-rs",
+    "crates/zk-recorder-svc",
 ]
 resolver = "2"
 

@@ -23,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "zk/monitor/v1/monitor.proto",
         "zk/pilot/v1/pilot_service.proto",
         "zk/pilot/v1/bootstrap.proto",
+        "zk/recorder/v1/recorder.proto",
     ];
 
     let full_paths: Vec<String> = files.iter().map(|f| format!("{proto_dir}/{f}")).collect();

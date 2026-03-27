@@ -64,6 +64,18 @@ pub mod subject {
         format!("zk.rtmd.funding.{venue}.{instrument_exch}")
     }
 
+    // ── Recorder ──────────────────────────────────────────────────────────
+
+    /// `zk.recorder.oms.{oms_id}.terminal_order.{account_id}`
+    pub fn recorder_terminal_order(oms_id: &str, account_id: i64) -> String {
+        format!("zk.recorder.oms.{oms_id}.terminal_order.{account_id}")
+    }
+
+    /// `zk.recorder.oms.{oms_id}.trade.{account_id}`
+    pub fn recorder_trade(oms_id: &str, account_id: i64) -> String {
+        format!("zk.recorder.oms.{oms_id}.trade.{account_id}")
+    }
+
     // ── Control ───────────────────────────────────────────────────────────────
 
     /// `zk.control.{service_type}.{service_id}` — admin control commands
@@ -102,6 +114,18 @@ mod tests {
         assert_eq!(
             subject::oms_position_update("oms_dev_1"),
             "zk.oms.oms_dev_1.position_update"
+        );
+    }
+
+    #[test]
+    fn test_recorder_subjects() {
+        assert_eq!(
+            subject::recorder_terminal_order("oms_dev_1", 9001),
+            "zk.recorder.oms.oms_dev_1.terminal_order.9001"
+        );
+        assert_eq!(
+            subject::recorder_trade("oms_dev_1", 9001),
+            "zk.recorder.oms.oms_dev_1.trade.9001"
         );
     }
 

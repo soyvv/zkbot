@@ -21,7 +21,7 @@
 
 use std::sync::Arc;
 
-use async_nats::{Client as NatsClient, Message};
+use async_nats::{jetstream, Client as NatsClient, Message};
 use bytes::Bytes;
 use futures::StreamExt;
 use prost::Message as ProstMessage;
@@ -32,6 +32,7 @@ use zk_infra_rs::nats::subject;
 use zk_proto_rs::zk::{
     exch_gw::v1::{BalanceUpdate, OrderReport},
     oms::v1::{BalanceUpdateEvent, OrderUpdateEvent, PositionUpdateEvent},
+    recorder::v1::{RecorderTerminalOrder, RecorderTradeEvent},
 };
 
 use crate::oms_actor::OmsCommand;
@@ -42,13 +43,15 @@ use crate::oms_actor::OmsCommand;
 #[derive(Clone)]
 pub struct NatsPublisher {
     pub nats: NatsClient,
+    pub js: jetstream::Context,
     pub oms_id: Arc<String>,
 }
 
 impl NatsPublisher {
-    pub fn new(nats: NatsClient, oms_id: impl Into<String>) -> Self {
+    pub fn new(nats: NatsClient, js: jetstream::Context, oms_id: impl Into<String>) -> Self {
         Self {
             nats,
+            js,
             oms_id: Arc::new(oms_id.into()),
         }
     }
@@ -77,6 +80,26 @@ impl NatsPublisher {
     pub async fn publish_position_update(&self, event: &PositionUpdateEvent) {
         let subj = subject::oms_position_update(&self.oms_id);
         self.publish_proto(subj, event).await;
+    }
+
+    /// Publish terminal order snapshot to JetStream recorder stream.
+    /// Best-effort: logs warning on failure. Only call for terminal orders.
+    pub async fn publish_recorder_terminal_order(&self, event: &RecorderTerminalOrder) {
+        let subj = subject::recorder_terminal_order(&self.oms_id, event.account_id);
+        let bytes = Bytes::from(event.encode_to_vec());
+        if let Err(e) = self.js.publish(subj.clone(), bytes).await {
+            warn!(subject = subj, error = %e, "JetStream recorder publish failed (terminal_order)");
+        }
+    }
+
+    /// Publish trade event to JetStream recorder stream.
+    /// Best-effort: logs warning on failure.
+    pub async fn publish_recorder_trade(&self, event: &RecorderTradeEvent) {
+        let subj = subject::recorder_trade(&self.oms_id, event.account_id);
+        let bytes = Bytes::from(event.encode_to_vec());
+        if let Err(e) = self.js.publish(subj.clone(), bytes).await {
+            warn!(subject = subj, error = %e, "JetStream recorder publish failed (trade)");
+        }
     }
 }
 

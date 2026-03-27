@@ -9,6 +9,7 @@ pub mod grpc;
 pub mod vault;
 pub mod mongo;
 pub mod nats;
+pub mod nats_js;
 pub mod nats_kv;
 pub mod nats_kv_discovery;
 pub mod pg;

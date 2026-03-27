@@ -15,6 +15,7 @@ Topic-specific design notes live alongside it:
 - [API Contracts](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/api_contracts.md)
 - [Proto](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/proto.md)
 - [Data Layer](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/data_layer.md)
+- [Bot UI Interaction](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/bot_ui_interaction.md)
 - [SDK](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/sdk.md)
 - [Rust Crates](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/rust_crates.md)
 - [Operations](/Users/zzk/workspace/zklab/zkbot/docs/system-arch/ops.md)

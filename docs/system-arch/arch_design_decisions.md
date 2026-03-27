@@ -1,5 +1,45 @@
 # Architecture Design Decisions — zkbot
 
+## Bot domain split: strategy definition, bot definition, and run snapshot (2026-03-27)
+
+The bot domain should be modeled as three separate control-plane entities:
+
+- `strategy_definition`
+- `engine_instance`
+- `strategy_instance`
+
+Rules:
+
+- `strategy_definition` owns only strategy-specific config and metadata
+- `strategy_key` is the semantic runtime selector for a strategy definition, for example
+  `MM_OKX_BTC_PERP_V1`
+- `engine_instance` is the operator-facing bot definition and owns engine/common config, OMS
+  workspace binding, and selected strategy
+- each bot start creates one `strategy_instance` identified by `execution_id`
+- `strategy_instance` must reference both:
+  - the owning bot definition via `engine_id`
+  - the selected strategy definition via `strategy_id`
+- generic strategy config must not embed account or symbol selections
+- at runtime, the engine is responsible for proving that the selected strategy can run inside the
+  chosen OMS workspace and for resolving the needed physical runtime scope
+- bot start and bot stop are owned by Pilot's runtime orchestrator
+- the current backend may use local process orchestration for development
+- the production target backend should be Kubernetes orchestration
+- engine bootstrap and self-registration happen after orchestrator launch and do not replace
+  orchestrator ownership of lifecycle intent
+- run snapshots must preserve the effective config used for that execution even if the strategy or
+  bot definition is edited later
+- bot management UI should anchor on `engine_instance` and show the current run or last active run
+  from `strategy_instance`
+
+Rationale:
+
+- strategy reuse and bot onboarding are different operator concerns
+- engine/common runtime config should not be mixed into strategy config
+- execution history needs stable run snapshots and correlation across UI, engine, and recorder
+- the current strategy-first Pilot model obscures the distinction between reusable strategy
+  templates and runnable bot definitions
+
 ## OMS recorder publication boundary (2026-03-27)
 
 Recorder-specific OMS persistence should use a dedicated JetStream-backed publish path rather than

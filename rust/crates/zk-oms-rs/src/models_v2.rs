@@ -125,6 +125,10 @@ pub struct LiveOrder {
 
     /// Error message (set on rejection).
     pub error_msg: String,
+
+    /// Frozen timestamp (ms) when the order first transitioned to terminal state.
+    /// Set exactly once — never updated after first terminal transition.
+    pub terminal_at: Option<i64>,
 }
 
 impl LiveOrder {

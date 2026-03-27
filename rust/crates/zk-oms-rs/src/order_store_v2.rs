@@ -134,6 +134,7 @@ impl OrderStoreV2 {
             cancel_attempts: 0,
             accounting_flags: flags,
             error_msg: String::new(),
+            terminal_at: None,
         };
 
         let detail = OrderDetailLog {
@@ -295,6 +296,7 @@ impl OrderStoreV2 {
             cancel_attempts: 0,
             accounting_flags: OrderAccountingFlags::default(),
             error_msg: String::new(),
+            terminal_at: None,
         };
 
         let detail = OrderDetailLog {
@@ -506,6 +508,10 @@ impl OrderStoreV2 {
             live.order_status = OrderStatus::Rejected as i32;
             live.updated_at = ts;
             live.error_msg = error_msg.to_string();
+            // Freeze terminal timestamp on rejection
+            if live.terminal_at.is_none() {
+                live.terminal_at = Some(ts);
+            }
         }
     }
 }
@@ -875,6 +881,7 @@ mod tests {
             cancel_attempts: 0,
             accounting_flags: OrderAccountingFlags::default(),
             error_msg: String::new(),
+            terminal_at: None,
         };
         let detail = OrderDetailLog {
             order_id: 99,
