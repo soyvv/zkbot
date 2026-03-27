@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use tokio::sync::{mpsc, watch, Mutex};
-use tracing::info;
+use tracing::{info, warn};
 
 use zk_venue_okx::config::OkxConfig;
 use zk_venue_okx::normalize::{self, OkxIdMap};
@@ -17,6 +17,57 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+fn is_okx_derivative(inst_id: &str) -> bool {
+    inst_id.contains("SWAP") || inst_id.matches('-').count() >= 2
+}
+
+fn okx_td_mode(inst_id: &str) -> &'static str {
+    if is_okx_derivative(inst_id) {
+        "cross"
+    } else {
+        "cash"
+    }
+}
+
+fn okx_pos_side(req: &VenuePlaceOrder) -> Option<&'static str> {
+    use zk_proto_rs::zk::common::v1::{BuySellType, OpenCloseType};
+
+    if !is_okx_derivative(&req.instrument) {
+        return None;
+    }
+
+    match (
+        req.buysell_type,
+        req.openclose_type,
+    ) {
+        (x, y)
+            if x == BuySellType::BsBuy as i32
+                && y == OpenCloseType::OcOpen as i32 =>
+        {
+            Some("long")
+        }
+        (x, y)
+            if x == BuySellType::BsSell as i32
+                && y == OpenCloseType::OcClose as i32 =>
+        {
+            Some("long")
+        }
+        (x, y)
+            if x == BuySellType::BsSell as i32
+                && y == OpenCloseType::OcOpen as i32 =>
+        {
+            Some("short")
+        }
+        (x, y)
+            if x == BuySellType::BsBuy as i32
+                && y == OpenCloseType::OcClose as i32 =>
+        {
+            Some("short")
+        }
+        _ => None,
+    }
 }
 
 pub struct OkxVenueAdapter {
@@ -191,7 +242,7 @@ impl VenueAdapter for OkxVenueAdapter {
             None
         };
 
-        let td_mode = "cash";
+        let td_mode = okx_td_mode(inst_id);
 
         match self
             .rest_client
@@ -203,6 +254,7 @@ impl VenueAdapter for OkxVenueAdapter {
                 px.as_deref(),
                 &cl_ord_id,
                 td_mode,
+                None,
             )
             .await
         {
@@ -214,11 +266,87 @@ impl VenueAdapter for OkxVenueAdapter {
                     error_message: None,
                 })
             }
-            Err(e) => Ok(VenueCommandAck {
-                success: false,
-                exch_order_ref: None,
-                error_message: Some(e.to_string()),
-            }),
+            Err(e) => {
+                if e.to_string().contains("Parameter posSide error") {
+                    if let Some(pos_side) = okx_pos_side(&req) {
+                        warn!(
+                            gw_id = self.gw_id,
+                            account_id = self.account_id,
+                            inst_id,
+                            side,
+                            ord_type,
+                            qty = sz,
+                            px = px.as_deref().unwrap_or(""),
+                            cl_ord_id,
+                            td_mode,
+                            pos_side,
+                            "OKX place_order retrying with derived posSide"
+                        );
+                        match self
+                            .rest_client
+                            .place_order(
+                                inst_id,
+                                side,
+                                ord_type,
+                                &sz,
+                                px.as_deref(),
+                                &cl_ord_id,
+                                td_mode,
+                                Some(pos_side),
+                            )
+                            .await
+                        {
+                            Ok(data) => {
+                                self.id_map.record(&cl_ord_id, &data.ord_id, inst_id);
+                                return Ok(VenueCommandAck {
+                                    success: true,
+                                    exch_order_ref: Some(data.ord_id),
+                                    error_message: None,
+                                });
+                            }
+                            Err(retry_err) => {
+                                warn!(
+                                    gw_id = self.gw_id,
+                                    account_id = self.account_id,
+                                    inst_id,
+                                    side,
+                                    ord_type,
+                                    qty = sz,
+                                    px = px.as_deref().unwrap_or(""),
+                                    cl_ord_id,
+                                    td_mode,
+                                    pos_side,
+                                    error = %retry_err,
+                                    "OKX place_order retry with derived posSide failed"
+                                );
+                                return Ok(VenueCommandAck {
+                                    success: false,
+                                    exch_order_ref: None,
+                                    error_message: Some(retry_err.to_string()),
+                                });
+                            }
+                        }
+                    }
+                }
+                warn!(
+                    gw_id = self.gw_id,
+                    account_id = self.account_id,
+                    inst_id,
+                    side,
+                    ord_type,
+                    qty = sz,
+                    px = px.as_deref().unwrap_or(""),
+                    cl_ord_id,
+                    td_mode,
+                    error = %e,
+                    "OKX place_order failed"
+                );
+                Ok(VenueCommandAck {
+                    success: false,
+                    exch_order_ref: None,
+                    error_message: Some(e.to_string()),
+                })
+            }
         }
     }
 
@@ -238,11 +366,21 @@ impl VenueAdapter for OkxVenueAdapter {
                 exch_order_ref: Some(ord_id.to_string()),
                 error_message: None,
             }),
-            Err(e) => Ok(VenueCommandAck {
-                success: false,
-                exch_order_ref: Some(ord_id.to_string()),
-                error_message: Some(e.to_string()),
-            }),
+            Err(e) => {
+                warn!(
+                    gw_id = self.gw_id,
+                    account_id = self.account_id,
+                    inst_id,
+                    ord_id,
+                    error = %e,
+                    "OKX cancel_order failed"
+                );
+                Ok(VenueCommandAck {
+                    success: false,
+                    exch_order_ref: Some(ord_id.to_string()),
+                    error_message: Some(e.to_string()),
+                })
+            }
         }
     }
 
@@ -396,5 +534,69 @@ impl VenueAdapter for OkxVenueAdapter {
         rx.recv()
             .await
             .ok_or_else(|| anyhow::anyhow!("OKX event channel closed"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{okx_pos_side, okx_td_mode};
+    use crate::venue_adapter::VenuePlaceOrder;
+    use zk_proto_rs::zk::common::v1::{BasicOrderType, BuySellType, OpenCloseType};
+
+    fn req(inst: &str, side: i32, oc: i32) -> VenuePlaceOrder {
+        VenuePlaceOrder {
+            correlation_id: 1,
+            exch_account_id: "acct".into(),
+            instrument: inst.into(),
+            buysell_type: side,
+            openclose_type: oc,
+            order_type: BasicOrderType::OrdertypeLimit as i32,
+            price: 1.0,
+            qty: 1.0,
+            leverage: 1.0,
+            timestamp: 0,
+        }
+    }
+
+    #[test]
+    fn okx_td_mode_uses_cash_for_spot_and_cross_for_derivatives() {
+        assert_eq!(okx_td_mode("BTC-USDT"), "cash");
+        assert_eq!(okx_td_mode("BTC-USDT-SWAP"), "cross");
+    }
+
+    #[test]
+    fn okx_pos_side_derives_long_and_short_for_perp_orders() {
+        assert_eq!(
+            okx_pos_side(&req(
+                "BTC-USDT-SWAP",
+                BuySellType::BsBuy as i32,
+                OpenCloseType::OcOpen as i32,
+            )),
+            Some("long")
+        );
+        assert_eq!(
+            okx_pos_side(&req(
+                "BTC-USDT-SWAP",
+                BuySellType::BsSell as i32,
+                OpenCloseType::OcClose as i32,
+            )),
+            Some("long")
+        );
+        assert_eq!(
+            okx_pos_side(&req(
+                "BTC-USDT-SWAP",
+                BuySellType::BsSell as i32,
+                OpenCloseType::OcOpen as i32,
+            )),
+            Some("short")
+        );
+        assert_eq!(
+            okx_pos_side(&req(
+                "BTC-USDT-SWAP",
+                BuySellType::BsBuy as i32,
+                OpenCloseType::OcClose as i32,
+            )),
+            Some("short")
+        );
     }
 }

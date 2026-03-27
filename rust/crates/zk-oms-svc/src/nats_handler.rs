@@ -146,7 +146,22 @@ async fn handle_order_report_msg(msg: Message, cmd_tx: &mpsc::Sender<OmsCommand>
 async fn handle_balance_msg(msg: Message, cmd_tx: &mpsc::Sender<OmsCommand>, gw_id: &str) {
     match BalanceUpdate::decode(msg.payload.as_ref()) {
         Ok(update) => {
-            debug!(gw_id, "received BalanceUpdate");
+            let total_entries = update.balances.len();
+            let spot_entries = update
+                .balances
+                .iter()
+                .filter(|entry| {
+                    entry.instrument_type
+                        == zk_proto_rs::zk::common::v1::InstrumentType::InstTypeSpot as i32
+                })
+                .count();
+            debug!(
+                gw_id,
+                total_entries,
+                spot_entries,
+                position_entries = total_entries.saturating_sub(spot_entries),
+                "received gateway balance/position update"
+            );
             if cmd_tx
                 .send(OmsCommand::GatewayBalanceUpdate(update))
                 .await

@@ -3,6 +3,7 @@ package zk.gateway.v1;
 
 import "zk/common/v1/common.proto";
 import "zk/exch_gw/v1/exch_gw.proto";
+import "zk/oms/v1/oms.proto";
 
 // ===== Request/response messages (from rpc-exch-gateway.proto, field numbers preserved) =====
 
@@ -98,7 +99,9 @@ message AccountResponse {
 
 message QueryPositionRequest {}
 
-message PositionResponse {}
+message PositionResponse {
+    repeated zk.oms.v1.Position positions = 1;
+}
 
 message QueryOpenOrderRequest {
     string exch_account_code = 1;

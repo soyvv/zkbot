@@ -1,5 +1,27 @@
 # Architecture Design Decisions — zkbot
 
+## OMS recorder publication boundary (2026-03-27)
+
+Recorder-specific OMS persistence should use a dedicated JetStream-backed publish path rather than
+the normal low-latency fanout subjects.
+
+Rules:
+
+- OMS keeps plain NATS `order_update` subjects as the low-latency fanout path for strategies and
+  monitors
+- OMS publishes recorder-facing terminal-order events to a dedicated JetStream subject
+- OMS publishes recorder-facing trade events to a dedicated JetStream subject
+- JetStream publication must stay outside the OMS writer critical path
+- the writer may enqueue recorder publish actions, but it must not await JetStream publish ACKs or
+  durable-write round trips inline with state mutation
+- recorder owns downstream Postgres retention and partition rotation for `trd.order_oms`
+
+Rationale:
+
+- recorder needs replayable, durable consumption semantics
+- strategies and monitors should not pay JetStream durability latency on the hot path
+- partition lifecycle belongs to the storage owner, not the event producer
+
 ## KvReconciler: periodic sweep for TTL-expired keys (2026-03-22)
 
 NATS KV `max_age` TTL expiry does not emit DELETE/PURGE watch events to KV watchers.

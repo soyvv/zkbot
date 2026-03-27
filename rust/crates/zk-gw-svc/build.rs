@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         // Reuse message types from zk-proto-rs
         .extern_path(".zk.common.v1", "::zk_proto_rs::zk::common::v1")
+        .extern_path(".zk.oms.v1", "::zk_proto_rs::zk::oms::v1")
         .extern_path(".zk.exch_gw.v1", "::zk_proto_rs::zk::exch_gw::v1")
         .extern_path(".zk.rtmd.v1", "::zk_proto_rs::zk::rtmd::v1")
         // Generate server stubs only (this is a server crate)

@@ -12,6 +12,7 @@ OMS is the command and state authority for:
 - balance and position state
 - risk checks and panic controls
 - normalized order-update fanout
+- recorder-facing terminal-order publication
 
 OMS discovers gateways through the generic KV registry and does not depend on a separate ODS.
 
@@ -26,7 +27,8 @@ Intent:
 
 - one writer task owns `OmsCore` mutations
 - queries read lock-free snapshots
-- gateway, Redis, and NATS side effects are emitted by the writer but executed through bounded async workers
+- gateway, Redis, plain NATS, and JetStream side effects are emitted by the writer but executed
+  through bounded async workers
 - snapshot mutation remains writer-owned
 
 Logical shape:
@@ -132,6 +134,7 @@ Mutation outputs:
 
 - gateway RPC actions
 - NATS `OrderUpdateEvent`, balance, position, and system events
+- JetStream-backed recorder terminal-order and trade events
 - Redis order/open-order/balance/position state updates
 - a fresh immutable `OmsSnapshot`
 
@@ -151,11 +154,21 @@ OMS notes:
 - OMS should persist the mapping between `client_order_id` and venue-native order id using the first
   linkage event or acknowledgment that contains both ids
 - command idempotency remains an OMS responsibility and is still deferred work
+- OMS should publish a recorder-dedicated terminal-order event only when an order transitions into
+  a terminal state
+- OMS should also publish recorder-dedicated trade events for fills so recorder can persist
+  `trd.trade_oms` from JetStream rather than from the live fanout subject
+- the recorder event should be backed by JetStream and must contain enough terminal snapshot data
+  that recorder does not need Redis hydration in the preferred design
+- JetStream publish must stay outside the OMS critical path: the writer should enqueue recorder
+  publish work to an async executor and never await JetStream ACKs inline with order mutation
+- OMS should not own recorder table retention or partition rotation; it only owns event production
 
 ## Interfaces
 
 - gRPC: `zk.oms.v1.OMSService`
 - NATS topics for order, balance, position, and system events
+- JetStream-backed recorder subjects for terminal orders and trades
 - Redis for fast operational state
 - PostgreSQL for config lookup
 
@@ -173,7 +186,8 @@ containing transport, venue/account scope, and capabilities.
 
 - PostgreSQL holds configuration and authoritative control-plane data
 - Redis is the warm-start and operational read store for live OMS state
-- NATS carries normalized events for strategies, recorder, and monitor
+- plain NATS carries normalized low-latency events for strategies and monitor
+- JetStream carries recorder-replayable terminal-order and trade events
 - OMS runtime memory remains the active mutation authority while the process is live
 
 ## Related Docs

@@ -18,6 +18,7 @@ Responsibilities:
 - Postgres-first persistence for OMS orders, fills, balances, positions, and strategy execution data
 - append-only recording for trades and strategy events
 - current-state upserts for OMS orders and execution status
+- retention-aware partition management for recorder-owned Postgres tables
 - optional raw event/log archival in MongoDB for debugging and short retention
 
 Non-responsibilities:
@@ -95,19 +96,21 @@ reconstruct truth from Mongo or Redis.
 
 ### 1. OMS Recorder
 
-Consumes OMS order update subjects and persists canonical OMS state into Postgres.
+Consumes OMS recorder subjects and persists canonical OMS state into Postgres.
 
 Responsibilities:
 
-- upsert current order state
+- upsert terminal order state
 - insert fills idempotently
 - persist fee detail together with fills or in a dedicated fee table when no fill is present
 - persist balance and position snapshots if/when those streams are moved off Redis
 - enrich rows with account, gateway, venue, and instrument metadata
+- manage partition creation and retention for recorder-owned order tables
 
 Input streams:
 
-- `zk.oms.<oms_id>.order_update.<account_id>` or the current equivalent subject
+- `zk.recorder.oms.<oms_id>.terminal_order.<account_id>`
+- `zk.recorder.oms.<oms_id>.trade.<account_id>`
 - optional balance and position update streams
 
 ### 2. Strategy Recorder
@@ -149,9 +152,11 @@ Already aligned with this design:
 Recommended additions:
 
 - `trd.order_oms`
-  Current OMS order state keyed by `order_id`, with `account_id`, `oms_id`, `strategy_id`,
+  Terminal OMS order state keyed by `order_id`, with `account_id`, `oms_id`, `strategy_id`,
   `execution_id`, `source_id`, `instrument_id`, `ext_order_ref`, requested qty/price, filled qty,
-  average fill price, status, timestamps, and raw snapshot jsonb.
+  average fill price, status, terminal timestamp, recorder timestamp, and raw snapshot jsonb.
+  This table should be range-partitioned by terminal month and only retain the most recent
+  3 months of partitions.
 - `trd.order_event_oms`
   Optional append-only order-update event table for short or medium retention. This replaces the
   current Mongo TTL collection if full auditability in Postgres is desired.
@@ -187,6 +192,20 @@ The recorder should keep both:
 The append-only side supports audit, replay, and debugging. The current-state side supports fast
 UI/API queries and reconciliation scans.
 
+### Partitioning And Retention
+
+`trd.order_oms` should not be an unbounded heap table.
+
+Rules:
+
+- partition by terminal month using a `terminal_at` or equivalent terminal-state timestamp
+- keep the live month plus the prior 2 full months in Postgres hot storage
+- create next-month partitions ahead of time so recorder writes never block on DDL
+- drop partitions older than the retention window instead of deleting rows piecemeal
+
+The retention target for the initial design is 3 months. If a longer audit window is needed later,
+that should be solved by changing retention policy or archiving, not by removing partitioning.
+
 ## Linking Strategy and OMS Data
 
 The key gap today is that strategy events know `execution_id`, but OMS trade persistence is driven
@@ -211,7 +230,34 @@ For the new design, use one of two modes:
 
 ### Preferred
 
-Publish a richer terminal order snapshot from OMS so the recorder does not need Redis reads.
+OMS publishes a recorder-dedicated terminal snapshot event through JetStream so the recorder does
+not need Redis reads.
+
+Contract:
+
+- producer: OMS
+- transport: NATS JetStream, dedicated recorder stream
+- subject shape: `zk.recorder.oms.<oms_id>.terminal_order.<account_id>`
+- trade subject shape: `zk.recorder.oms.<oms_id>.trade.<account_id>`
+- payload shape:
+  terminal order: `OrderUpdateEvent` or a recorder-specific terminal-order envelope carrying the
+  full terminal order snapshot
+  trade: `Trade` or a recorder-specific trade envelope carrying the fill plus order linkage fields
+- publication rule: only emit when OMS considers the order terminal (`FILLED`, `CANCELLED`,
+  `REJECTED`)
+- trade publication rule: emit each explicit or inferred fill once through the recorder stream so
+  recorder can persist `trd.trade_oms` without scraping the live order-update fanout
+
+Design intent:
+
+- the normal `zk.oms.<oms_id>.order_update.<account_id>` subject remains the low-latency fanout path
+  for strategies and monitors
+- the recorder path is isolated onto JetStream so recorder lag or replay does not affect the live
+  OMS fanout path
+- the recorder event should contain all fields required for `trd.order_oms` upsert, including
+  terminal status, quantities, average fill price, external order reference, and raw snapshot data
+- the recorder trade event should contain enough linkage metadata for idempotent `trd.trade_oms`
+  insert without additional Redis or OMS reads
 
 ### Compatibility Mode
 
@@ -224,6 +270,25 @@ Keep a small terminal-order hydrator that:
   snapshot payloads
 
 The hydrator should enrich Postgres only. Mongo should not remain the canonical sink.
+
+## Recorder Runtime Model
+
+The recorder should be intentionally simple:
+
+- JetStream durable consumer for terminal-order events
+- JetStream durable consumer for trade events
+- idempotent Postgres upsert for `trd.order_oms`
+- idempotent insert for `trd.trade_oms`
+- periodic partition-maintenance job running in the recorder process
+
+The periodic job should:
+
+- ensure the current and next monthly partitions exist
+- drop partitions older than the 3-month retention window
+- run on a low-frequency schedule such as hourly or daily
+
+This job is recorder-owned because the recorder owns the table lifecycle. OMS should publish facts,
+not manage downstream storage DDL.
 
 ## Trade Recording Design
 
@@ -258,6 +323,7 @@ Required handoff fields:
 - `instrument_id` and `instrument_exch`
 - `account_id`, `oms_id`
 - `source_id`, `strategy_id`, `execution_id`
+- terminal timestamp and recorder persistence timestamp
 - raw order snapshot jsonb for compatibility gaps
 
 The recorder may set an initial recon marker on terminal orders, but it should not own scan,

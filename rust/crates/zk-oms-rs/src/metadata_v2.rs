@@ -217,7 +217,8 @@ impl MetadataTables {
             instruments.push(meta);
 
             // Map (gw_id, exch_sym) -> instrument_id for every gateway serving this exchange.
-            if let Some(gw_keys) = config.exch_name_to_gw_keys.get(&ref_data.exchange_name) {
+            // Uppercase to match case-insensitive venue key in exch_name_to_gw_keys.
+            if let Some(gw_keys) = config.exch_name_to_gw_keys.get(&ref_data.exchange_name.to_uppercase()) {
                 for gw_key in gw_keys {
                     let gk_sym = strings.intern(gw_key);
                     if let Some(&gw_id) = gw_by_key.get(&gk_sym) {
@@ -460,7 +461,7 @@ impl MetadataTables {
             new_instrument_by_code.insert(code_sym, inst_id);
 
             // Rebuild (gw_id, exch_sym) -> instrument_id index from scratch.
-            if let Some(gw_keys) = config.exch_name_to_gw_keys.get(&ref_data.exchange_name) {
+            if let Some(gw_keys) = config.exch_name_to_gw_keys.get(&ref_data.exchange_name.to_uppercase()) {
                 for gw_key in gw_keys {
                     let gk_sym = self.strings.intern(gw_key);
                     if let Some(&gw_id) = self.gw_by_key.get(&gk_sym) {

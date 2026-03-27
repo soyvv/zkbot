@@ -310,7 +310,17 @@ impl GatewayService for GrpcHandler {
         &self,
         _request: Request<QueryPositionRequest>,
     ) -> Result<Response<PositionResponse>, Status> {
-        Ok(Response::new(PositionResponse {}))
+        let venue_req = VenuePositionQuery {};
+        match self.adapter.query_positions(venue_req).await {
+            Ok(facts) => {
+                let positions = facts
+                    .iter()
+                    .map(venue_position_fact_to_proto)
+                    .collect();
+                Ok(Response::new(PositionResponse { positions }))
+            }
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn query_order_details(
@@ -451,10 +461,41 @@ fn venue_order_fact_to_exch_order(f: &VenueOrderFact) -> ExchOrder {
     }
 }
 
+fn infer_instrument_type(instrument: &str) -> i32 {
+    use zk_proto_rs::zk::common::v1::InstrumentType;
+
+    if instrument.contains("SWAP") {
+        InstrumentType::InstTypePerp as i32
+    } else if instrument.contains("FUTURES") || instrument.contains("-") && instrument.matches('-').count() >= 2 {
+        InstrumentType::InstTypeFuture as i32
+    } else {
+        InstrumentType::InstTypeSpot as i32
+    }
+}
+
+fn venue_position_fact_to_proto(f: &VenuePositionFact) -> zk_proto_rs::zk::oms::v1::Position {
+    zk_proto_rs::zk::oms::v1::Position {
+        account_id: f.account_id,
+        instrument_code: f.instrument.clone(),
+        long_short_type: f.long_short_type,
+        instrument_type: infer_instrument_type(&f.instrument),
+        total_qty: f.qty,
+        frozen_qty: f.frozen_qty,
+        avail_qty: f.avail_qty,
+        is_from_exch: true,
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{validate_cancel_order_request, validate_send_order_request};
+    use super::{
+        infer_instrument_type, validate_cancel_order_request, validate_send_order_request,
+        venue_position_fact_to_proto,
+    };
     use crate::proto::zk_gw_v1::{CancelOrderRequest, SendOrderRequest};
+    use crate::venue_adapter::VenuePositionFact;
+    use zk_proto_rs::zk::common::v1::{InstrumentType, LongShortType};
 
     #[test]
     fn place_order_validation_rejects_zero_correlation_id() {
@@ -498,5 +539,37 @@ mod tests {
             validate_cancel_order_request(&req),
             Err("cancel_order: order_id must be > 0")
         );
+    }
+
+    #[test]
+    fn infer_instrument_type_handles_perp_and_spot() {
+        assert_eq!(
+            infer_instrument_type("BTC-USDT-SWAP"),
+            InstrumentType::InstTypePerp as i32
+        );
+        assert_eq!(
+            infer_instrument_type("BTC-USDT"),
+            InstrumentType::InstTypeSpot as i32
+        );
+    }
+
+    #[test]
+    fn venue_position_fact_to_proto_maps_fields() {
+        let fact = VenuePositionFact {
+            instrument: "BTC-USDT-SWAP".into(),
+            long_short_type: LongShortType::LsLong as i32,
+            qty: 2.5,
+            avail_qty: 2.0,
+            frozen_qty: 0.5,
+            account_id: 9001,
+        };
+        let proto = venue_position_fact_to_proto(&fact);
+        assert_eq!(proto.account_id, 9001);
+        assert_eq!(proto.instrument_code, "BTC-USDT-SWAP");
+        assert_eq!(proto.instrument_type, InstrumentType::InstTypePerp as i32);
+        assert_eq!(proto.total_qty, 2.5);
+        assert_eq!(proto.avail_qty, 2.0);
+        assert_eq!(proto.frozen_qty, 0.5);
+        assert!(proto.is_from_exch);
     }
 }

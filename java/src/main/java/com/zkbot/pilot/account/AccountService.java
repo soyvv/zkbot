@@ -112,6 +112,7 @@ public class AccountService {
 
         Oms.QueryPositionRequest req = Oms.QueryPositionRequest.newBuilder()
                 .setAccountId(accountId)
+                .setQueryGw(true)
                 .build();
         Oms.PositionResponse resp = omsClient.queryPosition(omsId, req);
 
@@ -204,6 +205,7 @@ public class AccountService {
         try {
             Oms.QueryPositionRequest posReq = Oms.QueryPositionRequest.newBuilder()
                     .setAccountId(accountId)
+                    .setQueryGw(true)
                     .build();
             positionCount = omsClient.queryPosition(omsId, posReq).getPositionsCount();
         } catch (Exception e) {

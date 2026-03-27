@@ -42,7 +42,7 @@ use std::time::Duration;
 use async_nats::jetstream;
 use futures::StreamExt;
 use prost::Message;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 use zk_proto_rs::zk::discovery::v1::ServiceRegistration;
@@ -59,6 +59,19 @@ const SNAPSHOT_SETTLE_MS: u64 = 200;
 pub struct KvDiscoveryClient {
     kv: KvRegistryClient,
     cache: Arc<RwLock<HashMap<String, ServiceRegistration>>>,
+    events_tx: broadcast::Sender<DiscoveryEvent>,
+}
+
+/// Typed discovery delta emitted by [`KvDiscoveryClient`].
+#[derive(Clone, Debug)]
+pub enum DiscoveryEvent {
+    Upsert {
+        key: String,
+        registration: ServiceRegistration,
+    },
+    Remove {
+        key: String,
+    },
 }
 
 impl KvDiscoveryClient {
@@ -70,7 +83,8 @@ impl KvDiscoveryClient {
     pub async fn start(js: &jetstream::Context) -> Result<Self, async_nats::Error> {
         let kv = KvRegistryClient::open(js, REGISTRY_BUCKET).await?;
         let cache = Arc::new(RwLock::new(HashMap::new()));
-        Ok(Self { kv, cache })
+        let (events_tx, _) = broadcast::channel(256);
+        Ok(Self { kv, cache, events_tx })
     }
 
     /// Spawn a background task that populates and maintains the cache via KV watch.
@@ -83,6 +97,7 @@ impl KvDiscoveryClient {
     pub fn spawn_watch_loop(&self) -> JoinHandle<()> {
         let kv = self.kv.clone();
         let cache = Arc::clone(&self.cache);
+        let events_tx = self.events_tx.clone();
 
         tokio::spawn(async move {
             loop {
@@ -108,7 +123,9 @@ impl KvDiscoveryClient {
                     )
                     .await
                     {
-                        Ok(Some(Ok(entry))) => apply_entry(&mut staging, entry),
+                        Ok(Some(Ok(entry))) => {
+                            let _ = apply_entry(&mut staging, entry);
+                        }
                         Ok(Some(Err(e))) => {
                             warn!(error = %e, "discovery: stream error during snapshot, reconnecting");
                             stream_error = true;
@@ -126,13 +143,37 @@ impl KvDiscoveryClient {
                 // Phase 2: atomic swap — replaces old cache in one write-lock.
                 // Readers see old data up to this point, then new snapshot; never empty.
                 let n = staging.len();
-                *cache.write().await = staging;
+                let (removed, upserts) = {
+                    let mut guard = cache.write().await;
+                    let removed: Vec<String> = guard
+                        .keys()
+                        .filter(|key| !staging.contains_key(*key))
+                        .cloned()
+                        .collect();
+                    let upserts: Vec<(String, ServiceRegistration)> = staging
+                        .iter()
+                        .filter(|(key, reg)| guard.get(*key) != Some(*reg))
+                        .map(|(key, reg)| (key.clone(), reg.clone()))
+                        .collect();
+                    *guard = staging;
+                    (removed, upserts)
+                };
+                for key in removed {
+                    let _ = events_tx.send(DiscoveryEvent::Remove { key });
+                }
+                for (key, registration) in upserts {
+                    let _ = events_tx.send(DiscoveryEvent::Upsert { key, registration });
+                }
                 debug!("discovery: snapshot loaded ({n} entries)");
 
                 // Phase 3: live updates applied directly to the shared cache.
                 while let Some(result) = watch.next().await {
                     match result {
-                        Ok(entry) => apply_entry(&mut *cache.write().await, entry),
+                        Ok(entry) => {
+                            if let Some(event) = apply_entry(&mut *cache.write().await, entry) {
+                                let _ = events_tx.send(event);
+                            }
+                        }
                         Err(e) => {
                             warn!(error = %e, "discovery: watch stream error, reconnecting");
                             break;
@@ -164,11 +205,19 @@ impl KvDiscoveryClient {
     pub async fn snapshot(&self) -> HashMap<String, ServiceRegistration> {
         self.cache.read().await.clone()
     }
+
+    /// Subscribe to typed discovery deltas.
+    pub fn subscribe(&self) -> broadcast::Receiver<DiscoveryEvent> {
+        self.events_tx.subscribe()
+    }
 }
 
 /// Apply a single KV entry (Put/Delete/Purge) to any `HashMap`.
 /// Used in both the snapshot staging phase and the live update phase.
-fn apply_entry(map: &mut HashMap<String, ServiceRegistration>, entry: KvEntry) {
+fn apply_entry(
+    map: &mut HashMap<String, ServiceRegistration>,
+    entry: KvEntry,
+) -> Option<DiscoveryEvent> {
     match entry.operation {
         KvOperation::Put => match ServiceRegistration::decode(entry.value.as_ref()) {
             Ok(reg) => {
@@ -177,13 +226,23 @@ fn apply_entry(map: &mut HashMap<String, ServiceRegistration>, entry: KvEntry) {
                     service_type = reg.service_type,
                     "discovery: upsert"
                 );
-                map.insert(entry.key, reg);
+                let key = entry.key;
+                let changed = map.get(&key) != Some(&reg);
+                map.insert(key.clone(), reg.clone());
+                changed.then_some(DiscoveryEvent::Upsert {
+                    key,
+                    registration: reg,
+                })
             }
-            Err(e) => warn!(key = entry.key, error = %e, "discovery: malformed entry, skipping"),
+            Err(e) => {
+                warn!(key = entry.key, error = %e, "discovery: malformed entry, skipping");
+                None
+            }
         },
         KvOperation::Delete | KvOperation::Purge => {
             debug!(key = entry.key, "discovery: removed");
-            map.remove(&entry.key);
+            map.remove(&entry.key)
+                .map(|_| DiscoveryEvent::Remove { key: entry.key })
         }
     }
 }

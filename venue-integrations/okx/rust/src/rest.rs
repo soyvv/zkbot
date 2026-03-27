@@ -6,6 +6,7 @@ use governor::{Quota, RateLimiter as GovRateLimiter};
 use reqwest::{Client, Method, Response};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde_json::Value;
 use tracing::{debug, warn};
 
 use crate::auth;
@@ -31,6 +32,67 @@ pub struct OkxResponse<T> {
     pub code: String,
     pub msg: String,
     pub data: Vec<T>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct OkxErrorContext {
+    code: String,
+    msg: String,
+    item_code: Option<String>,
+    item_msg: Option<String>,
+    ord_id: Option<String>,
+    cl_ord_id: Option<String>,
+}
+
+fn first_non_empty(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn parse_error_context(text: &str) -> Option<OkxErrorContext> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    let data0 = value
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first());
+
+    Some(OkxErrorContext {
+        code: first_non_empty(value.get("code")).unwrap_or_else(|| "?".to_string()),
+        msg: first_non_empty(value.get("msg")).unwrap_or_else(|| "unknown".to_string()),
+        item_code: data0
+            .and_then(|item| first_non_empty(item.get("sCode")).or_else(|| first_non_empty(item.get("code")))),
+        item_msg: data0
+            .and_then(|item| first_non_empty(item.get("sMsg")).or_else(|| first_non_empty(item.get("msg")))),
+        ord_id: data0.and_then(|item| first_non_empty(item.get("ordId"))),
+        cl_ord_id: data0.and_then(|item| first_non_empty(item.get("clOrdId"))),
+    })
+}
+
+fn format_error_context(path: &str, status: Option<reqwest::StatusCode>, ctx: &OkxErrorContext) -> String {
+    let mut msg = match status {
+        Some(status) => format!("OKX HTTP {status} on {path}: code={}, msg={}", ctx.code, ctx.msg),
+        None => format!("OKX API error on {path}: code={}, msg={}", ctx.code, ctx.msg),
+    };
+
+    if ctx.item_code.is_some() || ctx.item_msg.is_some() {
+        msg.push_str("; item");
+        if let Some(item_code) = &ctx.item_code {
+            msg.push_str(&format!(" sCode={item_code}"));
+        }
+        if let Some(item_msg) = &ctx.item_msg {
+            msg.push_str(&format!(", sMsg={item_msg}"));
+        }
+    }
+    if let Some(ord_id) = &ctx.ord_id {
+        msg.push_str(&format!(", ordId={ord_id}"));
+    }
+    if let Some(cl_ord_id) = &ctx.cl_ord_id {
+        msg.push_str(&format!(", clOrdId={cl_ord_id}"));
+    }
+    msg
 }
 
 // ── OKX data types (raw API shapes) ─────────────────────────────────────────
@@ -187,6 +249,7 @@ impl OkxRestClient {
         px: Option<&str>,
         cl_ord_id: &str,
         td_mode: &str,
+        pos_side: Option<&str>,
     ) -> anyhow::Result<OkxPlaceData> {
         self.order_limiter.until_ready().await;
 
@@ -201,6 +264,9 @@ impl OkxRestClient {
         if let Some(price) = px {
             body["px"] = serde_json::Value::String(price.to_string());
         }
+        if let Some(pos_side) = pos_side.filter(|s| !s.trim().is_empty()) {
+            body["posSide"] = serde_json::Value::String(pos_side.to_string());
+        }
 
         let resp: OkxResponse<OkxPlaceData> =
             self.signed_request(Method::POST, "/api/v5/trade/order", &body.to_string()).await?;
@@ -210,7 +276,27 @@ impl OkxRestClient {
         })?;
 
         if item.s_code != "0" {
-            anyhow::bail!("OKX place order rejected: sCode={}, sMsg={}", item.s_code, item.s_msg);
+            warn!(
+                path = "/api/v5/trade/order",
+                inst_id,
+                side,
+                ord_type,
+                sz,
+                px = px.unwrap_or(""),
+                cl_ord_id,
+                pos_side = pos_side.unwrap_or(""),
+                s_code = item.s_code,
+                s_msg = item.s_msg,
+                ord_id = item.ord_id,
+                "OKX place order rejected"
+            );
+            anyhow::bail!(
+                "OKX place order rejected: sCode={}, sMsg={}, ordId={}, clOrdId={}",
+                item.s_code,
+                item.s_msg,
+                item.ord_id,
+                item.cl_ord_id
+            );
         }
         Ok(item)
     }
@@ -235,7 +321,23 @@ impl OkxRestClient {
         })?;
 
         if item.s_code != "0" {
-            anyhow::bail!("OKX cancel rejected: sCode={}, sMsg={}", item.s_code, item.s_msg);
+            warn!(
+                path = "/api/v5/trade/cancel-order",
+                inst_id,
+                ord_id,
+                s_code = item.s_code,
+                s_msg = item.s_msg,
+                resp_ord_id = item.ord_id,
+                cl_ord_id = item.cl_ord_id,
+                "OKX cancel rejected"
+            );
+            anyhow::bail!(
+                "OKX cancel rejected: sCode={}, sMsg={}, ordId={}, clOrdId={}",
+                item.s_code,
+                item.s_msg,
+                item.ord_id,
+                item.cl_ord_id
+            );
         }
         Ok(item)
     }
@@ -416,10 +518,19 @@ impl OkxRestClient {
         debug!(path, status = %status, "OKX public response");
 
         if !status.is_success() {
-            if let Ok(err_val) = serde_json::from_str::<serde_json::Value>(&text) {
-                let msg = err_val["msg"].as_str().unwrap_or("unknown");
-                let code = err_val["code"].as_str().unwrap_or("?");
-                anyhow::bail!("OKX HTTP {status} on {path}: code={code}, msg={msg}");
+            if let Some(ctx) = parse_error_context(&text) {
+                warn!(
+                    path,
+                    %status,
+                    code = ctx.code,
+                    msg = ctx.msg,
+                    item_code = ctx.item_code.as_deref().unwrap_or(""),
+                    item_msg = ctx.item_msg.as_deref().unwrap_or(""),
+                    ord_id = ctx.ord_id.as_deref().unwrap_or(""),
+                    cl_ord_id = ctx.cl_ord_id.as_deref().unwrap_or(""),
+                    "OKX public HTTP error"
+                );
+                anyhow::bail!("{}", format_error_context(path, Some(status), &ctx));
             }
             anyhow::bail!("OKX HTTP {status} on {path}, body_len={}", text.len());
         }
@@ -429,7 +540,22 @@ impl OkxRestClient {
         })?;
 
         if parsed.code != "0" {
-            anyhow::bail!("OKX API error on {path}: code={}, msg={}", parsed.code, parsed.msg);
+            let ctx = parse_error_context(&text).unwrap_or(OkxErrorContext {
+                code: parsed.code,
+                msg: parsed.msg,
+                ..Default::default()
+            });
+            warn!(
+                path,
+                code = ctx.code,
+                msg = ctx.msg,
+                item_code = ctx.item_code.as_deref().unwrap_or(""),
+                item_msg = ctx.item_msg.as_deref().unwrap_or(""),
+                ord_id = ctx.ord_id.as_deref().unwrap_or(""),
+                cl_ord_id = ctx.cl_ord_id.as_deref().unwrap_or(""),
+                "OKX public API error"
+            );
+            anyhow::bail!("{}", format_error_context(path, None, &ctx));
         }
 
         Ok(parsed)
@@ -480,11 +606,19 @@ impl OkxRestClient {
         debug!(path, status = %status, "OKX response received");
 
         if !status.is_success() {
-            // Try to extract OKX error message from the body.
-            if let Ok(err_val) = serde_json::from_str::<serde_json::Value>(&text) {
-                let msg = err_val["msg"].as_str().unwrap_or("unknown");
-                let code = err_val["code"].as_str().unwrap_or("?");
-                anyhow::bail!("OKX HTTP {status} on {path}: code={code}, msg={msg}");
+            if let Some(ctx) = parse_error_context(&text) {
+                warn!(
+                    path,
+                    %status,
+                    code = ctx.code,
+                    msg = ctx.msg,
+                    item_code = ctx.item_code.as_deref().unwrap_or(""),
+                    item_msg = ctx.item_msg.as_deref().unwrap_or(""),
+                    ord_id = ctx.ord_id.as_deref().unwrap_or(""),
+                    cl_ord_id = ctx.cl_ord_id.as_deref().unwrap_or(""),
+                    "OKX signed HTTP error"
+                );
+                anyhow::bail!("{}", format_error_context(path, Some(status), &ctx));
             }
             anyhow::bail!("OKX HTTP {status} on {path}, body_len={}", text.len());
         }
@@ -494,7 +628,22 @@ impl OkxRestClient {
         })?;
 
         if parsed.code != "0" {
-            anyhow::bail!("OKX API error on {path}: code={}, msg={}", parsed.code, parsed.msg);
+            let ctx = parse_error_context(&text).unwrap_or(OkxErrorContext {
+                code: parsed.code,
+                msg: parsed.msg,
+                ..Default::default()
+            });
+            warn!(
+                path,
+                code = ctx.code,
+                msg = ctx.msg,
+                item_code = ctx.item_code.as_deref().unwrap_or(""),
+                item_msg = ctx.item_msg.as_deref().unwrap_or(""),
+                ord_id = ctx.ord_id.as_deref().unwrap_or(""),
+                cl_ord_id = ctx.cl_ord_id.as_deref().unwrap_or(""),
+                "OKX signed API error"
+            );
+            anyhow::bail!("{}", format_error_context(path, None, &ctx));
         }
 
         Ok(parsed)
@@ -531,6 +680,44 @@ fn iso_timestamp() -> String {
     format!(
         "{y:04}-{m:02}-{d:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_error_context, parse_error_context, OkxErrorContext};
+
+    #[test]
+    fn parse_error_context_extracts_item_level_fields() {
+        let text = r#"{
+          "code":"1",
+          "msg":"All operations failed",
+          "data":[{"clOrdId":"7442579191356194816","ordId":"","sCode":"51008","sMsg":"Order failed. Insufficient margin."}]
+        }"#;
+        let ctx = parse_error_context(text).expect("expected parsed context");
+        assert_eq!(ctx.code, "1");
+        assert_eq!(ctx.msg, "All operations failed");
+        assert_eq!(ctx.item_code.as_deref(), Some("51008"));
+        assert_eq!(ctx.item_msg.as_deref(), Some("Order failed. Insufficient margin."));
+        assert_eq!(ctx.cl_ord_id.as_deref(), Some("7442579191356194816"));
+    }
+
+    #[test]
+    fn format_error_context_includes_item_detail() {
+        let ctx = OkxErrorContext {
+            code: "1".into(),
+            msg: "All operations failed".into(),
+            item_code: Some("51008".into()),
+            item_msg: Some("Order failed. Insufficient margin.".into()),
+            ord_id: Some("123".into()),
+            cl_ord_id: Some("456".into()),
+        };
+        let msg = format_error_context("/api/v5/trade/order", None, &ctx);
+        assert!(msg.contains("code=1, msg=All operations failed"));
+        assert!(msg.contains("sCode=51008"));
+        assert!(msg.contains("sMsg=Order failed. Insufficient margin."));
+        assert!(msg.contains("ordId=123"));
+        assert!(msg.contains("clOrdId=456"));
+    }
 }
 
 /// Convert days since epoch to (year, month, day). Adapted from Howard Hinnant's algorithm.

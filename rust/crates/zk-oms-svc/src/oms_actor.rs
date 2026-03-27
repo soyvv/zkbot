@@ -60,7 +60,7 @@ use zk_oms_rs::{
 };
 use zk_proto_rs::zk::{
     exch_gw::v1::{BalanceUpdate, OrderReport},
-    oms::v1::{oms_response, OmsErrorType, OmsResponse, OrderCancelRequest, OrderRequest},
+    oms::v1::{oms_response, ExecType, OmsErrorType, OmsResponse, OrderCancelRequest, OrderRequest, OrderStatus},
 };
 
 use crate::{
@@ -74,6 +74,95 @@ use crate::{
 
 /// Atomic read replica — shared between the writer task and all gRPC query handlers.
 pub type ReadReplica = Arc<ArcSwap<OmsSnapshotV2>>;
+
+fn order_status_label(status: i32) -> &'static str {
+    OrderStatus::try_from(status)
+        .map(|s| s.as_str_name())
+        .unwrap_or("ORDER_STATUS_UNKNOWN")
+}
+
+fn log_order_update_event(event: &zk_proto_rs::zk::oms::v1::OrderUpdateEvent) {
+    let status = event
+        .order_snapshot
+        .as_ref()
+        .map(|o| o.order_status)
+        .unwrap_or_default();
+    let exec_type = event
+        .exec_message
+        .as_ref()
+        .and_then(|m| ExecType::try_from(m.exec_type).ok())
+        .map(|t| t.as_str_name())
+        .unwrap_or("");
+    let error_detail = event
+        .exec_message
+        .as_ref()
+        .map(|m| {
+            if let Some(rej) = &m.rejection_info {
+                if !rej.error_message.is_empty() {
+                    return rej.error_message.as_str();
+                }
+            }
+            if !m.error_msg.is_empty() {
+                return m.error_msg.as_str();
+            }
+            ""
+        })
+        .unwrap_or("");
+    let qty = event
+        .order_snapshot
+        .as_ref()
+        .map(|o| o.qty)
+        .unwrap_or_default();
+    let filled_qty = event
+        .order_snapshot
+        .as_ref()
+        .map(|o| o.filled_qty)
+        .unwrap_or_default();
+    let remaining_qty = (qty - filled_qty).max(0.0);
+
+    if error_detail.is_empty() {
+        info!(
+            order_id = event.order_id,
+            account_id = event.account_id,
+            order_status = order_status_label(status),
+            order_status_code = status,
+            exch_order_ref = event
+                .order_snapshot
+                .as_ref()
+                .map(|o| o.exch_order_ref.as_str())
+                .unwrap_or(""),
+            filled_qty = event
+                .order_snapshot
+                .as_ref()
+                .map(|o| o.filled_qty)
+                .unwrap_or_default(),
+            remaining_qty,
+            exec_type,
+            "OMS order update"
+        );
+    } else {
+        info!(
+            order_id = event.order_id,
+            account_id = event.account_id,
+            order_status = order_status_label(status),
+            order_status_code = status,
+            exch_order_ref = event
+                .order_snapshot
+                .as_ref()
+                .map(|o| o.exch_order_ref.as_str())
+                .unwrap_or(""),
+            filled_qty = event
+                .order_snapshot
+                .as_ref()
+                .map(|o| o.filled_qty)
+                .unwrap_or_default(),
+            remaining_qty,
+            exec_type,
+            error_detail,
+            "OMS order update"
+        );
+    }
+}
 
 /// All commands the OMS writer task can receive.
 pub enum OmsCommand {
@@ -116,6 +205,17 @@ pub enum OmsCommand {
     PositionRecheck,
     /// Periodic order reconciliation against gateways.
     OrderReconcile,
+    /// Gateway discovered via shared service discovery after OMS startup.
+    GatewayDiscovered {
+        gw_key: String,
+        gw_id: u32,
+        addr: String,
+    },
+    /// Gateway removed from shared service discovery.
+    GatewayRemoved {
+        gw_key: String,
+        gw_id: u32,
+    },
     /// Gateway worker failed to send order (gRPC error). Feedback from gw_worker.
     GatewaySendFailed {
         order_id: i64,
@@ -217,6 +317,10 @@ async fn oms_writer_loop(
                         &mut publish_executor,
                     )
                     .await;
+                } else if let OmsCommand::GatewayDiscovered { gw_key, gw_id, addr } = cmd {
+                    run_gateway_discovered(&mut gw_pool, &gw_executor, gw_key, gw_id, addr).await;
+                } else if let OmsCommand::GatewayRemoved { gw_key, gw_id } = cmd {
+                    run_gateway_removed(&mut gw_pool, &gw_executor, &gw_key, gw_id);
                 } else {
                 process_command(
                     cmd,
@@ -265,6 +369,40 @@ async fn oms_writer_loop(
         }
     }
     info!("OMS writer loop exited");
+}
+
+async fn run_gateway_discovered(
+    gw_pool: &mut GwClientPool,
+    gw_executor: &GwExecutorPool,
+    gw_key: String,
+    gw_id: u32,
+    addr: String,
+) {
+    if gw_pool.contains(&gw_key) {
+        debug!(gw_key, gw_id, addr, "gateway already registered in OMS");
+        return;
+    }
+
+    match gw_pool.connect(gw_key.clone(), &addr).await {
+        Ok(()) => {
+            if let Some(client) = gw_pool.get_client(&gw_key) {
+                gw_executor.register_gateway(gw_id, gw_key.clone(), client);
+                info!(gw_key, gw_id, addr, "gateway registered in OMS from discovery");
+            }
+        }
+        Err(e) => warn!(gw_key, gw_id, addr, error = %e, "late gateway gRPC connect failed"),
+    }
+}
+
+fn run_gateway_removed(
+    gw_pool: &mut GwClientPool,
+    gw_executor: &GwExecutorPool,
+    gw_key: &str,
+    gw_id: u32,
+) {
+    gw_pool.remove(gw_key);
+    gw_executor.remove_gateway(gw_id);
+    info!(gw_key, gw_id, "gateway removed from OMS discovery state");
 }
 
 // ── Latency drain ───────────────────────────────────────────────────────────
@@ -394,6 +532,7 @@ fn process_command(
         OmsCommand::RecheckCancel(r) => (OmsMessage::RecheckCancel(r), None),
         OmsCommand::PositionRecheck => (OmsMessage::PositionRecheck, None),
         OmsCommand::OrderReconcile => return, // handled in writer loop (async context)
+        OmsCommand::GatewayDiscovered { .. } | OmsCommand::GatewayRemoved { .. } => return,
         OmsCommand::GatewaySendFailed {
             order_id,
             gw_id,
@@ -712,6 +851,7 @@ fn process_command(
                     *include_exec_message,
                     *include_inferred_trade,
                 ) {
+                    log_order_update_event(&event);
                     let latency_ctx =
                         report_latency_ctx.map(|(oid, t6, t4, t5)| ReportLatencyCtx {
                             order_id: oid,
@@ -726,6 +866,11 @@ fn process_command(
             OmsActionV2::PublishBalanceUpdate { account_id } => {
                 balances_dirty = true;
                 if let Some(event) = core.build_balance_update_event(*account_id) {
+                    debug!(
+                        account_id = *account_id,
+                        balance_entries = event.balance_snapshots.len(),
+                        "publishing OMS balance update"
+                    );
                     let pa = PublishAction::BalanceUpdate { event };
                     publish_executor.dispatch(*account_id, pa);
                 }
@@ -733,6 +878,11 @@ fn process_command(
             OmsActionV2::PublishPositionUpdate { account_id } => {
                 positions_dirty = true;
                 if let Some(event) = core.build_position_update_event(*account_id) {
+                    debug!(
+                        account_id = *account_id,
+                        position_entries = event.position_snapshots.len(),
+                        "publishing OMS position update"
+                    );
                     let pa = PublishAction::PositionUpdate { event };
                     publish_executor.dispatch(*account_id, pa);
                 }
@@ -791,6 +941,7 @@ fn process_command(
                     *include_exec_message,
                     *include_inferred_trade,
                 ) {
+                    log_order_update_event(&event);
                     let pa = PublishAction::OrderUpdate {
                         event,
                         latency_ctx: None,
@@ -809,6 +960,11 @@ fn process_command(
             OmsActionV2::PublishBalanceUpdate { account_id } => {
                 balances_dirty = true;
                 if let Some(event) = core.build_balance_update_event(*account_id) {
+                    debug!(
+                        account_id = *account_id,
+                        balance_entries = event.balance_snapshots.len(),
+                        "publishing OMS balance update"
+                    );
                     let pa = PublishAction::BalanceUpdate { event };
                     publish_executor.dispatch(*account_id, pa);
                 }
@@ -1086,6 +1242,7 @@ async fn dispatch_reconcile_report(
                     *include_exec_message,
                     *include_inferred_trade,
                 ) {
+                    log_order_update_event(&event);
                     let pa = PublishAction::OrderUpdate {
                         event,
                         latency_ctx: None,

@@ -19,7 +19,9 @@ use arc_swap::ArcSwap;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use zk_oms_rs::{config::ConfdataManager, models::OmsOrder, oms_core_v2::OmsCoreV2};
+use zk_oms_rs::{
+    config::ConfdataManager, models::OmsOrder, models_v2::OmsActionV2, oms_core_v2::OmsCoreV2,
+};
 use zk_proto_rs::{
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     zk::{
@@ -362,7 +364,74 @@ async fn test_gateway_exec_reject_by_order_id_marks_order_rejected() {
     let snap = replica.load();
     let order = snap.orders.get(&order_id).expect("order missing");
     assert_eq!(order.order_status, OrderStatus::Rejected as i32);
+    assert!(
+        !snap.open_order_ids_by_account
+            .get(&9001)
+            .map(|s| s.contains(&order_id))
+            .unwrap_or(false),
+        "rejected order must leave the open-order set immediately"
+    );
     shutdown.cancel();
+}
+
+#[test]
+fn test_core_gateway_exec_reject_emits_immediate_persist_and_publish_actions() {
+    let confdata = test_confdata("oms_test_core_gw_reject");
+    let mut core = OmsCoreV2::new(&confdata, false, true, false, 10_000);
+
+    let order_id = 2102;
+    let place_actions = core.process_message(zk_oms_rs::models::OmsMessage::PlaceOrder(
+        test_order_req(order_id, 9001),
+    ));
+    assert!(
+        place_actions
+            .iter()
+            .any(|a| matches!(a, OmsActionV2::SendOrderToGw { order_id: oid, .. } if *oid == order_id)),
+        "place_order should dispatch to gateway"
+    );
+
+    let reject_report = OrderReport {
+        exchange: "gw_mock_1".into(),
+        account_id: 9001,
+        order_id,
+        update_timestamp: 12345,
+        order_report_entries: vec![OrderReportEntry {
+            report_type: OrderReportType::OrderRepTypeExec as i32,
+            report: Some(Report::ExecReport(ExecReport {
+                exec_type: ExchExecType::Rejected as i32,
+                rejection_info: Some(Rejection {
+                    error_message: "venue rejected order".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })),
+        }],
+        ..Default::default()
+    };
+
+    let reject_actions =
+        core.process_message(zk_oms_rs::models::OmsMessage::GatewayOrderReport(reject_report));
+
+    assert!(
+        reject_actions.iter().any(|a| matches!(
+            a,
+            OmsActionV2::PersistOrder { order_id: oid, set_closed: true, .. } if *oid == order_id
+        )),
+        "gateway reject must emit PersistOrder immediately"
+    );
+    assert!(
+        reject_actions.iter().any(|a| matches!(
+            a,
+            OmsActionV2::PublishOrderUpdate { order_id: oid, include_exec_message: true, .. } if *oid == order_id
+        )),
+        "gateway reject must emit PublishOrderUpdate immediately"
+    );
+    assert!(
+        !reject_actions
+            .iter()
+            .any(|a| matches!(a, OmsActionV2::SendOrderToGw { .. })),
+        "gateway reject path must converge locally, not re-dispatch the order"
+    );
 }
 
 /// Panic mode: once set, the account appears in `panic_accounts` snapshot.

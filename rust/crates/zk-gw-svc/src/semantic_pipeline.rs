@@ -1,11 +1,25 @@
 use std::collections::HashSet;
 
+use tracing::debug;
+use zk_proto_rs::zk::common::v1::InstrumentType;
 use zk_proto_rs::zk::exch_gw::v1::{
     order_report_entry::Report, BalanceUpdate, OrderReport, OrderReportType, PositionReport,
 };
 
 use crate::nats_publisher::NatsPublisher;
 use crate::venue_adapter::{VenueBalanceFact, VenueEvent, VenuePositionFact};
+
+fn infer_instrument_type(instrument: &str) -> i32 {
+    if instrument.contains("SWAP") {
+        InstrumentType::InstTypePerp as i32
+    } else if instrument.contains("FUTURES")
+        || instrument.contains('-') && instrument.matches('-').count() >= 2
+    {
+        InstrumentType::InstTypeFuture as i32
+    } else {
+        InstrumentType::InstTypeSpot as i32
+    }
+}
 
 /// Processes VenueEvents through the gateway semantic pipeline and publishes
 /// normalized events to NATS.
@@ -109,6 +123,11 @@ impl SemanticPipeline {
             })
             .collect();
 
+        debug!(
+            gw_id = publisher.gw_id(),
+            balance_entries = balances.len(),
+            "publishing gateway balance update"
+        );
         let update = BalanceUpdate { balances };
         publisher.publish_balance_update(&update).await;
     }
@@ -129,6 +148,8 @@ impl SemanticPipeline {
 
             position_reports.push(PositionReport {
                 instrument_code: fact.instrument.clone(),
+                instrument_type: infer_instrument_type(&fact.instrument),
+                long_short_type: fact.long_short_type,
                 qty: fact.qty,
                 avail_qty: fact.avail_qty,
                 exch_account_code: self.exch_account_code.clone(),
@@ -150,6 +171,8 @@ impl SemanticPipeline {
             if parts.len() == 2 {
                 position_reports.push(PositionReport {
                     instrument_code: parts[0].to_string(),
+                    instrument_type: infer_instrument_type(parts[0]),
+                    long_short_type: parts[1].parse::<i32>().unwrap_or_default(),
                     qty: 0.0,
                     avail_qty: 0.0,
                     exch_account_code: self.exch_account_code.clone(),
@@ -160,6 +183,13 @@ impl SemanticPipeline {
         }
 
         if !position_reports.is_empty() {
+            debug!(
+                gw_id = publisher.gw_id(),
+                position_entries = position_reports.len(),
+                live_position_entries = facts.len(),
+                synthetic_zero_entries = zero_keys.len(),
+                "publishing gateway position update"
+            );
             let update = BalanceUpdate {
                 balances: position_reports,
             };
@@ -171,5 +201,27 @@ impl SemanticPipeline {
     pub fn reset(&mut self) {
         self.published_trade_ids.clear();
         self.published_position_keys.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::infer_instrument_type;
+    use zk_proto_rs::zk::common::v1::InstrumentType;
+
+    #[test]
+    fn infer_instrument_type_handles_okx_derivatives() {
+        assert_eq!(
+            infer_instrument_type("BTC-USDT-SWAP"),
+            InstrumentType::InstTypePerp as i32
+        );
+        assert_eq!(
+            infer_instrument_type("BTC-USDT-260327"),
+            InstrumentType::InstTypeFuture as i32
+        );
+        assert_eq!(
+            infer_instrument_type("BTC-USDT"),
+            InstrumentType::InstTypeSpot as i32
+        );
     }
 }

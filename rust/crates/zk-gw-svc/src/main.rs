@@ -119,44 +119,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let kv_value = zk_infra_rs::discovery_registration::encode_registration(&reg_proto);
 
-    // ── 7. KV registration ───────────────────────────────────────────────
-    let mut registration = if let Some(ref nats) = nats_client {
-        let js = async_nats::jetstream::new(nats.clone());
-        let reg = if let Some(ref grant) = pilot_grant {
-            let r = ServiceRegistration::register_kv_with_grant(
-                nats,
-                &js,
-                grant,
-                kv_value,
-                std::time::Duration::from_secs(15),
-            )
-            .await
-            .expect("Pilot KV registration failed");
-            info!(
-                kv_key = r.grant().kv_key,
-                session_id = r.grant().owner_session_id,
-                "registered via Pilot (split-phase)"
-            );
-            r
-        } else {
-            let kv_prefix =
-                std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".into());
-            let kv_key = format!("{kv_prefix}.{}", runtime_cfg.gw_id);
-            let r = ServiceRegistration::register_direct(
-                &js,
-                kv_key.clone(),
-                kv_value,
-                std::time::Duration::from_secs(15),
-            )
-            .await
-            .expect("failed to register in NATS KV");
-            info!(kv_key, "registered in NATS KV (direct)");
-            r
-        };
-        Some(reg)
-    } else {
-        None
-    };
+    // ── 7. KV registration is deferred until gRPC listeners are bound. ─────
+    // Registering earlier allows discovery consumers to dial a gateway that
+    // has announced itself but is not yet actually serving.
+    let mut registration: Option<ServiceRegistration> = None;
 
     // ── 8. Build venue adapter via factory ───────────────────────────────
     let built = zk_gw_svc::venue::build_adapter(runtime_cfg).await?;
@@ -288,6 +254,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         info!(gw_addr = %gw_listener.local_addr()?, admin_addr = %admin_listener.local_addr()?, "starting dual gRPC servers");
 
+        if let Some(ref nats) = nats_client {
+            let js = async_nats::jetstream::new(nats.clone());
+            let reg = if let Some(ref grant) = pilot_grant {
+                let r = ServiceRegistration::register_kv_with_grant(
+                    nats,
+                    &js,
+                    grant,
+                    kv_value.clone(),
+                    std::time::Duration::from_secs(15),
+                )
+                .await
+                .expect("Pilot KV registration failed");
+                info!(
+                    kv_key = r.grant().kv_key,
+                    session_id = r.grant().owner_session_id,
+                    "registered via Pilot (split-phase)"
+                );
+                r
+            } else {
+                let kv_prefix =
+                    std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".into());
+                let kv_key = format!("{kv_prefix}.{}", runtime_cfg.gw_id);
+                let r = ServiceRegistration::register_direct(
+                    &js,
+                    kv_key.clone(),
+                    kv_value.clone(),
+                    std::time::Duration::from_secs(15),
+                )
+                .await
+                .expect("failed to register in NATS KV");
+                info!(kv_key, "registered in NATS KV (direct)");
+                r
+            };
+            registration = Some(reg);
+        }
+
         let gw_incoming = tokio_stream::wrappers::TcpListenerStream::new(gw_listener);
         let admin_incoming = tokio_stream::wrappers::TcpListenerStream::new(admin_listener);
 
@@ -321,6 +323,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     } else {
         info!(addr = %gw_listener.local_addr()?, "starting gRPC server");
+
+        if let Some(ref nats) = nats_client {
+            let js = async_nats::jetstream::new(nats.clone());
+            let reg = if let Some(ref grant) = pilot_grant {
+                let r = ServiceRegistration::register_kv_with_grant(
+                    nats,
+                    &js,
+                    grant,
+                    kv_value.clone(),
+                    std::time::Duration::from_secs(15),
+                )
+                .await
+                .expect("Pilot KV registration failed");
+                info!(
+                    kv_key = r.grant().kv_key,
+                    session_id = r.grant().owner_session_id,
+                    "registered via Pilot (split-phase)"
+                );
+                r
+            } else {
+                let kv_prefix =
+                    std::env::var("ZK_GATEWAY_KV_PREFIX").unwrap_or_else(|_| "svc.gw".into());
+                let kv_key = format!("{kv_prefix}.{}", runtime_cfg.gw_id);
+                let r = ServiceRegistration::register_direct(
+                    &js,
+                    kv_key.clone(),
+                    kv_value.clone(),
+                    std::time::Duration::from_secs(15),
+                )
+                .await
+                .expect("failed to register in NATS KV");
+                info!(kv_key, "registered in NATS KV (direct)");
+                r
+            };
+            registration = Some(reg);
+        }
 
         let gw_incoming = tokio_stream::wrappers::TcpListenerStream::new(gw_listener);
         let gw_server = tonic::transport::Server::builder()

@@ -60,6 +60,10 @@ use zk_infra_rs::{
     tracing as zk_tracing,
 };
 use zk_oms_rs::{config::ConfdataManager, oms_core_v2::OmsCoreV2};
+use zk_proto_rs::zk::{
+    exch_gw::v1::{BalanceUpdate, PositionReport},
+    gateway::v1::PositionResponse,
+};
 
 fn gateway_addr_from_registration(value: &[u8]) -> anyhow::Result<String> {
     let reg = zk_infra_rs::discovery_registration::decode_registration(value)?;
@@ -75,6 +79,70 @@ fn gateway_addr_from_registration(value: &[u8]) -> anyhow::Result<String> {
     } else {
         Ok(format!("http://{addr}"))
     }
+}
+
+fn exch_account_code_for_gw(confdata: &ConfdataManager, gw_key: &str) -> Option<String> {
+    confdata
+        .gw_key_to_account_ids
+        .get(gw_key)
+        .and_then(|account_ids| {
+            account_ids
+                .iter()
+                .find_map(|account_id| confdata.account_routes.get(account_id))
+        })
+        .map(|route| route.exch_account_id.clone())
+}
+
+fn normalize_gw_balance_update_for_oms(
+    confdata: &ConfdataManager,
+    gw_key: &str,
+    mut update: BalanceUpdate,
+) -> BalanceUpdate {
+    let fallback_exch_account = exch_account_code_for_gw(confdata, gw_key).unwrap_or_default();
+    for balance in &mut update.balances {
+        if balance.exch_account_code.trim().is_empty() {
+            balance.exch_account_code = fallback_exch_account.clone();
+        }
+    }
+    update
+}
+
+fn position_response_to_balance_update_for_oms(
+    confdata: &ConfdataManager,
+    gw_key: &str,
+    response: &PositionResponse,
+) -> BalanceUpdate {
+    use zk_proto_rs::zk::common::v1::InstrumentType;
+
+    let fallback_exch_account = exch_account_code_for_gw(confdata, gw_key).unwrap_or_default();
+    let balances = response
+        .positions
+        .iter()
+        .map(|p| {
+            let exch_account_code = confdata
+                .account_routes
+                .get(&p.account_id)
+                .map(|route| route.exch_account_id.clone())
+                .unwrap_or_else(|| fallback_exch_account.clone());
+
+            PositionReport {
+                instrument_code: p.instrument_code.clone(),
+                instrument_type: if p.instrument_type != 0 {
+                    p.instrument_type
+                } else if p.instrument_code.contains("SWAP") {
+                    InstrumentType::InstTypePerp as i32
+                } else {
+                    InstrumentType::InstTypeSpot as i32
+                },
+                long_short_type: p.long_short_type,
+                qty: p.total_qty,
+                avail_qty: p.avail_qty,
+                exch_account_code,
+                ..Default::default()
+            }
+        })
+        .collect();
+    BalanceUpdate { balances }
 }
 
 #[tokio::main]
@@ -222,6 +290,11 @@ async fn main() -> anyhow::Result<()> {
     .await
     .expect("Failed to open/create KV registry bucket");
 
+    let discovery = zk_infra_rs::nats_kv_discovery::KvDiscoveryClient::start(&js)
+        .await
+        .expect("Failed to start KV discovery client");
+    let discovery_handle = discovery.spawn_watch_loop();
+
     let mut gw_pool = GwClientPool::new();
     let gw_prefix = format!("{}.>", cfg.gateway_kv_prefix);
     let mut gw_watch = kv_registry
@@ -286,7 +359,7 @@ async fn main() -> anyhow::Result<()> {
     // ── 10. Balance/position reconciliation ──────────────────────────────────
     {
         use zk_oms_rs::models_v2::OmsActionV2;
-        use zk_proto_rs::zk::gateway::v1::QueryAccountRequest;
+        use zk_proto_rs::zk::gateway::v1::{QueryAccountRequest, QueryPositionRequest};
 
         // Query each connected gateway once for account balances/positions.
         let gw_keys: Vec<String> = gw_pool.gw_keys().map(String::from).collect();
@@ -295,6 +368,8 @@ async fn main() -> anyhow::Result<()> {
             match gw_pool.query_account_balance(gw_key, req).await {
                 Ok(resp) => {
                     if let Some(balance_update) = resp.balance_update {
+                        let balance_update =
+                            normalize_gw_balance_update_for_oms(&confdata, gw_key, balance_update);
                         let actions = core.process_message(
                             zk_oms_rs::models::OmsMessage::BalanceUpdate(balance_update),
                         );
@@ -327,6 +402,42 @@ async fn main() -> anyhow::Result<()> {
                                 _ => {}
                             }
                         }
+                    }
+                    match gw_pool.query_position(gw_key, QueryPositionRequest {}).await {
+                        Ok(pos_resp) => {
+                            if !pos_resp.positions.is_empty() {
+                                let balance_update = position_response_to_balance_update_for_oms(
+                                    &confdata, gw_key, &pos_resp,
+                                );
+                                let actions = core.process_message(
+                                    zk_oms_rs::models::OmsMessage::BalanceUpdate(balance_update),
+                                );
+                                for action in &actions {
+                                    match action {
+                                        OmsActionV2::PersistBalance { account_id, asset_id } => {
+                                            oms_actor::persist_balance_to_redis(
+                                                &core,
+                                                &mut redis_writer,
+                                                *account_id,
+                                                *asset_id,
+                                            )
+                                            .await;
+                                        }
+                                        OmsActionV2::PersistPosition { account_id, instrument_id } => {
+                                            oms_actor::persist_position_to_redis(
+                                                &core,
+                                                &mut redis_writer,
+                                                *account_id,
+                                                *instrument_id,
+                                            )
+                                            .await;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => warn!(gw_key, error = %e, "startup position reconcile failed"),
                     }
                     info!(gw_key, "startup reconcile succeeded");
                 }
@@ -547,6 +658,70 @@ async fn main() -> anyhow::Result<()> {
         cmd_tx.clone(),
     );
 
+    {
+        let mut discovery_rx = discovery.subscribe();
+        let configured_gws: std::collections::HashSet<String> =
+            confdata.gw_configs.keys().cloned().collect();
+        let gw_id_lookup: std::collections::HashMap<String, u32> =
+            gw_id_to_key.iter().map(|(id, key)| (key.clone(), *id)).collect();
+        let gw_prefix = format!("{}.", cfg.gateway_kv_prefix);
+        let cmd_tx = cmd_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                match discovery_rx.recv().await {
+                    Ok(zk_infra_rs::nats_kv_discovery::DiscoveryEvent::Upsert { key, registration }) => {
+                        if registration.service_type != "gw" {
+                            continue;
+                        }
+                        let Some(gw_key) = key.strip_prefix(&gw_prefix).map(str::to_string) else {
+                            continue;
+                        };
+                        if !configured_gws.contains(&gw_key) {
+                            continue;
+                        }
+                        let Some(&gw_id) = gw_id_lookup.get(&gw_key) else {
+                            continue;
+                        };
+                        let Some(endpoint) = registration.endpoint else {
+                            continue;
+                        };
+                        let addr = endpoint.address.trim();
+                        if addr.is_empty() {
+                            continue;
+                        }
+                        let addr = if addr.starts_with("http://") || addr.starts_with("https://") {
+                            addr.to_string()
+                        } else {
+                            format!("http://{addr}")
+                        };
+                        let _ = cmd_tx
+                            .send(OmsCommand::GatewayDiscovered {
+                                gw_key,
+                                gw_id,
+                                addr,
+                            })
+                            .await;
+                    }
+                    Ok(zk_infra_rs::nats_kv_discovery::DiscoveryEvent::Remove { key }) => {
+                        let Some(gw_key) = key.strip_prefix(&gw_prefix).map(str::to_string) else {
+                            continue;
+                        };
+                        let Some(&gw_id) = gw_id_lookup.get(&gw_key) else {
+                            continue;
+                        };
+                        let _ = cmd_tx
+                            .send(OmsCommand::GatewayRemoved { gw_key, gw_id })
+                            .await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        warn!(skipped, "gateway discovery receiver lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
     let persist_executor = PersistExecutorPool::new(1024, redis_writer.clone_writer());
 
     let nats_publisher = NatsPublisher::new(nats_client.clone(), cfg.oms_id.clone());
@@ -715,6 +890,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Wait for writer and gRPC server to drain.
     let _ = tokio::join!(writer_handle, grpc_handle);
+    discovery_handle.abort();
     for h in sub_handles {
         h.abort();
     }
@@ -725,6 +901,88 @@ async fn main() -> anyhow::Result<()> {
         registration.deregister().await.ok();
     }
 
-    info!("zk-oms-svc stopped");
+info!("zk-oms-svc stopped");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        normalize_gw_balance_update_for_oms, position_response_to_balance_update_for_oms,
+    };
+    use zk_oms_rs::config::ConfdataManager;
+    use zk_proto_rs::ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry};
+    use zk_proto_rs::zk::{
+        common::v1::{InstrumentRefData, InstrumentType, LongShortType},
+        exch_gw::v1::{BalanceUpdate, PositionReport},
+        gateway::v1::PositionResponse,
+        oms::v1::Position,
+    };
+
+    fn test_confdata() -> ConfdataManager {
+        ConfdataManager::new(
+            OmsConfigEntry {
+                oms_id: "oms1".into(),
+                managed_account_ids: vec![8002],
+                ..Default::default()
+            },
+            vec![OmsRouteEntry {
+                account_id: 8002,
+                exch_account_id: "OKX-DEMO-1".into(),
+                gw_key: "gw_okx_demo1".into(),
+                ..Default::default()
+            }],
+            vec![GwConfigEntry {
+                gw_key: "gw_okx_demo1".into(),
+                exch_name: "OKX".into(),
+                ..Default::default()
+            }],
+            Vec::<InstrumentRefData>::new(),
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn startup_balance_reconcile_backfills_exch_account_code() {
+        let confdata = test_confdata();
+        let update = BalanceUpdate {
+            balances: vec![PositionReport {
+                instrument_code: "USDT".into(),
+                instrument_type: InstrumentType::InstTypeSpot as i32,
+                qty: 1.0,
+                avail_qty: 1.0,
+                ..Default::default()
+            }],
+        };
+
+        let normalized = normalize_gw_balance_update_for_oms(&confdata, "gw_okx_demo1", update);
+        assert_eq!(normalized.balances[0].exch_account_code, "OKX-DEMO-1");
+    }
+
+    #[test]
+    fn startup_position_reconcile_uses_exch_account_code_not_internal_account_id() {
+        let confdata = test_confdata();
+        let response = PositionResponse {
+            positions: vec![Position {
+                account_id: 8002,
+                instrument_code: "BTC-USDT-SWAP".into(),
+                instrument_type: InstrumentType::InstTypePerp as i32,
+                long_short_type: LongShortType::LsLong as i32,
+                total_qty: 0.5,
+                avail_qty: 0.4,
+                ..Default::default()
+            }],
+        };
+
+        let update = position_response_to_balance_update_for_oms(
+            &confdata,
+            "gw_okx_demo1",
+            &response,
+        );
+        assert_eq!(update.balances[0].exch_account_code, "OKX-DEMO-1");
+        assert_eq!(
+            update.balances[0].instrument_type,
+            InstrumentType::InstTypePerp as i32
+        );
+    }
 }

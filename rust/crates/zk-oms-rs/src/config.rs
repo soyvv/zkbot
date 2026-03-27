@@ -88,11 +88,11 @@ impl ConfdataManager {
                 .collect()
         };
 
-        // exch_name → gw_keys
+        // exch_name → gw_keys (uppercased for case-insensitive venue matching)
         let mut exch_name_to_gw_keys: HashMap<String, HashSet<String>> = HashMap::new();
         for (gw_key, cfg) in &gw_key_to_config {
             exch_name_to_gw_keys
-                .entry(cfg.exch_name.clone())
+                .entry(cfg.exch_name.to_uppercase())
                 .or_default()
                 .insert(gw_key.clone());
         }
@@ -124,7 +124,7 @@ impl ConfdataManager {
         for ref_entry in &refdata_enabled {
             let exch_name = &ref_entry.exchange_name;
             let gw_keys_for_exch = exch_name_to_gw_keys
-                .get(exch_name)
+                .get(&exch_name.to_uppercase())
                 .cloned()
                 .unwrap_or_default();
 

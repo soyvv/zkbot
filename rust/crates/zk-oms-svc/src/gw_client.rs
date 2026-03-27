@@ -18,8 +18,8 @@ use tracing::{info, warn};
 use crate::proto::gw_svc::gateway_service_client::GatewayServiceClient;
 use zk_proto_rs::zk::gateway::v1::{
     AccountResponse, BatchCancelOrdersRequest, BatchSendOrdersRequest, CancelOrderRequest,
-    GatewayResponse, OrderDetailResponse, QueryAccountRequest, QueryOpenOrderRequest,
-    QueryOrderDetailRequest, SendOrderRequest,
+    GatewayResponse, OrderDetailResponse, PositionResponse, QueryAccountRequest,
+    QueryOpenOrderRequest, QueryOrderDetailRequest, QueryPositionRequest, SendOrderRequest,
 };
 
 pub type GatewayClient = GatewayServiceClient<Channel>;
@@ -178,6 +178,22 @@ impl GwClientPool {
             .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
         let resp = client
             .query_order_details(tonic::Request::new(req))
+            .await
+            .map_err(GwError::Rpc)?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn query_position(
+        &mut self,
+        gw_key: &str,
+        req: QueryPositionRequest,
+    ) -> Result<PositionResponse, GwError> {
+        let client = self
+            .clients
+            .get_mut(gw_key)
+            .ok_or_else(|| GwError::NotFound(gw_key.into()))?;
+        let resp = client
+            .query_position(tonic::Request::new(req))
             .await
             .map_err(GwError::Rpc)?;
         Ok(resp.into_inner())

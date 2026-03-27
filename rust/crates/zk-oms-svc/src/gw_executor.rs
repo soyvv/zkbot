@@ -75,6 +75,7 @@ pub struct GwSendLatency {
 /// Gateway executor pool. Sharded by `order_id % shard_count`.
 ///
 /// All shards are pre-spawned at construction — `dispatch` is `&self` (no mutation).
+#[derive(Clone)]
 pub struct GwExecutorPool {
     shards: Vec<mpsc::Sender<GwAction>>,
     shard_count: usize,
@@ -132,6 +133,15 @@ impl GwExecutorPool {
             .write()
             .expect("GwExecutorPool clients poisoned");
         map.insert(gw_id, (gw_key, client));
+    }
+
+    /// Remove a gateway from the live client map.
+    pub fn remove_gateway(&self, gw_id: u32) {
+        let mut map = self
+            .clients
+            .write()
+            .expect("GwExecutorPool clients poisoned");
+        map.remove(&gw_id);
     }
 
     /// Dispatch a gateway action to the shard for `order_id`.

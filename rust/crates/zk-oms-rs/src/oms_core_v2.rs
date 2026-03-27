@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 use zk_proto_rs::zk::{
     common::v1::{BuySellType, LongShortType, Rejection, RejectionReason, RejectionSource},
@@ -1256,8 +1256,9 @@ impl OmsCoreV2 {
     ) -> Vec<OmsActionV2> {
         let mut actions = Vec::new();
         let ts = gen_timestamp_ms();
+        let total_entries = update.balances.len();
 
-        if update.balances.is_empty() {
+        if total_entries == 0 {
             return vec![];
         }
 
@@ -1283,6 +1284,7 @@ impl OmsCoreV2 {
             Some(id) => id,
             None => {
                 warn!(
+                    total_entries,
                     exch_account_code,
                     "unknown exchange account in balance update"
                 );
@@ -1293,11 +1295,14 @@ impl OmsCoreV2 {
         // Classify entries as spot (balance) vs non-spot (position)
         let mut has_spot = false;
         let mut has_nonspot = false;
+        let mut spot_entries = 0usize;
+        let mut nonspot_entries = 0usize;
 
         // Process spot entries -> balance store
         for entry in &update.balances {
             if entry.instrument_type == SPOT_INSTRUMENT_TYPE {
                 has_spot = true;
+                spot_entries += 1;
                 let asset = &entry.instrument_code;
                 let asset_id = self
                     .metadata
@@ -1356,6 +1361,7 @@ impl OmsCoreV2 {
         for entry in &update.balances {
             if entry.instrument_type != SPOT_INSTRUMENT_TYPE {
                 has_nonspot = true;
+                nonspot_entries += 1;
 
                 if let Some(route) = self.metadata.route(account_id) {
                     let gw_id = route.gw_id;
@@ -1427,6 +1433,13 @@ impl OmsCoreV2 {
                 }
             }
         }
+        debug!(
+            account_id,
+            total_entries,
+            spot_entries,
+            position_entries = nonspot_entries,
+            "processed exchange balance/position update"
+        );
         if has_nonspot {
             actions.push(OmsActionV2::PublishPositionUpdate { account_id });
         }
