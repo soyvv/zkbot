@@ -11,6 +11,7 @@ public record StrategyResponse(
         String strategyId,
         String runtimeType,
         String codeRef,
+        String strategyTypeKey,
         String description,
         List<Long> defaultAccounts,
         List<String> defaultSymbols,

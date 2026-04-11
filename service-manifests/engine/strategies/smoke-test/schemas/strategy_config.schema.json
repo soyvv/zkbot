@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Smoke Test Strategy Config",
+  "type": "object",
+  "description": "Strategy-owned config for the smoke-test market-making validation strategy.",
+  "properties": {
+    "quote_interval_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 5000,
+      "description": "Refresh interval for cancel-replace quote cycles."
+    },
+    "quote_qty": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "default": 1.0,
+      "description": "Order quantity for each quote side."
+    },
+    "buy_tick_distance": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.0,
+      "description": "Buy quote distance below best bid, measured in instrument price ticks."
+    },
+    "sell_tick_distance": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.0,
+      "description": "Sell quote distance above best ask, measured in instrument price ticks."
+    }
+  },
+  "additionalProperties": false
+}

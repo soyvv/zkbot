@@ -95,14 +95,19 @@ public class AccountService {
             return List.of();
         }
 
-        Oms.QueryBalancesRequest req = Oms.QueryBalancesRequest.newBuilder()
-                .setAccountId(accountId)
-                .build();
-        Oms.QueryBalancesResponse resp = omsClient.queryBalances(omsId, req);
+        try {
+            Oms.QueryBalancesRequest req = Oms.QueryBalancesRequest.newBuilder()
+                    .setAccountId(accountId)
+                    .build();
+            Oms.QueryBalancesResponse resp = omsClient.queryBalances(omsId, req);
 
-        return resp.getBalancesList().stream()
-                .map(b -> new BalanceEntry(b.getAsset(), b.getTotalQty(), b.getFrozenQty(), b.getAvailQty()))
-                .toList();
+            return resp.getBalancesList().stream()
+                    .map(b -> new BalanceEntry(b.getAsset(), b.getTotalQty(), b.getFrozenQty(), b.getAvailQty()))
+                    .toList();
+        } catch (io.grpc.StatusRuntimeException e) {
+            log.warn("OMS query balances failed for account {} ({}): {}", accountId, omsId, e.getStatus());
+            return List.of();
+        }
     }
 
     public List<PositionEntry> getPositions(long accountId) {
@@ -111,18 +116,23 @@ public class AccountService {
             return List.of();
         }
 
-        Oms.QueryPositionRequest req = Oms.QueryPositionRequest.newBuilder()
-                .setAccountId(accountId)
-                .setQueryGw(true)
-                .build();
-        Oms.PositionResponse resp = omsClient.queryPosition(omsId, req);
+        try {
+            Oms.QueryPositionRequest req = Oms.QueryPositionRequest.newBuilder()
+                    .setAccountId(accountId)
+                    .setQueryGw(true)
+                    .build();
+            Oms.PositionResponse resp = omsClient.queryPosition(omsId, req);
 
-        return resp.getPositionsList().stream()
-                .map(p -> new PositionEntry(
-                        p.getInstrumentCode(),
-                        shortLongShort(p.getLongShortType()),
-                        p.getTotalQty(), p.getFrozenQty(), p.getAvailQty()))
-                .toList();
+            return resp.getPositionsList().stream()
+                    .map(p -> new PositionEntry(
+                            p.getInstrumentCode(),
+                            shortLongShort(p.getLongShortType()),
+                            p.getTotalQty(), p.getFrozenQty(), p.getAvailQty()))
+                    .toList();
+        } catch (io.grpc.StatusRuntimeException e) {
+            log.warn("OMS query positions failed for account {} ({}): {}", accountId, omsId, e.getStatus());
+            return List.of();
+        }
     }
 
     public List<OpenOrderEntry> getOpenOrders(long accountId) {
@@ -131,21 +141,26 @@ public class AccountService {
             return List.of();
         }
 
-        Oms.QueryOpenOrderRequest req = Oms.QueryOpenOrderRequest.newBuilder()
-                .setAccountId(accountId)
-                .build();
-        Oms.OrderDetailResponse resp = omsClient.queryOpenOrders(omsId, req);
+        try {
+            Oms.QueryOpenOrderRequest req = Oms.QueryOpenOrderRequest.newBuilder()
+                    .setAccountId(accountId)
+                    .build();
+            Oms.OrderDetailResponse resp = omsClient.queryOpenOrders(omsId, req);
 
-        List<OpenOrderEntry> orders = new ArrayList<>();
-        for (Oms.Order o : resp.getOrdersList()) {
-            orders.add(new OpenOrderEntry(
-                    o.getOrderId(), o.getExchOrderRef(), o.getInstrument(),
-                    shortSide(o.getBuySellType()), shortOrderStatus(o.getOrderStatus()),
-                    o.getPrice(), o.getQty(),
-                    o.getFilledQty(), o.getFilledAvgPrice(),
-                    o.getCreatedAt(), o.getUpdatedAt()));
+            List<OpenOrderEntry> orders = new ArrayList<>();
+            for (Oms.Order o : resp.getOrdersList()) {
+                orders.add(new OpenOrderEntry(
+                        o.getOrderId(), o.getExchOrderRef(), o.getInstrument(),
+                        shortSide(o.getBuySellType()), shortOrderStatus(o.getOrderStatus()),
+                        o.getPrice(), o.getQty(),
+                        o.getFilledQty(), o.getFilledAvgPrice(),
+                        o.getCreatedAt(), o.getUpdatedAt()));
+            }
+            return orders;
+        } catch (io.grpc.StatusRuntimeException e) {
+            log.warn("OMS query open orders failed for account {} ({}): {}", accountId, omsId, e.getStatus());
+            return List.of();
         }
-        return orders;
     }
 
     public List<TradeEntry> getTrades(long accountId, int limit) {

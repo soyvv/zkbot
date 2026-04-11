@@ -1,0 +1,12 @@
+strategy_type_key: mm
+schema_id: strategy/mm
+version: 1
+runtime_kind: rust_native
+label: Market Making Placeholder
+description: Placeholder Rust-native market-making strategy contract.
+config_schema: schemas/strategy_config.schema.json
+metadata:
+  crate: zk-strategy-mm-rs
+  tags:
+    - rust
+    - placeholder

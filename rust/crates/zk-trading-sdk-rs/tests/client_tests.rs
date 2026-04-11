@@ -9,8 +9,10 @@ async fn test_from_config_fails_with_instance_id_out_of_range() {
         nats_url: "nats://localhost:4222".to_string(),
         env: "test".to_string(),
         account_ids: vec![9001],
+        oms_id: None,
         client_instance_id: 1024, // > 1023: invalid
         discovery_bucket: "zk-svc-registry-v1".to_string(),
+        discovery_timeout_ms: 15_000,
         refdata_grpc: None,
     };
 

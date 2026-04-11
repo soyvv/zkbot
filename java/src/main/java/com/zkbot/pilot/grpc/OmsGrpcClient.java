@@ -27,6 +27,8 @@ public class OmsGrpcClient implements DisposableBean {
         this.discoveryResolver = discoveryResolver;
     }
 
+    private static final long GRPC_DEADLINE_SECONDS = 5;
+
     public OMSServiceBlockingStub getStub(String omsId) {
         String currentAddress = discoveryResolver.findOms(omsId);
         if (currentAddress == null) {
@@ -50,7 +52,8 @@ public class OmsGrpcClient implements DisposableBean {
                     .usePlaintext()
                     .build();
         });
-        return OMSServiceGrpc.newBlockingStub(channel);
+        return OMSServiceGrpc.newBlockingStub(channel)
+                .withDeadlineAfter(GRPC_DEADLINE_SECONDS, TimeUnit.SECONDS);
     }
 
     public Oms.OMSResponse placeOrder(String omsId, Oms.PlaceOrderRequest request) {

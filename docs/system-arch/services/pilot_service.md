@@ -600,6 +600,33 @@ Recommended metadata contents:
   - instrument options
   - market options
 
+Dynamic-form rule:
+
+- `/v1/meta` should provide broad dropdown-ready lists used across many forms
+- Pilot should also expose scoped option-list APIs for dependent fields that cannot be represented
+  as one global list
+- schema-driven UI authoring should consume:
+  - JSON Schema for structural validation
+  - manifest `field_descriptors` for widget and option-source hints
+  - `/v1/meta` or scoped topology/meta endpoints for live option values
+
+Recommended examples:
+
+- `/v1/meta?domains=bot`
+  - OMS list
+  - strategy-type list
+  - runtime kind labels
+- scoped endpoints or scoped meta payloads
+  - accounts for one `oms_id`
+  - instruments for one OMS/account scope
+  - gateway or venue-specific symbol lists when needed
+
+Authority rule:
+
+- UI metadata endpoints are advisory sources for operator selection UX
+- backend validation remains authoritative and must reject invalid combinations even if the UI had
+  previously offered them
+
 ### 1. `/v1/manual`
 
 - `POST /v1/manual/orders:preview`

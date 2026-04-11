@@ -1,0 +1,12 @@
+strategy_type_key: arbi
+schema_id: strategy/arbi
+version: 1
+runtime_kind: rust_native
+label: Arbitrage Placeholder
+description: Placeholder Rust-native arbitrage strategy contract.
+config_schema: schemas/strategy_config.schema.json
+metadata:
+  crate: zk-strategy-arbi-rs
+  tags:
+    - rust
+    - placeholder

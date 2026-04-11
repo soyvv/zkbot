@@ -11,17 +11,19 @@ The bot domain should be modeled as three separate control-plane entities:
 Rules:
 
 - `strategy_definition` owns only strategy-specific config and metadata
-- `strategy_key` is the semantic runtime selector for a strategy definition, for example
-  `MM_OKX_BTC_PERP_V1`
+- `strategy_key` is the logical authored strategy identity bound to an engine/bot run
+- `strategy_type_key` is the engine implementation selector, for example `smoke-test`,
+  `mm`, or `python-wrapper`
 - `engine_instance` is the operator-facing bot definition and owns engine/common config, OMS
-  workspace binding, and selected strategy
+  workspace binding, connected accounts, interested instruments, and selected strategy
 - each bot start creates one `strategy_instance` identified by `execution_id`
 - `strategy_instance` must reference both:
   - the owning bot definition via `engine_id`
   - the selected strategy definition via `strategy_id`
-- generic strategy config must not embed account or symbol selections
-- at runtime, the engine is responsible for proving that the selected strategy can run inside the
-  chosen OMS workspace and for resolving the needed physical runtime scope
+- strategy config may use logical account and symbol names, but it should not replace the concrete
+  engine connectivity config
+- at runtime, the engine uses its configured OMS binding, accounts, and instruments as the physical
+  runtime scope and the strategy resolves logical names against that scope
 - bot start and bot stop are owned by Pilot's runtime orchestrator
 - the current backend may use local process orchestration for development
 - the production target backend should be Kubernetes orchestration

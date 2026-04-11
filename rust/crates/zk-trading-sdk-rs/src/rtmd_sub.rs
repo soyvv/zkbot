@@ -10,27 +10,37 @@ use zk_infra_rs::nats_kv::KvRegistryClient;
 use crate::error::SdkError;
 
 const RTMD_SUB_BUCKET: &str = "zk-rtmd-subs-v1";
+const DEFAULT_INTEREST_TTL: Duration = Duration::from_secs(60);
 
 // ── Deterministic topic constructors ─────────────────────────────────────────
 
 /// NATS subject for tick/quote data.
 pub fn tick_topic(venue: &str, instrument_exch: &str) -> String {
-    format!("zk.rtmd.tick.{venue}.{instrument_exch}")
+    format!("zk.rtmd.tick.{}.{}", canonical_venue(venue), instrument_exch)
 }
 
 /// NATS subject for OHLCV kline data.
 pub fn kline_topic(venue: &str, instrument_exch: &str, interval: &str) -> String {
-    format!("zk.rtmd.kline.{venue}.{instrument_exch}.{interval}")
+    format!(
+        "zk.rtmd.kline.{}.{}.{}",
+        canonical_venue(venue),
+        instrument_exch,
+        interval
+    )
 }
 
 /// NATS subject for funding rate data.
 pub fn funding_topic(venue: &str, instrument_exch: &str) -> String {
-    format!("zk.rtmd.funding.{venue}.{instrument_exch}")
+    format!("zk.rtmd.funding.{}.{}", canonical_venue(venue), instrument_exch)
 }
 
 /// NATS subject for order book data.
 pub fn orderbook_topic(venue: &str, instrument_exch: &str) -> String {
-    format!("zk.rtmd.orderbook.{venue}.{instrument_exch}")
+    format!(
+        "zk.rtmd.orderbook.{}.{}",
+        canonical_venue(venue),
+        instrument_exch
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,8 +85,11 @@ impl RtmdInterestManager {
     }
 
     pub async fn refresh_interest(&self, lease: &RtmdInterestLease) -> Result<(), SdkError> {
+        let mut refreshed = lease.spec.clone();
+        refreshed.updated_at_ms = now_ms();
+        refreshed.lease_expiry_ms = default_lease_expiry_ms(DEFAULT_INTEREST_TTL);
         self.kv
-            .put(&lease.key, Bytes::from(serde_json::to_vec(&lease.spec)?))
+            .put(&lease.key, Bytes::from(serde_json::to_vec(&refreshed)?))
             .await?;
         Ok(())
     }
@@ -88,12 +101,19 @@ impl RtmdInterestManager {
 
     fn key_for(&self, spec: &RtmdInterestSpec) -> String {
         let suffix = match &spec.channel_param {
-            Some(param) => format!("{}_{}", spec.instrument_id, param),
-            None => spec.instrument_id.clone(),
+            Some(param) => format!(
+                "{}_{}",
+                sanitize_key_segment(&spec.instrument_id),
+                sanitize_key_segment(param)
+            ),
+            None => sanitize_key_segment(&spec.instrument_id),
         };
         format!(
             "sub.{}.{}.{}.{}",
-            spec.scope, spec.subscriber_id, spec.channel_type, suffix
+            sanitize_key_segment(&spec.scope),
+            sanitize_key_segment(&spec.subscriber_id),
+            sanitize_key_segment(&spec.channel_type),
+            suffix
         )
     }
 }
@@ -107,6 +127,29 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+fn sanitize_key_segment(input: &str) -> String {
+    let sanitized: String = input
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed = sanitized.trim_matches('_');
+    if trimmed.is_empty() {
+        "x".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn canonical_venue(venue: &str) -> String {
+    venue.to_ascii_uppercase()
 }
 
 #[cfg(test)]
@@ -142,12 +185,19 @@ mod tests {
 
     fn key_for_spec(spec: &RtmdInterestSpec) -> String {
         let suffix = match &spec.channel_param {
-            Some(param) => format!("{}_{}", spec.instrument_id, param),
-            None => spec.instrument_id.clone(),
+            Some(param) => format!(
+                "{}_{}",
+                sanitize_key_segment(&spec.instrument_id),
+                sanitize_key_segment(param)
+            ),
+            None => sanitize_key_segment(&spec.instrument_id),
         };
         format!(
             "sub.{}.{}.{}.{}",
-            spec.scope, spec.subscriber_id, spec.channel_type, suffix
+            sanitize_key_segment(&spec.scope),
+            sanitize_key_segment(&spec.subscriber_id),
+            sanitize_key_segment(&spec.channel_type),
+            suffix
         )
     }
 
@@ -209,5 +259,14 @@ mod tests {
         let s1 = make_spec("logical", "strat_a", "BTCUSDT_MOCK", "tick", None);
         let s2 = make_spec("logical", "strat_b", "BTCUSDT_MOCK", "tick", None);
         assert_ne!(key_for_spec(&s1), key_for_spec(&s2));
+    }
+
+    #[test]
+    fn test_rtmd_key_sanitizes_real_world_instrument_ids() {
+        let spec = make_spec("logical", "bot-smoke-okx-01", "BTC-P/USDT@OKX", "tick", None);
+        assert_eq!(
+            key_for_spec(&spec),
+            "sub.logical.bot-smoke-okx-01.tick.BTC-P_USDT_OKX"
+        );
     }
 }

@@ -22,12 +22,24 @@ public class ExecutionRepository {
 
     public void createExecution(String executionId, String strategyId,
                                  String targetOmsId, Map<String, Object> configOverride) {
+        createExecution(executionId, strategyId, null, targetOmsId, configOverride, null, null, null);
+    }
+
+    public void createExecution(String executionId, String strategyId, String engineId,
+                                 String targetOmsId, Map<String, Object> configOverride,
+                                 Map<String, Object> strategyConfigSnapshot,
+                                 Map<String, Object> engineConfigSnapshot,
+                                 Map<String, Object> bindingSnapshot) {
         jdbc.update("""
                 INSERT INTO cfg.strategy_instance
-                  (execution_id, strategy_id, target_oms_id, status, config_override, started_at)
-                VALUES (?, ?, ?, 'INITIALIZING', ?::jsonb, now())
+                  (execution_id, strategy_id, engine_id, target_oms_id, status,
+                   config_override, strategy_config_snapshot, engine_config_snapshot,
+                   binding_snapshot, started_at)
+                VALUES (?, ?, ?, ?, 'INITIALIZING', ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, now())
                 """,
-                executionId, strategyId, targetOmsId, toJson(configOverride));
+                executionId, strategyId, engineId, targetOmsId,
+                toJson(configOverride), toJson(strategyConfigSnapshot),
+                toJson(engineConfigSnapshot), toJson(bindingSnapshot));
     }
 
     public void updateExecutionStatus(String executionId, String status, String errorMessage) {
@@ -83,6 +95,15 @@ public class ExecutionRepository {
                 WHERE strategy_id = ? AND status IN ('INITIALIZING', 'RUNNING', 'PAUSED')
                 ORDER BY started_at DESC LIMIT 1
                 """, strategyId);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    public Map<String, Object> findRunningExecutionForEngine(String engineId) {
+        var rows = jdbc.queryForList("""
+                SELECT * FROM cfg.strategy_instance
+                WHERE engine_id = ? AND status IN ('INITIALIZING', 'RUNNING', 'PAUSED')
+                ORDER BY started_at DESC LIMIT 1
+                """, engineId);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 

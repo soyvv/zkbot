@@ -4,7 +4,7 @@ use zk_proto_rs::{
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     zk::{
         common::v1::{
-            BasicOrderType, InstrumentRefData, InstrumentType, OpenCloseType, TimeInForceType,
+            BasicOrderType, InstrumentRefData, InstrumentType, TimeInForceType,
         },
         exch_gw::v1::{
             order_report_entry::Report, BalanceUpdate, OrderReport, OrderReportType, PositionReport,
@@ -351,7 +351,7 @@ fn to_order_request(order: &StrategyOrder, ts_ms: i64) -> OrderRequest {
         account_id: order.account_id,
         instrument_code: order.symbol.clone(),
         buy_sell_type: order.side,
-        open_close_type: OpenCloseType::OcOpen as i32,
+        open_close_type: order.open_close_type,
         order_type: BasicOrderType::OrdertypeLimit as i32,
         time_inforce_type: TimeInForceType::TimeinforceGtc as i32,
         price: order.price,

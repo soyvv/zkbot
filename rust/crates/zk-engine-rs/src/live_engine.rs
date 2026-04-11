@@ -46,6 +46,7 @@ use tokio::sync::mpsc;
 
 use zk_proto_rs::zk::common::v1::InstrumentRefData;
 use zk_strategy_sdk_rs::{
+    context::StrategyIdAllocator,
     models::{SAction, TimerSubscription},
     runner::StrategyRunner,
     strategy::Strategy,
@@ -103,7 +104,27 @@ impl<S: Strategy, D: ActionDispatcher> LiveEngine<S, D> {
         execution_id: String,
         strategy_key: String,
     ) -> Self {
-        let runner = StrategyRunner::new(&account_ids, &refdata);
+        Self::new_with_id_allocator(
+            account_ids,
+            refdata,
+            strategy,
+            dispatcher,
+            execution_id,
+            strategy_key,
+            None,
+        )
+    }
+
+    pub fn new_with_id_allocator(
+        account_ids: Vec<i64>,
+        refdata: Vec<InstrumentRefData>,
+        strategy: S,
+        dispatcher: D,
+        execution_id: String,
+        strategy_key: String,
+        id_allocator: Option<Arc<dyn StrategyIdAllocator>>,
+    ) -> Self {
+        let runner = StrategyRunner::new_with_id_allocator(&account_ids, &refdata, id_allocator);
         let replica = crate::snapshot::new_read_replica(&execution_id, &strategy_key);
         Self {
             runner,

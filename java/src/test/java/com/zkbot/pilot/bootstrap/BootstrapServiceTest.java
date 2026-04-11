@@ -41,7 +41,7 @@ class BootstrapServiceTest {
 
     @BeforeEach
     void setUp() {
-        props = new PilotProperties("nats://localhost:4222", "test", "pilot_test", 60, null, null);
+        props = new PilotProperties("nats://localhost:4222", "test", "pilot_test", 60, null, null, "zk-engine-svc", "logs");
         service = new BootstrapService(natsConnection, repository, tokenService, kvReconciler,
                 props, desiredConfigRepo, schemaLocator, new ObjectMapper());
     }

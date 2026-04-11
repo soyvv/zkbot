@@ -7,7 +7,8 @@
         refdata-run pilot-run engine-run \
         pilot-java-build pilot-java-test pilot-java-run \
         oms-run-pilot gw-run-pilot \
-        recorder-check recorder-build recorder-run
+        recorder-check recorder-build recorder-run \
+        engine-smoke-run-pilot
 
 gen:
 	buf generate protos
@@ -288,6 +289,9 @@ pilot-java-run: ## Run Java Pilot locally (requires NATS+PG+Redis: make dev-up)
 	           ZK_ENV=dev \
 	           ZK_PILOT_ID=pilot_dev_1 \
 	           ZK_HTTP_PORT=8090 \
+	           ZK_ENGINE_BINARY_PATH=$(CURDIR)/rust/target/debug/zk-engine-svc \
+	           ZK_SERVICE_MANIFESTS_ROOT=$(CURDIR)/service-manifests \
+	           ZK_VENUE_INTEGRATIONS_ROOT=$(CURDIR)/venue-integrations \
 	           SPRING_PROFILES_ACTIVE=dev \
 	           ./gradlew bootRun'
 
@@ -298,4 +302,20 @@ engine-run: ## Run engine-svc locally (requires NATS+PG: make dev-up)
 	           ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
 	           ZK_GRPC_PORT=50053 \
 	           RUST_LOG=zk_engine_svc=debug,info \
+	           cargo run -p zk-engine-svc'
+
+engine-smoke-run-pilot: ## Run smoke bot engine outside orchestrator but with Pilot bootstrap; requires ZK_BOOTSTRAP_TOKEN
+	@test -n "$(ZK_BOOTSTRAP_TOKEN)" || (echo "ZK_BOOTSTRAP_TOKEN is required, e.g. make engine-smoke-run-pilot ZK_BOOTSTRAP_TOKEN=<token>" && exit 1)
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh engine-bot-smoke-okx-01 zsh -lc 'cd rust && \
+	           cargo build -p zk-engine-svc && \
+	           ZK_ENGINE_ID=bot-smoke-okx-01 \
+	           ZK_INSTANCE_TYPE=ENGINE \
+	           ZK_NATS_URL=nats://localhost:4222 \
+	           ZK_ENV=dev \
+	           ZK_GRPC_HOST=127.0.0.1 \
+	           ZK_GRPC_PORT=50053 \
+	           ZK_DISCOVERY_BUCKET=zk-svc-registry-v1 \
+	           ZK_KV_HEARTBEAT_SECS=10 \
+	           ZK_BOOTSTRAP_TOKEN=$(ZK_BOOTSTRAP_TOKEN) \
+	           RUST_LOG=zk_engine_svc=debug,zk_trading_sdk_rs=debug,zk_infra_rs=debug,info \
 	           cargo run -p zk-engine-svc'

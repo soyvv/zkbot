@@ -62,6 +62,26 @@ public class SchemaController {
         return schema;
     }
 
+    @GetMapping("/strategies/{strategyTypeKey}")
+    public SchemaResourceEntry getStrategyManifest(@PathVariable String strategyTypeKey) {
+        var manifest = service.getActiveStrategyManifest(strategyTypeKey);
+        if (manifest == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "No active manifest for strategy type: " + strategyTypeKey);
+        }
+        return manifest;
+    }
+
+    @GetMapping(value = "/strategies/{strategyTypeKey}/config", produces = MediaType.APPLICATION_JSON_VALUE)
+    public String getStrategyConfigSchema(@PathVariable String strategyTypeKey) {
+        String schema = service.getConfigSchema("strategy_kind", strategyTypeKey);
+        if (schema == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "No config schema for strategy type: " + strategyTypeKey);
+        }
+        return schema;
+    }
+
     @GetMapping(value = "/venues/{venueId}/capabilities/{capability}/config",
             produces = MediaType.APPLICATION_JSON_VALUE)
     public String getVenueCapabilityConfigSchema(@PathVariable String venueId,

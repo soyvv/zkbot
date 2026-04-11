@@ -11,6 +11,8 @@ pub struct TradingOrder {
     pub instrument_id: String,
     pub side: Side,
     pub order_type: OrderType,
+    /// Open/close intent for derivative orders. Spot orders should use `OcOpen`.
+    pub open_close_type: i32,
     pub price: f64,
     pub qty: f64,
     pub source_id: String,

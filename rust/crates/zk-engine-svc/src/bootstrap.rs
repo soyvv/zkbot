@@ -11,14 +11,12 @@ use std::time::Duration;
 use tracing::info;
 
 use zk_infra_rs::bootstrap::{
-    bootstrap_runtime_config, BootstrapConfigError, BootstrapMode, BootstrapOutcome,
-    PilotPayload, ServiceBootstrap,
+    bootstrap_runtime_config, BootstrapConfigError, BootstrapMode, BootstrapOutcome, PilotPayload,
+    ServiceBootstrap,
 };
 use zk_infra_rs::service_registry::{PilotBootstrapGrant, ServiceRegistration};
 
-use crate::config::{
-    self, EngineBootstrapConfig, EngineProvidedConfig, EngineRuntimeConfig,
-};
+use crate::config::{self, EngineBootstrapConfig, EngineProvidedConfig, EngineRuntimeConfig};
 
 // ── ServiceBootstrap impl ───────────────────────────────────────────────────
 
@@ -33,13 +31,20 @@ impl ServiceBootstrap for EngineService {
     fn decode_pilot_config(
         payload: &PilotPayload,
     ) -> Result<Self::ProvidedConfig, BootstrapConfigError> {
-        let cfg: EngineProvidedConfig =
-            serde_json::from_str(&payload.runtime_config_json)?;
+        let mut cfg: EngineProvidedConfig = serde_json::from_str(&payload.runtime_config_json)?;
+
+        // Backward compatibility: older payloads overloaded strategy_key as the
+        // runtime selector. If strategy_type_key is absent, treat strategy_key
+        // as both logical identity and type selector until the control plane
+        // sends both explicitly.
+        if cfg.strategy_type_key.is_empty() && !cfg.strategy_key.is_empty() {
+            cfg.strategy_type_key = cfg.strategy_key.clone();
+        }
 
         // Validate required bindings.
-        if cfg.strategy_key.is_empty() {
+        if cfg.strategy_type_key.is_empty() {
             return Err(BootstrapConfigError::MissingField {
-                field: "strategy_key".into(),
+                field: "strategy_type_key".into(),
             });
         }
         if cfg.account_ids.is_empty() {
@@ -64,6 +69,11 @@ impl ServiceBootstrap for EngineService {
         provided: Self::ProvidedConfig,
     ) -> Result<Self::RuntimeConfig, BootstrapConfigError> {
         let execution_id = format!("{}-{}", bootstrap.engine_id, uuid_v4_short());
+        let strategy_key = if provided.strategy_key.is_empty() {
+            provided.strategy_type_key.clone()
+        } else {
+            provided.strategy_key
+        };
 
         Ok(EngineRuntimeConfig {
             // bootstrap
@@ -75,9 +85,12 @@ impl ServiceBootstrap for EngineService {
             kv_heartbeat_secs: bootstrap.kv_heartbeat_secs,
             discovery_bucket: bootstrap.discovery_bucket.clone(),
             // provided
-            strategy_key: provided.strategy_key,
+            strategy_key,
+            strategy_type_key: provided.strategy_type_key,
             account_ids: provided.account_ids,
             instruments: provided.instruments,
+            oms_id: provided.oms_id,
+            strategy_config_json: provided.strategy_config_json,
             timer_interval_ms: provided.timer_interval_ms,
             kline_interval: provided.kline_interval,
             // runtime-derived
@@ -115,7 +128,7 @@ pub async fn run_bootstrap(
         nats,
         &boot_cfg.bootstrap_token,
         &boot_cfg.engine_id,
-        "engine",
+        "ENGINE",
         &boot_cfg.env,
         std::collections::HashMap::new(),
     )
@@ -236,6 +249,7 @@ fn uuid_v4_short() -> String {
 mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
+    use std::sync::{Mutex, OnceLock};
     use zk_infra_rs::bootstrap::{BootstrapMode, PilotPayload};
     use zk_proto_rs::zk::config::v1::ConfigMetadata;
 
@@ -250,6 +264,11 @@ mod tests {
             bootstrap_token: String::new(),
             discovery_bucket: "zk-svc-registry-v1".into(),
         }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
     }
 
     fn pilot_payload(json: &str) -> PilotPayload {
@@ -277,7 +296,7 @@ mod tests {
     }
 
     fn valid_provided_json() -> &'static str {
-        r#"{"strategy_key":"alpha","account_ids":[1,2],"instruments":["BTC-USDT","ETH-USDT"],"timer_interval_ms":500,"kline_interval":"1m"}"#
+        r#"{"strategy_key":"strategy-alpha","strategy_type_key":"alpha","account_ids":[1,2],"instruments":["BTC-USDT","ETH-USDT"],"timer_interval_ms":500,"kline_interval":"1m"}"#
     }
 
     /// Compute normalized JSON hash (same algorithm as zk-infra-rs config_mgmt).
@@ -296,7 +315,13 @@ mod tests {
                 sorted.sort_by_key(|(k, _)| *k);
                 let entries: Vec<String> = sorted
                     .into_iter()
-                    .map(|(k, v)| format!("{}:{}", serde_json::to_string(k).unwrap(), normalize_json(v)))
+                    .map(|(k, v)| {
+                        format!(
+                            "{}:{}",
+                            serde_json::to_string(k).unwrap(),
+                            normalize_json(v)
+                        )
+                    })
                     .collect();
                 format!("{{{}}}", entries.join(","))
             }
@@ -308,8 +333,11 @@ mod tests {
 
     #[test]
     fn direct_mode_assembles_runtime_config() {
+        let _guard = env_lock().lock().unwrap();
+
         // Set env vars for direct-mode provided config loading.
-        std::env::set_var("ZK_STRATEGY_KEY", "test-strat");
+        std::env::set_var("ZK_STRATEGY_KEY", "strategy-test");
+        std::env::set_var("ZK_STRATEGY_TYPE_KEY", "test-strat");
         std::env::set_var("ZK_ACCOUNT_IDS", "100,200");
         std::env::set_var("ZK_INSTRUMENTS", "BTC-USDT,ETH-USDT");
         std::env::set_var("ZK_TIMER_INTERVAL_MS", "500");
@@ -323,7 +351,8 @@ mod tests {
         assert_eq!(cfg.env, "dev");
         assert_eq!(cfg.engine_id, "engine-test-1");
         assert_eq!(cfg.nats_url, "nats://localhost:4222");
-        assert_eq!(cfg.strategy_key, "test-strat");
+        assert_eq!(cfg.strategy_key, "strategy-test");
+        assert_eq!(cfg.strategy_type_key, "test-strat");
         assert_eq!(cfg.account_ids, vec![100, 200]);
         assert_eq!(cfg.instruments, vec!["BTC-USDT", "ETH-USDT"]);
         assert_eq!(cfg.timer_interval_ms, 500);
@@ -333,6 +362,7 @@ mod tests {
 
         // Clean up.
         std::env::remove_var("ZK_STRATEGY_KEY");
+        std::env::remove_var("ZK_STRATEGY_TYPE_KEY");
         std::env::remove_var("ZK_ACCOUNT_IDS");
         std::env::remove_var("ZK_INSTRUMENTS");
         std::env::remove_var("ZK_TIMER_INTERVAL_MS");
@@ -345,7 +375,8 @@ mod tests {
     fn pilot_mode_decodes_valid_json() {
         let payload = pilot_payload(valid_provided_json());
         let provided = EngineService::decode_pilot_config(&payload).unwrap();
-        assert_eq!(provided.strategy_key, "alpha");
+        assert_eq!(provided.strategy_key, "strategy-alpha");
+        assert_eq!(provided.strategy_type_key, "alpha");
         assert_eq!(provided.account_ids, vec![1, 2]);
         assert_eq!(provided.instruments, vec!["BTC-USDT", "ETH-USDT"]);
         assert_eq!(provided.timer_interval_ms, 500);
@@ -368,7 +399,8 @@ mod tests {
         assert_eq!(cfg.nats_url, "nats://localhost:4222");
 
         // Provided fields decoded.
-        assert_eq!(cfg.strategy_key, "alpha");
+        assert_eq!(cfg.strategy_key, "strategy-alpha");
+        assert_eq!(cfg.strategy_type_key, "alpha");
         assert_eq!(cfg.account_ids, vec![1, 2]);
         assert_eq!(cfg.instruments, vec!["BTC-USDT", "ETH-USDT"]);
         assert_eq!(cfg.timer_interval_ms, 500);
@@ -404,9 +436,22 @@ mod tests {
     }
 
     #[test]
-    fn pilot_mode_missing_strategy_key_fails() {
+    fn pilot_mode_missing_strategy_type_key_falls_back_to_legacy_strategy_key() {
         let boot = test_boot_cfg();
-        let json = r#"{"strategy_key":"","account_ids":[1],"instruments":["BTC-USDT"]}"#;
+        let json = r#"{"strategy_key":"strategy-alpha","strategy_type_key":"","account_ids":[1],"instruments":["BTC-USDT"]}"#;
+        let mode = BootstrapMode::Pilot {
+            payload: pilot_payload(json),
+            validate_hash: false,
+        };
+        let outcome = bootstrap_runtime_config::<EngineService>(&boot, mode).unwrap();
+        assert_eq!(outcome.runtime_config.strategy_key, "strategy-alpha");
+        assert_eq!(outcome.runtime_config.strategy_type_key, "strategy-alpha");
+    }
+
+    #[test]
+    fn pilot_mode_missing_both_strategy_fields_fails() {
+        let boot = test_boot_cfg();
+        let json = r#"{"strategy_key":"","strategy_type_key":"","account_ids":[1],"instruments":["BTC-USDT"]}"#;
         let mode = BootstrapMode::Pilot {
             payload: pilot_payload(json),
             validate_hash: false,
@@ -414,14 +459,14 @@ mod tests {
         let err = bootstrap_runtime_config::<EngineService>(&boot, mode).unwrap_err();
         assert!(matches!(
             err,
-            BootstrapConfigError::MissingField { ref field } if field == "strategy_key"
+            BootstrapConfigError::MissingField { ref field } if field == "strategy_type_key"
         ));
     }
 
     #[test]
     fn pilot_mode_missing_account_ids_fails() {
         let boot = test_boot_cfg();
-        let json = r#"{"strategy_key":"alpha","account_ids":[],"instruments":["BTC-USDT"]}"#;
+        let json = r#"{"strategy_key":"strategy-alpha","strategy_type_key":"alpha","account_ids":[],"instruments":["BTC-USDT"]}"#;
         let mode = BootstrapMode::Pilot {
             payload: pilot_payload(json),
             validate_hash: false,
@@ -436,7 +481,7 @@ mod tests {
     #[test]
     fn pilot_mode_missing_instruments_fails() {
         let boot = test_boot_cfg();
-        let json = r#"{"strategy_key":"alpha","account_ids":[1],"instruments":[]}"#;
+        let json = r#"{"strategy_key":"strategy-alpha","strategy_type_key":"alpha","account_ids":[1],"instruments":[]}"#;
         let mode = BootstrapMode::Pilot {
             payload: pilot_payload(json),
             validate_hash: false,
@@ -472,17 +517,21 @@ mod tests {
             validate_hash: true,
         };
         let outcome = bootstrap_runtime_config::<EngineService>(&boot, mode).unwrap();
-        assert_eq!(outcome.runtime_config.strategy_key, "alpha");
+        assert_eq!(outcome.runtime_config.strategy_key, "strategy-alpha");
+        assert_eq!(outcome.runtime_config.strategy_type_key, "alpha");
     }
 
     // -- No silent fallback (structural) --------------------------------------
 
     #[test]
     fn pilot_mode_does_not_call_load_direct_config() {
+        let _guard = env_lock().lock().unwrap();
+
         // The shared orchestrator calls decode_pilot_config in Pilot mode
         // and load_direct_config in Direct mode — never both.  This test
         // verifies Pilot mode works even if ZK_* env vars are unset/wrong.
         std::env::remove_var("ZK_STRATEGY_KEY");
+        std::env::remove_var("ZK_STRATEGY_TYPE_KEY");
         std::env::remove_var("ZK_ACCOUNT_IDS");
         std::env::remove_var("ZK_INSTRUMENTS");
 
@@ -493,6 +542,7 @@ mod tests {
         };
         // Should succeed — Pilot config is self-contained, env vars irrelevant.
         let outcome = bootstrap_runtime_config::<EngineService>(&boot, mode).unwrap();
-        assert_eq!(outcome.runtime_config.strategy_key, "alpha");
+        assert_eq!(outcome.runtime_config.strategy_key, "strategy-alpha");
+        assert_eq!(outcome.runtime_config.strategy_type_key, "alpha");
     }
 }

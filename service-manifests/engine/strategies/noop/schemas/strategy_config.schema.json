@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "No-op Strategy Config",
+  "type": "object",
+  "description": "No-op strategy does not currently require strategy-owned config.",
+  "additionalProperties": false
+}

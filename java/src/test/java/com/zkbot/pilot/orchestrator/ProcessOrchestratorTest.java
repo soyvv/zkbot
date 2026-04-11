@@ -1,5 +1,6 @@
 package com.zkbot.pilot.orchestrator;
 
+import com.zkbot.pilot.config.PilotProperties;
 import com.zkbot.pilot.orchestrator.RuntimeOrchestrator.OrchestratorProfile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -13,7 +14,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Timeout(15)
 class ProcessOrchestratorTest {
 
-    private final ProcessOrchestrator orchestrator = new ProcessOrchestrator();
+    private final ProcessOrchestrator orchestrator = new ProcessOrchestrator(
+            new PilotProperties("nats://localhost:4222", "test", "test", 60, null, null, "zk-engine-svc", "logs"));
 
     @AfterEach
     void tearDown() {

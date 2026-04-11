@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use zk_proto_rs::zk::{
     common::v1::InstrumentRefData,
     oms::v1::{BalanceUpdateEvent, OrderUpdateEvent, PositionUpdateEvent},
@@ -5,7 +7,7 @@ use zk_proto_rs::zk::{
 };
 
 use crate::{
-    context::StrategyContext,
+    context::{StrategyContext, StrategyIdAllocator},
     models::{SAction, StrategyCancel, StrategyOrder},
     strategy::Strategy,
     timer_manager::TimerManager,
@@ -23,8 +25,19 @@ pub struct StrategyRunner {
 
 impl StrategyRunner {
     pub fn new(account_ids: &[i64], refdata: &[InstrumentRefData]) -> Self {
+        Self::new_with_id_allocator(account_ids, refdata, None)
+    }
+
+    pub fn new_with_id_allocator(
+        account_ids: &[i64],
+        refdata: &[InstrumentRefData],
+        id_allocator: Option<Arc<dyn StrategyIdAllocator>>,
+    ) -> Self {
         Self {
-            ctx: StrategyContext::new(account_ids, refdata),
+            ctx: match id_allocator {
+                Some(alloc) => StrategyContext::new_with_id_allocator(account_ids, refdata, alloc),
+                None => StrategyContext::new(account_ids, refdata),
+            },
             timer: TimerManager::new(),
         }
     }

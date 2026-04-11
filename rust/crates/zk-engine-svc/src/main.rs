@@ -16,15 +16,12 @@
 
 use zk_engine_svc::config;
 use zk_infra_rs::tracing as zk_tracing;
-use zk_strategy_host_rs::{build_strategy, StrategySpec};
-
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // ── 1. Config ─────────────────────────────────────────────────────
-    let boot_cfg =
-        config::load_bootstrap().expect("Failed to load EngineBootstrapConfig from env");
+    let boot_cfg = config::load_bootstrap().expect("Failed to load EngineBootstrapConfig from env");
 
     // ── 2. Tracing ────────────────────────────────────────────────────
     zk_tracing::init_tracing(&format!("zk-engine-svc[{}]", boot_cfg.engine_id));
@@ -35,10 +32,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // ── 3-12. Run full lifecycle ──────────────────────────────────────
-    // Default to the shared noop strategy placeholder until runtime strategy
-    // selection is wired through Pilot/runtime config.
-    let strategy = build_strategy(&StrategySpec::Noop)?;
     let refdata = vec![];
 
-    zk_engine_svc::runtime::run(boot_cfg, strategy, refdata).await
+    zk_engine_svc::runtime::run(boot_cfg, refdata).await
 }

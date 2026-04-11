@@ -28,3 +28,38 @@
 - When OMS runs on host (not Docker), Docker DNS names like `gw-sim:51051` don't resolve
 - `02_oms_svc_compat.sql` must use `localhost:51051` for `make dev-up + make oms-run` workflow
 - For `dev-up-full` (OMS in Docker), Docker DNS works but localhost doesn't
+
+## 2026-03-23: OMS/GW order-request debugging
+
+### OMS order validation must live in `zk-oms-rs`, not only `zk-oms-svc`
+- gRPC-side validation alone protects one ingress path but does not harden the OMS domain model
+- Invalid requests like `order_id <= 0` should be rejected by shared OMS logic so alternate callers and future service layers cannot bypass the guard
+- Keep `oms-svc` as a thin consumer of `zk-oms-rs::validation`, with `OmsCoreV2` re-checking before mutating state
+
+### Local OMS/GW debugging needs persisted logs by default-friendly targets
+- Stdout-only local runs make it hard to correlate `order_id` across OMS ingress, writer dispatch, GW ingress, and GW exec shards after the fact
+- A small wrapper script plus `make oms-run-log`, `make gw-run-log`, and `make dev-logs-save` is enough to create repeatable log capture without changing the usual runtime commands
+
+## 2026-03-24: Pilot venue-backed onboarding config shape
+
+### Venue-backed create flows must normalize config server-side
+- The Pilot UI and backend drifted on create payload naming: UI posted `runtimeConfig`, Java expected `providedConfig`
+- That mismatch silently stored `{}` for newly created GW/MDGW rows, which only showed up later at bootstrap time
+- Fix: accept the legacy alias in the Java DTO and normalize venue-backed config in `TopologyService` before persistence
+
+### Real-venue descriptors must match nested `venue_config` paths
+- Pilot merges real venue schemas under `provided_config.venue_config`, but manifest field descriptors stay venue-local (`/secret_ref`, `/api_base_url`, ...)
+- Reusing those raw paths in bootstrap/drift logic breaks secret-ref extraction and reload classification for GW/MDGW
+- Fix: prefix venue-capability descriptor paths with `/venue_config` for non-inline venues when resolving instance descriptors
+
+## 2026-03-25: OMS balance / position redesign catch-up
+
+### Runtime separation can look complete before the live path is actually complete
+- The OMS V2 stores already separate balances, managed positions, exchange positions, and reservations
+- That is not enough by itself; the live runtime still lagged in startup reconcile, query semantics, and gateway plumbing
+- The design review should always trace the full path: gateway query RPC -> OMS startup reconcile -> periodic recheck -> gRPC query -> event publication -> replay parity
+
+### Spot exposure is the easiest place to accidentally reintroduce domain conflation
+- Spot inventory legitimately appears in both domains: as exchange-owned `Balance` and as derived operational `Position`
+- If the projection boundary is not explicit, code drifts back toward one overloaded balance-like model
+- Keep the rule explicit in code and tests: canonical spot asset state is balance, derived sellable exposure is position

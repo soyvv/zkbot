@@ -44,7 +44,7 @@ class StrategyRepositoryIT extends PostgresTestBase {
     @Test
     void create_strategy_persists_basic_fields() {
         repo.createStrategy("strat_1", "RUST", "path::to::strategy",
-                "test desc", null, null, null);
+                "smoke-test", "test desc", null, null, null);
 
         var row = repo.getStrategy("strat_1");
         assertThat(row).isNotNull();
@@ -58,7 +58,7 @@ class StrategyRepositoryIT extends PostgresTestBase {
     @Test
     void create_strategy_persists_array_columns() {
         repo.createStrategy("strat_arr", "RUST", "code_ref",
-                "desc", List.of(9001L, 9002L), List.of("BTCUSDT", "ETHUSDT"), null);
+                "smoke-test", "desc", List.of(9001L, 9002L), List.of("BTCUSDT", "ETHUSDT"), null);
 
         var row = jdbc.queryForMap("SELECT default_accounts, default_symbols FROM cfg.strategy_definition WHERE strategy_id = 'strat_arr'");
 
@@ -82,7 +82,7 @@ class StrategyRepositoryIT extends PostgresTestBase {
     @Test
     void create_strategy_persists_config_json() {
         Map<String, Object> config = Map.of("param1", "value1", "param2", 42);
-        repo.createStrategy("strat_cfg", "RUST", "code_ref", "desc",
+        repo.createStrategy("strat_cfg", "RUST", "code_ref", "smoke-test", "desc",
                 null, null, config);
 
         var row = jdbc.queryForMap("SELECT config_json FROM cfg.strategy_definition WHERE strategy_id = 'strat_cfg'");
@@ -101,7 +101,7 @@ class StrategyRepositoryIT extends PostgresTestBase {
 
     @Test
     void update_strategy_updates_only_provided_fields() {
-        repo.createStrategy("strat_upd", "RUST", "code_ref", "original desc",
+        repo.createStrategy("strat_upd", "RUST", "code_ref", "smoke-test", "original desc",
                 null, null, null);
 
         repo.updateStrategy("strat_upd", Map.of("description", "updated desc"));
@@ -113,7 +113,7 @@ class StrategyRepositoryIT extends PostgresTestBase {
 
     @Test
     void update_strategy_can_disable() {
-        repo.createStrategy("strat_dis", "RUST", "code_ref", "desc",
+        repo.createStrategy("strat_dis", "RUST", "code_ref", "smoke-test", "desc",
                 null, null, null);
 
         repo.updateStrategy("strat_dis", Map.of("enabled", false));
@@ -125,7 +125,7 @@ class StrategyRepositoryIT extends PostgresTestBase {
     @Test
     void find_strategy_with_current_execution_joins_running_instance() {
         TestFixtures.insertOmsInstance(jdbc, "oms_1");
-        repo.createStrategy("strat_exec", "RUST", "code_ref", "desc",
+        repo.createStrategy("strat_exec", "RUST", "code_ref", "smoke-test", "desc",
                 null, null, null);
 
         jdbc.update("""
@@ -143,7 +143,7 @@ class StrategyRepositoryIT extends PostgresTestBase {
     @Test
     void find_strategy_with_current_execution_ignores_stopped() {
         TestFixtures.insertOmsInstance(jdbc, "oms_1");
-        repo.createStrategy("strat_stop", "RUST", "code_ref", "desc",
+        repo.createStrategy("strat_stop", "RUST", "code_ref", "smoke-test", "desc",
                 null, null, null);
 
         jdbc.update("""
@@ -159,8 +159,8 @@ class StrategyRepositoryIT extends PostgresTestBase {
 
     @Test
     void list_strategies_filters_by_status() {
-        repo.createStrategy("strat_enabled", "RUST", "code_ref", "desc", null, null, null);
-        repo.createStrategy("strat_disabled", "RUST", "code_ref", "desc", null, null, null);
+        repo.createStrategy("strat_enabled", "RUST", "code_ref", "smoke-test", "desc", null, null, null);
+        repo.createStrategy("strat_disabled", "RUST", "code_ref", "smoke-test", "desc", null, null, null);
         repo.updateStrategy("strat_disabled", Map.of("enabled", false));
 
         var enabled = repo.listStrategies("enabled", null, null, null, 50);
@@ -170,8 +170,8 @@ class StrategyRepositoryIT extends PostgresTestBase {
 
     @Test
     void list_strategies_filters_by_type() {
-        repo.createStrategy("strat_rust", "RUST", "code_ref", "desc", null, null, null);
-        repo.createStrategy("strat_py", "PYTHON", "code_ref", "desc", null, null, null);
+        repo.createStrategy("strat_rust", "RUST", "code_ref", "smoke-test", "desc", null, null, null);
+        repo.createStrategy("strat_py", "PYTHON", "code_ref", "smoke-test", "desc", null, null, null);
 
         var results = repo.listStrategies(null, null, null, "RUST", 50);
         assertThat(results).hasSize(1);
@@ -186,7 +186,7 @@ class StrategyRepositoryIT extends PostgresTestBase {
         TestFixtures.insertAccount(jdbc, 9001, "SIM");
         TestFixtures.insertAccountBinding(jdbc, 9001, "oms_1", "gw_sim");
 
-        repo.createStrategy("strat_sim", "RUST", "code_ref", "desc", null, null, null);
+        repo.createStrategy("strat_sim", "RUST", "code_ref", "smoke-test", "desc", null, null, null);
 
         // Create an execution to link strategy to OMS (venue filter requires this join)
         jdbc.update("""

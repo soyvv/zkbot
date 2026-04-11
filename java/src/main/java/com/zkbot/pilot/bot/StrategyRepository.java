@@ -21,23 +21,26 @@ public class StrategyRepository {
     }
 
     public void createStrategy(String strategyId, String runtimeType, String codeRef,
-                                String description, List<Long> defaultAccounts,
-                                List<String> defaultSymbols, Map<String, Object> configJson) {
+                                String strategyTypeKey, String description,
+                                List<Long> defaultAccounts, List<String> defaultSymbols,
+                                Map<String, Object> configJson) {
         Long[] accountsArr = defaultAccounts != null ? defaultAccounts.toArray(Long[]::new) : new Long[0];
         String[] symbolsArr = defaultSymbols != null ? defaultSymbols.toArray(String[]::new) : new String[0];
         jdbc.update(con -> {
             var ps = con.prepareStatement("""
                     INSERT INTO cfg.strategy_definition
-                      (strategy_id, runtime_type, code_ref, description, default_accounts, default_symbols, config_json, enabled)
-                    VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, true)
+                      (strategy_id, runtime_type, code_ref, strategy_type_key, description,
+                       default_accounts, default_symbols, config_json, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, true)
                     """);
             ps.setString(1, strategyId);
             ps.setString(2, runtimeType);
             ps.setString(3, codeRef);
-            ps.setString(4, description);
-            ps.setArray(5, con.createArrayOf("bigint", accountsArr));
-            ps.setArray(6, con.createArrayOf("text", symbolsArr));
-            ps.setString(7, toJson(configJson));
+            ps.setString(4, strategyTypeKey);
+            ps.setString(5, description);
+            ps.setArray(6, con.createArrayOf("bigint", accountsArr));
+            ps.setArray(7, con.createArrayOf("text", symbolsArr));
+            ps.setString(8, toJson(configJson));
             return ps;
         });
     }
@@ -51,6 +54,7 @@ public class StrategyRepository {
         boolean hasSymbols = fields.containsKey("defaultSymbols");
 
         if (fields.containsKey("description")) setClauses.add("description = ?");
+        if (fields.containsKey("strategyTypeKey")) setClauses.add("strategy_type_key = ?");
         if (hasAccounts) setClauses.add("default_accounts = ?");
         if (hasSymbols) setClauses.add("default_symbols = ?");
         if (fields.containsKey("config")) setClauses.add("config_json = ?::jsonb");
@@ -66,6 +70,7 @@ public class StrategyRepository {
             var ps = con.prepareStatement(sql);
             int idx = 1;
             if (fields.containsKey("description")) ps.setString(idx++, (String) fields.get("description"));
+            if (fields.containsKey("strategyTypeKey")) ps.setString(idx++, (String) fields.get("strategyTypeKey"));
             if (hasAccounts) {
                 var list = (List<Long>) fields.get("defaultAccounts");
                 ps.setArray(idx++, con.createArrayOf("bigint", list != null ? list.toArray(Long[]::new) : new Long[0]));

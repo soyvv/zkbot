@@ -1,5 +1,7 @@
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use zk_proto_rs::zk::{
     common::v1::InstrumentRefData,
@@ -10,6 +12,35 @@ use zk_proto_rs::zk::{
 };
 
 use crate::models::{StrategyCancel, StrategyOrder};
+
+pub trait StrategyIdAllocator: Send + Sync {
+    fn next_id(&self) -> i64;
+}
+
+#[derive(Debug)]
+pub struct SequentialIdAllocator {
+    next: AtomicI64,
+}
+
+impl SequentialIdAllocator {
+    pub fn new(start: i64) -> Self {
+        Self {
+            next: AtomicI64::new(start),
+        }
+    }
+}
+
+impl Default for SequentialIdAllocator {
+    fn default() -> Self {
+        Self::new(1)
+    }
+}
+
+impl StrategyIdAllocator for SequentialIdAllocator {
+    fn next_id(&self) -> i64 {
+        self.next.fetch_add(1, Ordering::AcqRel)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // AccountState — per-account order and balance tracking
@@ -74,10 +105,19 @@ pub struct StrategyContext {
     /// Arbitrary init data injected by the runtime before `on_init` fires.
     /// Mirrors Python `tq.__tq_init_output__` / `tq.get_custom_init_data()`.
     init_data: Option<Box<dyn Any + Send + 'static>>,
+    id_allocator: Arc<dyn StrategyIdAllocator>,
 }
 
 impl StrategyContext {
     pub fn new(account_ids: &[i64], refdata: &[InstrumentRefData]) -> Self {
+        Self::new_with_id_allocator(account_ids, refdata, Arc::new(SequentialIdAllocator::default()))
+    }
+
+    pub fn new_with_id_allocator(
+        account_ids: &[i64],
+        refdata: &[InstrumentRefData],
+        id_allocator: Arc<dyn StrategyIdAllocator>,
+    ) -> Self {
         let account_states = account_ids
             .iter()
             .map(|&id| (id, AccountState::new(id)))
@@ -94,6 +134,7 @@ impl StrategyContext {
             balance_generation: 0,
             position_generation: 0,
             init_data: None,
+            id_allocator,
         }
     }
 
@@ -261,6 +302,15 @@ impl StrategyContext {
         self.account_states.keys().copied()
     }
 
+    /// Allocate a runtime-scoped unique order/correlation id.
+    ///
+    /// The allocator is injected by the host runtime:
+    /// - live engine: Snowflake / Pilot-granted worker id
+    /// - backtester: deterministic local sequence
+    pub fn next_id(&self) -> i64 {
+        self.id_allocator.next_id()
+    }
+
     // -----------------------------------------------------------------------
     // Init data — set by runtime before on_init, readable in any callback
     // -----------------------------------------------------------------------
@@ -292,6 +342,14 @@ mod tests {
 
     fn make_ctx() -> StrategyContext {
         StrategyContext::new(&[100], &[])
+    }
+
+    #[test]
+    fn next_id_is_monotonic() {
+        let ctx = make_ctx();
+        let a = ctx.next_id();
+        let b = ctx.next_id();
+        assert!(b > a);
     }
 
     fn make_balance_update(account_id: i64, asset: &str, total_qty: f64) -> BalanceUpdateEvent {

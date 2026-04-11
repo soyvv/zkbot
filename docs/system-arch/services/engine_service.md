@@ -172,6 +172,171 @@ Manifest/config rule:
 - the engine should apply the effective config received from Pilot rather than treating local
   runtime files/env as the source of truth
 
+### Engine And Strategy Manifest Model
+
+The engine config model should mirror the gateway pattern:
+
+- one service-kind manifest/schema for the engine runtime itself
+- one strategy manifest/schema per strategy family selected by `strategy_type_key`
+
+This keeps engine hosting concerns separate from strategy behavior concerns.
+
+#### 1. Engine Service-Kind Manifest
+
+The engine service manifest should define only engine-owned `provided_config`.
+
+Examples:
+
+- target OMS binding metadata when that is part of engine provided-config
+- connected account IDs used by `TradingClient`
+- interested instruments used for RTMD subscription setup
+- runtime mode
+- supervision mode
+- timer defaults that belong to the engine host
+- logging and observability controls
+- embedded RTMD host flags
+- restart-required vs reloadable classification
+
+It should not be the place for:
+
+- strategy-specific parameters
+- strategy-family schema selection rules
+- Python strategy payload details beyond the generic wrapper contract
+
+Design rule:
+
+- `service-manifests/engine/manifest.yaml` and its JSON Schema are the authoritative contract for
+  engine-owned config
+- Pilot should load and validate bot `provided_config` against this service-kind schema the same way
+  it does for gateway config loading
+
+#### 2. Strategy Manifest Registry
+
+Each selectable strategy should have its own manifest/schema contract keyed by
+`strategy_type_key`.
+
+Recommended manifest contents:
+
+- `strategy_type_key`
+- `runtime_kind`
+  - `rust_native`
+  - `python_wrapper`
+- human metadata such as label, description, and tags
+- config schema location
+- optional defaults
+- capability flags
+- optional refdata / RTMD subscription hints
+- compatibility metadata such as required engine features
+
+Design rule:
+
+- strategy authoring should be driven by the selected strategy manifest/schema, not by one generic
+  free-form JSON blob for all strategies
+- Pilot should validate strategy config against the schema for the selected `strategy_type_key`
+
+#### 3. Rust-Native Strategy Manifests
+
+For Rust-native strategies such as market making, arbitrage, or smoke-test:
+
+- `strategy_type_key` selects the strategy family
+- the manifest identifies the Rust strategy implementation
+- the strategy schema defines the strategy's own config payload
+
+Examples of strategy-owned fields:
+
+- quoting widths
+- inventory controls
+- trigger thresholds
+- sampling windows
+- research/model flags
+- logical names such as `mm_main_accnt` or `hedge_symbol`
+
+Logical-name rule:
+
+- strategy config may refer to logical account or symbol names meaningful to the strategy
+- the engine service config must carry the concrete connected accounts and interested instruments
+  used to satisfy those logical references
+- operator validation should ensure the selected engine config can satisfy the strategy's logical
+  requirements
+
+#### 4. Python Wrapper Strategy Manifest
+
+The system should also support one umbrella Python-wrapping strategy family.
+
+Recommended behavior:
+
+- from Pilot's perspective, it is just another selectable `strategy_type_key`
+- its manifest declares `runtime_kind = python_wrapper`
+- the engine still hosts it through the normal engine lifecycle
+- the wrapper config includes Python runtime location metadata plus one JSON payload for the wrapped
+  Python strategy config
+
+Recommended wrapper shape:
+
+```json
+{
+  "python_module": "my_pkg.my_strategy",
+  "python_class": "MyStrategy",
+  "python_search_path": "/opt/zkbot/strategies",
+  "python_strategy_config": {
+    "lookback": 20,
+    "threshold_bps": 5
+  }
+}
+```
+
+Design rule:
+
+- the wrapper fields are generic and belong to the Python-wrapper strategy manifest
+- `python_strategy_config` is a nested JSON object owned by the wrapped Python strategy contract
+- Pilot should validate both:
+  - the outer wrapper schema
+  - the nested Python strategy config schema when that schema is available
+
+#### 5. Effective Runtime Config Assembly
+
+The engine should assemble runtime config from two manifest-governed inputs:
+
+- engine host config from the engine service-kind schema
+- strategy config from the selected strategy manifest/schema
+
+Recommended effective shape:
+
+```text
+runtime_config
+  = bootstrap_config
+  + engine_provided_config
+  + strategy_definition
+  + execution metadata
+  + runtime-derived fields
+```
+
+Where:
+
+- `engine_provided_config` is validated by the engine service-kind schema
+- `strategy_definition.config_json` is validated by the strategy manifest/schema for
+  `strategy_type_key`
+- concrete engine connectivity such as connected accounts and interested instruments belongs to the
+  engine service-kind config
+- logical aliases used by the strategy belong to the strategy config
+- the engine runtime applies both, but does not collapse them into one authoring contract
+
+#### 6. Pilot Authoring Flow
+
+Pilot should resolve two schema layers during bot onboarding:
+
+1. engine schema from the engine service manifest
+2. strategy schema from the selected `strategy_type_key` manifest
+
+Operator workflow:
+
+- strategy authoring uses the strategy manifest/schema
+- bot onboarding uses the engine service-kind manifest/schema
+- start validation checks the combined runtime feasibility
+
+This is the engine-side equivalent of how gateway onboarding loads shared gateway host config from
+the service-kind schema and venue-specific config from the venue capability manifest.
+
 Runtime introspection rule:
 
 - the engine should expose a default `GetCurrentConfig` style query
@@ -180,6 +345,144 @@ Runtime introspection rule:
 - Pilot uses that response to compare desired vs live config and to classify drift before reload or
   restart
 - raw secret values must not be returned
+
+#### 7. Schema And Dynamic Option Metadata
+
+JSON Schema should remain the base contract for:
+
+- field types
+- required/default values
+- range and pattern validation
+- nested object structure
+
+But JSON Schema alone is not enough for operator-facing engine and strategy forms because many
+fields depend on live Pilot metadata.
+
+Examples:
+
+- `target_oms_id` should come from the current OMS list
+- `account_ids` should come from accounts reachable under the selected OMS / gateway scope
+- `instruments` should come from live refdata or OMS-visible instrument scope
+- `strategy_type_key` should come from the synced strategy manifest registry
+- logical strategy fields such as `mm_main_accnt` may need a resolved account-option list, not a
+  free-text box
+
+Design rule:
+
+- authoring should use `JSON Schema + field_descriptors + Pilot metadata APIs`
+- schema defines the shape
+- field descriptors define how the UI should source and present values
+- Pilot metadata APIs provide the dynamic option lists
+
+Recommended manifest extension:
+
+```yaml
+field_descriptors:
+  - path: /strategy_type_key
+    reloadable: false
+    ui:
+      widget: select
+      options_source: meta.strategy_types
+      value_key: value
+      label_key: label
+
+  - path: /target_oms_id
+    reloadable: false
+    ui:
+      widget: select
+      options_source: meta.oms
+      value_key: value
+      label_key: label
+
+  - path: /account_ids
+    reloadable: false
+    ui:
+      widget: multi_select
+      options_source: topology.oms_accounts
+      depends_on:
+        - /target_oms_id
+      value_key: account_id
+      label_key: display_name
+
+  - path: /instruments
+    reloadable: false
+    ui:
+      widget: multi_select
+      options_source: topology.oms_instruments
+      depends_on:
+        - /target_oms_id
+        - /account_ids
+      value_key: instrument_id
+      label_key: instrument_id
+```
+
+Recommended `ui` descriptor fields:
+
+- `widget`
+  - `select`
+  - `multi_select`
+  - `autocomplete`
+  - `json_editor`
+  - `hidden`
+- `options_source`
+  - identifies which Pilot metadata source to query
+- `depends_on`
+  - one or more config paths that must be resolved first
+- `value_key`
+  - field name in each option object used as the stored value
+- `label_key`
+  - field name used for operator-facing display
+- `placeholder`
+- `help_text`
+- `order`
+
+Metadata source model:
+
+- `meta.*`
+  - broad dropdown-ready lists returned by `/v1/meta`
+  - examples: OMS list, strategy-type list, runtime kinds
+- `topology.*`
+  - scoped option lists that depend on a selected OMS, gateway, account, or venue
+  - examples: accounts under one OMS, instruments available for one runtime scope
+- `strategy.*`
+  - optional strategy-family helper lookups if a strategy manifest needs special logical aliases
+
+Recommended source examples:
+
+- `meta.oms`
+- `meta.strategy_types`
+- `topology.oms_accounts`
+- `topology.oms_instruments`
+- `topology.gateway_symbols`
+
+Dependency rule:
+
+- the UI should resolve option sources only after all declared `depends_on` fields are populated
+- when an upstream dependency changes, dependent fields should be cleared or revalidated
+- Pilot should still perform authoritative backend validation even if the UI uses filtered lists
+
+Engine-form guidance:
+
+- engine config should be as metadata-driven as possible
+- `target_oms_id`, `account_ids`, and `instruments` should normally be rendered from dynamic option
+  sources rather than free-form text
+- `strategy_type_key` should usually be hidden or auto-filled from the selected strategy definition,
+  not operator-entered separately during bot onboarding
+
+Strategy-form guidance:
+
+- strategy config should still validate through the selected strategy schema
+- strategy fields that represent logical aliases may use dynamic selects when their valid choices
+  can be derived from current Pilot metadata
+- when a strategy field cannot be safely constrained from live metadata, the UI may fall back to a
+  normal schema-driven text/JSON input
+
+Fallback rule:
+
+- schema-driven authoring should remain the default
+- a schema-free/manual JSON path may still exist for advanced or bootstrap workflows
+- even in manual mode, Pilot should preserve descriptor metadata when available so the UI can show
+  what automation was skipped
 
 ## Startup Model
 

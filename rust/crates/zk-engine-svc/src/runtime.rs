@@ -19,8 +19,9 @@ use tracing::{info, warn};
 
 use zk_engine_rs::{run_timer_clock, EngineReadReplica, EventEnvelope, LiveEngine};
 use zk_proto_rs::zk::common::v1::InstrumentRefData;
-use zk_strategy_sdk_rs::strategy::Strategy;
+use zk_strategy_sdk_rs::context::StrategyIdAllocator;
 use zk_trading_sdk_rs::client::TradingClient;
+use zk_trading_sdk_rs::id_gen::SnowflakeIdGen;
 
 use crate::bootstrap;
 use crate::config::EngineBootstrapConfig;
@@ -39,6 +40,24 @@ use zk_proto_rs::zk::engine::v1::{
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 const GRACE_QUEUE_CAPACITY: usize = 512;
 const CONTROL_QUEUE_CAPACITY: usize = 32;
+
+struct RuntimeSnowflakeAllocator {
+    inner: SnowflakeIdGen,
+}
+
+impl RuntimeSnowflakeAllocator {
+    fn new(instance_id: u16) -> anyhow::Result<Self> {
+        Ok(Self {
+            inner: SnowflakeIdGen::new(instance_id)?,
+        })
+    }
+}
+
+impl StrategyIdAllocator for RuntimeSnowflakeAllocator {
+    fn next_id(&self) -> i64 {
+        self.inner.next_id()
+    }
+}
 
 /// Combined gRPC handler implementing `EngineService`.
 ///
@@ -108,9 +127,8 @@ impl EngineService for EngineGrpcHandler {
 /// 9. Run engine event loop
 /// 10. Supervise (fencing / signal)
 /// 11. Graceful shutdown
-pub async fn run<S: Strategy>(
+pub async fn run(
     boot_cfg: EngineBootstrapConfig,
-    strategy: S,
     refdata: Vec<InstrumentRefData>,
 ) -> anyhow::Result<()> {
     let start_time = Instant::now();
@@ -130,19 +148,30 @@ pub async fn run<S: Strategy>(
     info!(
         execution_id = %cfg.execution_id,
         strategy_key = %cfg.strategy_key,
+        strategy_type_key = %cfg.strategy_type_key,
+        oms_id = %cfg.oms_id,
         accounts = ?cfg.account_ids,
         instruments = ?cfg.instruments,
         config_source = %outcome.source.as_metadata_source(),
         "bootstrap complete"
     );
 
+    let spec = zk_strategy_host_rs::parse_strategy_spec(&cfg.strategy_type_key)?;
+    let strategy = zk_strategy_host_rs::build_strategy(
+        &spec,
+        (!cfg.strategy_config_json.is_empty()).then_some(cfg.strategy_config_json.as_str()),
+    )?;
+    info!(?spec, "resolved strategy spec");
+
     // ── 3. Connect TradingClient ────────────────────────────────────────
     let trading_config = zk_trading_sdk_rs::config::TradingClientConfig {
         nats_url: cfg.nats_url.clone(),
         env: cfg.env.clone(),
         account_ids: cfg.account_ids.clone(),
+        oms_id: if cfg.oms_id.is_empty() { None } else { Some(cfg.oms_id.clone()) },
         client_instance_id: cfg.instance_id,
         discovery_bucket: cfg.discovery_bucket.clone(),
+        discovery_timeout_ms: 15_000,
         refdata_grpc: None,
     };
     let trading_client = Arc::new(
@@ -156,16 +185,17 @@ pub async fn run<S: Strategy>(
     let _rehydrated = crate::rehydration::rehydrate(&trading_client, &cfg.account_ids).await;
 
     // ── 5. Build LiveEngine ─────────────────────────────────────────────
-    let dispatcher =
-        TradingDispatcher::new(Arc::clone(&trading_client), cfg.execution_id.clone());
+    let dispatcher = TradingDispatcher::new(Arc::clone(&trading_client), cfg.execution_id.clone());
 
-    let mut engine = LiveEngine::new(
+    let id_allocator = Arc::new(RuntimeSnowflakeAllocator::new(cfg.instance_id)?);
+    let mut engine = LiveEngine::new_with_id_allocator(
         cfg.account_ids.clone(),
         refdata,
         strategy,
         dispatcher,
         cfg.execution_id.clone(),
         cfg.strategy_key.clone(),
+        Some(id_allocator),
     );
 
     // Grab the read replica before moving into the event loop task.
@@ -240,12 +270,9 @@ pub async fn run<S: Strategy>(
     sub_handles.extend(oms_handles);
 
     // RTMD tick subscriptions.
-    let tick_handles = crate::subscriptions::subscribe_ticks(
-        &trading_client,
-        &cfg.instruments,
-        event_tx.clone(),
-    )
-    .await;
+    let tick_handles =
+        crate::subscriptions::subscribe_ticks(&trading_client, &cfg.instruments, event_tx.clone())
+            .await;
     sub_handles.extend(tick_handles);
 
     // RTMD kline (bar) subscriptions.

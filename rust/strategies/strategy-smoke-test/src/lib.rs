@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use zk_proto_rs::zk::common::v1::BuySellType;
+use serde::{Deserialize, Serialize};
+use zk_proto_rs::zk::common::v1::{BuySellType, OpenCloseType};
 use zk_proto_rs::zk::oms::v1::{OrderStatus, OrderUpdateEvent};
 use zk_proto_rs::zk::rtmd::v1::TickData;
 use zk_strategy_sdk_rs::context::StrategyContext;
@@ -11,17 +12,23 @@ use zk_strategy_sdk_rs::models::{
 use zk_strategy_sdk_rs::strategy::Strategy;
 
 const TIMER_KEY: &str = "smoke_mm/refresh";
+const MAX_OPEN_ORDERS_BEFORE_PAUSE: usize = 4;
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct SmokeMMConfig {
     /// Interval between quote refresh cycles (ms).
     pub quote_interval_ms: i64,
     /// Qty for each side of the quote.
     pub quote_qty: f64,
+    /// Buy quote distance, in instrument price ticks, below best bid.
+    pub buy_tick_distance: f64,
+    /// Sell quote distance, in instrument price ticks, above best ask.
+    pub sell_tick_distance: f64,
 }
 
 impl Default for SmokeMMConfig {
@@ -29,6 +36,8 @@ impl Default for SmokeMMConfig {
         Self {
             quote_interval_ms: 5_000,
             quote_qty: 1.0,
+            buy_tick_distance: 0.0,
+            sell_tick_distance: 0.0,
         }
     }
 }
@@ -83,7 +92,6 @@ impl SymbolState {
 #[derive(Debug, Clone)]
 pub struct SmokeTestStrategy {
     config: SmokeMMConfig,
-    next_order_id: i64,
     /// Per-symbol quote and position state.
     symbols: HashMap<String, SymbolState>,
     /// false while paused — suppresses new quotes.
@@ -106,17 +114,10 @@ impl SmokeTestStrategy {
     pub fn with_config(config: SmokeMMConfig) -> Self {
         Self {
             config,
-            next_order_id: 1,
             symbols: HashMap::new(),
             quoting_enabled: true,
             account_id: None,
         }
-    }
-
-    fn alloc_order_id(&mut self) -> i64 {
-        let id = self.next_order_id;
-        self.next_order_id += 1;
-        id
     }
 
     fn log(message: impl Into<String>, ts_ms: i64) -> SAction {
@@ -152,17 +153,63 @@ impl SmokeTestStrategy {
         Some((bid, ask))
     }
 
-    /// Place buy+sell quotes for a symbol at the given BBO.
+    fn tick_size_for(&self, symbol: &str, ctx: &StrategyContext) -> f64 {
+        ctx.get_symbol_info(symbol)
+            .map(|info| info.price_tick_size)
+            .filter(|tick| *tick > 0.0)
+            .unwrap_or(1.0)
+    }
+
+    fn quote_prices(
+        &self,
+        symbol: &str,
+        bid: f64,
+        ask: f64,
+        ctx: &StrategyContext,
+    ) -> Option<(f64, f64)> {
+        let tick_size = self.tick_size_for(symbol, ctx);
+        let buy_offset = self.config.buy_tick_distance.max(0.0) * tick_size;
+        let sell_offset = self.config.sell_tick_distance.max(0.0) * tick_size;
+        let quote_bid = bid - buy_offset;
+        let quote_ask = ask + sell_offset;
+
+        if quote_bid <= 0.0 || quote_bid >= quote_ask {
+            return None;
+        }
+
+        Some((quote_bid, quote_ask))
+    }
+
+    /// Place buy+sell quotes for a symbol using configured distance from BBO.
     fn place_quotes(
         &mut self,
         symbol: &str,
         bid: f64,
         ask: f64,
+        ctx: &StrategyContext,
         account_id: i64,
         ts_ms: i64,
     ) -> Vec<SAction> {
-        let buy_id = self.alloc_order_id();
-        let sell_id = self.alloc_order_id();
+        let open_orders = ctx.get_open_orders(account_id).len();
+        if open_orders > MAX_OPEN_ORDERS_BEFORE_PAUSE {
+            return vec![Self::log(
+                format!(
+                    "smoke_mm.skip_quote symbol={symbol} reason=open_order_limit open_orders={open_orders} limit={MAX_OPEN_ORDERS_BEFORE_PAUSE}"
+                ),
+                ts_ms,
+            )];
+        }
+
+        let Some((quote_bid, quote_ask)) = self.quote_prices(symbol, bid, ask, ctx) else {
+            return vec![Self::log(
+                format!(
+                    "smoke_mm.skip_quote symbol={symbol} reason=invalid_quote_prices bid={bid} ask={ask}"
+                ),
+                ts_ms,
+            )];
+        };
+        let buy_id = ctx.next_id();
+        let sell_id = ctx.next_id();
         let ss = self.symbols.get_mut(symbol).expect("symbol must exist");
         let mut actions = Vec::with_capacity(3);
         ss.buy_order_id = Some(buy_id);
@@ -170,25 +217,27 @@ impl SmokeTestStrategy {
 
         actions.push(Self::log(
             format!(
-                "smoke_mm.quote symbol={symbol} buy_id={buy_id}@{bid} sell_id={sell_id}@{ask} qty={}",
-                self.config.quote_qty,
+                "smoke_mm.quote symbol={symbol} buy_id={buy_id}@{quote_bid} sell_id={sell_id}@{quote_ask} qty={} buy_ticks={} sell_ticks={}",
+                self.config.quote_qty, self.config.buy_tick_distance, self.config.sell_tick_distance,
             ),
             ts_ms,
         ));
         actions.push(SAction::PlaceOrder(StrategyOrder {
             order_id: buy_id,
             symbol: symbol.to_string(),
-            price: bid,
+            price: quote_bid,
             qty: self.config.quote_qty,
             side: BuySellType::BsBuy as i32,
+            open_close_type: OpenCloseType::OcOpen as i32,
             account_id,
         }));
         actions.push(SAction::PlaceOrder(StrategyOrder {
             order_id: sell_id,
             symbol: symbol.to_string(),
-            price: ask,
+            price: quote_ask,
             qty: self.config.quote_qty,
             side: BuySellType::BsSell as i32,
+            open_close_type: OpenCloseType::OcOpen as i32,
             account_id,
         }));
         actions
@@ -286,6 +335,7 @@ impl SmokeTestStrategy {
     fn maybe_requote_on_both_cleared(
         &mut self,
         symbol: &str,
+        ctx: &StrategyContext,
         account_id: i64,
         ts_ms: i64,
     ) -> Vec<SAction> {
@@ -294,7 +344,7 @@ impl SmokeTestStrategy {
             let bid = ss.best_bid;
             let ask = ss.best_ask;
             if bid > 0.0 && ask > 0.0 && bid < ask {
-                return self.place_quotes(symbol, bid, ask, account_id, ts_ms);
+                return self.place_quotes(symbol, bid, ask, ctx, account_id, ts_ms);
             }
         }
         vec![]
@@ -351,7 +401,7 @@ impl Strategy for SmokeTestStrategy {
                 )];
             };
             self.account_id = Some(account_id);
-            return self.place_quotes(symbol, bid, ask, account_id, ctx.current_ts_ms);
+            return self.place_quotes(symbol, bid, ask, ctx, account_id, ctx.current_ts_ms);
         }
 
         vec![]
@@ -388,7 +438,7 @@ impl Strategy for SmokeTestStrategy {
 
             // Re-quote if BBO is valid.
             if bid > 0.0 && ask > 0.0 && bid < ask {
-                actions.extend(self.place_quotes(&sym, bid, ask, account_id, event.ts_ms));
+                actions.extend(self.place_quotes(&sym, bid, ask, _ctx, account_id, event.ts_ms));
             } else {
                 actions.push(Self::log(
                     format!("smoke_mm.skip_quote symbol={sym} bid={bid} ask={ask}"),
@@ -458,6 +508,7 @@ impl Strategy for SmokeTestStrategy {
             let account_id = self.account_id.unwrap_or(0);
             actions.extend(self.maybe_requote_on_both_cleared(
                 &symbol,
+                ctx,
                 account_id,
                 update.timestamp,
             ));
@@ -495,7 +546,14 @@ impl Strategy for SmokeTestStrategy {
             .collect();
         for (sym, bid, ask) in syms {
             if bid > 0.0 && ask > 0.0 && bid < ask {
-                actions.extend(self.place_quotes(&sym, bid, ask, account_id, ctx.current_ts_ms));
+                actions.extend(self.place_quotes(
+                    &sym,
+                    bid,
+                    ask,
+                    ctx,
+                    account_id,
+                    ctx.current_ts_ms,
+                ));
             }
         }
         actions
@@ -509,12 +567,27 @@ impl Strategy for SmokeTestStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zk_backtest_rs::testutils::{
+        instrument_refdata, StrategyTestBuilder, TestEventSequenceBuilder, TestMatchPolicyKind,
+    };
+    use zk_proto_rs::zk::common::v1::InstrumentRefData;
     use zk_proto_rs::zk::oms::v1::{Order, Trade};
     use zk_proto_rs::zk::rtmd::v1::PriceLevel;
     use zk_strategy_sdk_rs::context::StrategyContext;
 
     fn make_ctx() -> StrategyContext {
         StrategyContext::new(&[100], &[])
+    }
+
+    fn make_ctx_with_refdata(symbol: &str, price_tick_size: f64) -> StrategyContext {
+        StrategyContext::new(
+            &[100],
+            &[InstrumentRefData {
+                instrument_id: symbol.to_string(),
+                price_tick_size,
+                ..Default::default()
+            }],
+        )
     }
 
     fn make_tick(symbol: &str, bid: f64, ask: f64) -> TickData {
@@ -570,6 +643,19 @@ mod tests {
         }
     }
 
+    fn make_oue_open(order_id: i64) -> OrderUpdateEvent {
+        OrderUpdateEvent {
+            order_id,
+            account_id: 100,
+            order_snapshot: Some(Order {
+                order_id,
+                order_status: OrderStatus::Booked as i32,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
     fn count_orders(actions: &[SAction]) -> usize {
         actions
             .iter()
@@ -592,6 +678,76 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn end_to_end_backtest_places_fills_and_requotes() {
+        let symbol = "BTC/USD@SIM1";
+        let events = TestEventSequenceBuilder::new()
+            .start_at_ms(1_000)
+            .add_tick_ob(symbol, 100.0, 101.0)
+            .clock_forward_millis(1_000)
+            .add_tick_ob(symbol, 99.0, 100.0)
+            .clock_forward_millis(1_000)
+            .add_tick_ob(symbol, 101.0, 102.0)
+            .build();
+
+        let mut init_balances = HashMap::new();
+        init_balances.insert(
+            100,
+            HashMap::from([
+                ("USD".to_string(), 10_000.0),
+                ("BTC".to_string(), 10.0),
+            ]),
+        );
+
+        let refdata = vec![InstrumentRefData {
+            price_tick_size: 1.0,
+            ..instrument_refdata(symbol)
+        }];
+
+        let mut harness = StrategyTestBuilder::new()
+            .with_accounts(vec![100])
+            .with_refdata(refdata)
+            .with_init_balances(init_balances)
+            .with_match_policy(TestMatchPolicyKind::Fcfs)
+            .with_event_sequence(events)
+            .build();
+
+        let mut strategy = SmokeTestStrategy::with_config(SmokeMMConfig {
+            quote_interval_ms: 5_000,
+            quote_qty: 1.0,
+            buy_tick_distance: 0.0,
+            sell_tick_distance: 0.0,
+        });
+
+        let result = harness.run(&mut strategy);
+
+        assert_eq!(result.order_placements.len(), 4);
+        assert_eq!(result.trades.len(), 2);
+
+        let prices: Vec<f64> = result
+            .order_placements
+            .iter()
+            .map(|(_, order)| order.price)
+            .collect();
+        assert_eq!(prices, vec![100.0, 101.0, 101.0, 102.0]);
+
+        let fill_logs: Vec<&str> = result
+            .logs
+            .iter()
+            .map(|log| log.message.as_str())
+            .filter(|msg| msg.contains("smoke_mm.fill"))
+            .collect();
+        assert_eq!(fill_logs.len(), 2);
+
+        let requote_logs: Vec<&str> = result
+            .logs
+            .iter()
+            .map(|log| log.message.as_str())
+            .filter(|msg| msg.contains("smoke_mm.quote"))
+            .collect();
+        assert_eq!(requote_logs.len(), 2);
     }
 
     // ── First tick triggers quotes ──────────────────────────────────────
@@ -622,6 +778,30 @@ mod tests {
         assert_eq!(buy.unwrap().price, 100.0);
         assert_eq!(sell.unwrap().price, 101.0);
         assert_eq!(buy.unwrap().symbol, "BTC-USDT");
+    }
+
+    #[test]
+    fn first_tick_skips_when_more_than_four_open_orders() {
+        let mut strat = SmokeTestStrategy::new();
+        let mut ctx = make_ctx();
+        for order_id in 1..=5 {
+            ctx.on_order_update(&make_oue_open(order_id));
+        }
+
+        let actions = strat.on_tick(&make_tick("BTC-USDT", 100.0, 101.0), &ctx);
+
+        assert_eq!(count_orders(&actions), 0);
+        let logs: Vec<&str> = actions
+            .iter()
+            .filter_map(|action| match action {
+                SAction::Log(log) => Some(log.message.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            logs.iter().any(|msg| msg.contains("reason=open_order_limit")),
+            "expected open-order-limit skip log, got {logs:?}"
+        );
     }
 
     #[test]
@@ -866,6 +1046,30 @@ mod tests {
             _ => None,
         });
         assert_eq!(buy.unwrap().qty, 5.0);
+    }
+
+    #[test]
+    fn custom_tick_distance_offsets_quotes_from_bbo() {
+        let cfg = SmokeMMConfig {
+            buy_tick_distance: 2.0,
+            sell_tick_distance: 3.0,
+            ..Default::default()
+        };
+        let mut strat = SmokeTestStrategy::with_config(cfg);
+        let ctx = make_ctx_with_refdata("BTC-USDT", 0.5);
+        let actions = strat.on_tick(&make_tick("BTC-USDT", 100.0, 101.0), &ctx);
+
+        let buy = actions.iter().find_map(|a| match a {
+            SAction::PlaceOrder(o) if o.side == BuySellType::BsBuy as i32 => Some(o),
+            _ => None,
+        });
+        let sell = actions.iter().find_map(|a| match a {
+            SAction::PlaceOrder(o) if o.side == BuySellType::BsSell as i32 => Some(o),
+            _ => None,
+        });
+
+        assert_eq!(buy.unwrap().price, 99.0);
+        assert_eq!(sell.unwrap().price, 102.5);
     }
 
     // ── Reinit arms timer ───────────────────────────────────────────────
@@ -1278,7 +1482,9 @@ mod tests {
 
         // Simulate a partial fill to populate last_filled_qty.
         strat.on_order_update(&make_oue_partial(buy_id, 0.3, 0.0), &ctx);
-        assert!(strat.symbols["BTC-USDT"].last_filled_qty.contains_key(&buy_id));
+        assert!(strat.symbols["BTC-USDT"]
+            .last_filled_qty
+            .contains_key(&buy_id));
 
         // Timer cancel+replace should clean up the old entry.
         let timer_event = TimerEvent {
@@ -1286,6 +1492,8 @@ mod tests {
             ts_ms: 5000,
         };
         strat.on_timer(&timer_event, &ctx);
-        assert!(!strat.symbols["BTC-USDT"].last_filled_qty.contains_key(&buy_id));
+        assert!(!strat.symbols["BTC-USDT"]
+            .last_filled_qty
+            .contains_key(&buy_id));
     }
 }

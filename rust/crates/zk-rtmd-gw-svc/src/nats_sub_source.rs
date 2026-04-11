@@ -292,7 +292,7 @@ impl NatsKvSubSource {
                 return None;
             }
         };
-        if wire.venue != self.venue {
+        if !wire.venue.eq_ignore_ascii_case(&self.venue) {
             return None;
         }
         wire.into_lease(kv_key.to_string())

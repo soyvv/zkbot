@@ -42,6 +42,11 @@ public class SchemaService {
         return row != null ? toSchemaResourceEntry(row) : null;
     }
 
+    public SchemaResourceEntry getActiveStrategyManifest(String strategyTypeKey) {
+        Map<String, Object> row = getActive("strategy_kind", strategyTypeKey);
+        return row != null ? toSchemaResourceEntry(row) : null;
+    }
+
     @SuppressWarnings("unchecked")
     public List<Map<String, Object>> getFieldDescriptors(String resourceType, String resourceKey) {
         Map<String, Object> manifest = getActive(resourceType, resourceKey);

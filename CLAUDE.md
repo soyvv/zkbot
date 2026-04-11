@@ -11,3 +11,5 @@
 - when starting a benchmark script or test script, use a timer to detect a stuck state
 
 - dev-stack: zkbot/devops a local docker-compose env for local dev/debugging
+
+- for ui tasks, alwasys refer to zkbot-ui/ui-design design docs

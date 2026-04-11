@@ -26,6 +26,8 @@ pilot:
   lease-ttl-minutes: 60
   venue-integrations-root: ${ZK_VENUE_INTEGRATIONS_ROOT:}
   service-manifests-root: ${ZK_SERVICE_MANIFESTS_ROOT:}
+  engine-binary-path: ${ZK_ENGINE_BINARY_PATH:zk-engine-svc}
+  engine-log-dir: ${ZK_DEV_LOG_DIR:logs}
 
 management:
   endpoints:

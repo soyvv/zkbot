@@ -1,9 +1,11 @@
 use std::any::Any;
 use std::collections::HashMap;
 
+use std::sync::Arc;
+
 use zk_proto_rs::zk::common::v1::InstrumentRefData;
 use zk_strategy_sdk_rs::{
-    context::StrategyContext,
+    context::{SequentialIdAllocator, StrategyContext},
     models::{SAction, TimerSchedule},
     runner::StrategyRunner,
     strategy::Strategy,
@@ -120,7 +122,11 @@ pub struct Backtester {
 
 impl Backtester {
     pub fn new(config: BacktestConfig) -> Self {
-        let runner = StrategyRunner::new(&config.account_ids, &config.refdata);
+        let runner = StrategyRunner::new_with_id_allocator(
+            &config.account_ids,
+            &config.refdata,
+            Some(Arc::new(SequentialIdAllocator::default())),
+        );
         let oms = BacktestOms::new(
             config.refdata,
             config.account_ids,

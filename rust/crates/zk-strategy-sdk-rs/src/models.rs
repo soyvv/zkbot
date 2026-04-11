@@ -7,6 +7,8 @@ pub struct StrategyOrder {
     pub qty: f64,
     /// BuySellType i32 (zk_proto_rs::common::BuySellType).
     pub side: i32,
+    /// OpenCloseType i32 (zk_proto_rs::common::OpenCloseType).
+    pub open_close_type: i32,
     pub account_id: i64,
 }
 

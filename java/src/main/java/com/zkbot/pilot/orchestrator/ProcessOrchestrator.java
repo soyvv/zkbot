@@ -1,11 +1,17 @@
 package com.zkbot.pilot.orchestrator;
 
+import com.zkbot.pilot.config.PilotProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -17,8 +23,14 @@ public class ProcessOrchestrator implements RuntimeOrchestrator, DisposableBean 
 
     private static final Logger log = LoggerFactory.getLogger(ProcessOrchestrator.class);
     private static final long STOP_TIMEOUT_SECONDS = 10;
+    private static final DateTimeFormatter LOG_TS = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final ConcurrentHashMap<String, Process> managed = new ConcurrentHashMap<>();
+    private final PilotProperties props;
+
+    public ProcessOrchestrator(PilotProperties props) {
+        this.props = props;
+    }
 
     @Override
     public StartResult start(String logicalId, OrchestratorProfile profile) {
@@ -37,13 +49,23 @@ public class ProcessOrchestrator implements RuntimeOrchestrator, DisposableBean 
             }
 
             ProcessBuilder pb = new ProcessBuilder(cmdLine);
-            pb.inheritIO();
+            pb.redirectErrorStream(true);
 
             if (profile.workingDir() != null) {
                 pb.directory(new File(profile.workingDir()));
             }
             if (profile.env() != null) {
                 pb.environment().putAll(profile.env());
+            }
+
+            // Capture logs following devops/scripts/run-with-log.sh convention:
+            //   <logDir>/engine-<logicalId>/<timestamp>.log  +  latest.log symlink
+            File logFile = setupLogFile(logicalId);
+            if (logFile != null) {
+                pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile));
+                log.info("orchestrator: capturing '{}' logs to {}", logicalId, logFile.getAbsolutePath());
+            } else {
+                pb.inheritIO();
             }
 
             Process process = pb.start();
@@ -54,6 +76,26 @@ public class ProcessOrchestrator implements RuntimeOrchestrator, DisposableBean 
         } catch (Exception e) {
             log.error("orchestrator: failed to start '{}': {}", logicalId, e.getMessage());
             return new StartResult(false, "start failed: " + e.getMessage());
+        }
+    }
+
+    private File setupLogFile(String logicalId) {
+        try {
+            Path serviceLogDir = Path.of(props.engineLogDir(), "engine-" + logicalId);
+            Files.createDirectories(serviceLogDir);
+
+            String timestamp = LocalDateTime.now().format(LOG_TS);
+            Path logFile = serviceLogDir.resolve(timestamp + ".log");
+
+            // Create latest.log symlink
+            Path latestLink = serviceLogDir.resolve("latest.log");
+            Files.deleteIfExists(latestLink);
+            Files.createSymbolicLink(latestLink, logFile.getFileName());
+
+            return logFile.toFile();
+        } catch (IOException e) {
+            log.warn("orchestrator: could not set up log dir for '{}': {}", logicalId, e.getMessage());
+            return null;
         }
     }
 

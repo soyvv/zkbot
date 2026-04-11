@@ -13,3 +13,5 @@ pilot:
   pilot-id: pilot_dev_1
   venue-integrations-root: ../venue-integrations
   service-manifests-root: ../service-manifests
+  engine-binary-path: ../rust/target/debug/zk-engine-svc
+  engine-log-dir: ../devops/logs

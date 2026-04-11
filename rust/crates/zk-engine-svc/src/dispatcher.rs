@@ -98,7 +98,7 @@ impl ActionDispatcher for TradingDispatcher {
 
 /// Map `StrategyOrder` → `TradingOrder`.
 fn map_strategy_order(order: &StrategyOrder, source_id: &str) -> TradingOrder {
-    use zk_proto_rs::zk::common::v1::BuySellType;
+    use zk_proto_rs::zk::common::v1::{BuySellType, OpenCloseType};
 
     let side = if order.side == BuySellType::BsBuy as i32 {
         Side::Buy
@@ -111,6 +111,11 @@ fn map_strategy_order(order: &StrategyOrder, source_id: &str) -> TradingOrder {
         instrument_id: order.symbol.clone(),
         side,
         order_type: OrderType::Limit,
+        open_close_type: if order.open_close_type == 0 {
+            OpenCloseType::OcOpen as i32
+        } else {
+            order.open_close_type
+        },
         price: order.price,
         qty: order.qty,
         source_id: source_id.to_string(),

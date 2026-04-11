@@ -61,14 +61,26 @@ pub struct EngineBootstrapConfig {
 /// JSON decode).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineProvidedConfig {
-    /// Strategy key (e.g. "my-alpha-strat").
+    /// Logical strategy identity for this engine run.
+    #[serde(default)]
     pub strategy_key: String,
+
+    /// Strategy implementation selector (e.g. "smoke-test", "mm").
+    pub strategy_type_key: String,
 
     /// Account IDs bound to this engine.
     pub account_ids: Vec<i64>,
 
     /// Instrument codes to subscribe.
     pub instruments: Vec<String>,
+
+    /// Optional OMS workspace target for discovery filtering.
+    #[serde(default)]
+    pub oms_id: String,
+
+    /// Serialized strategy config payload from strategy_definition.config_json.
+    #[serde(default)]
+    pub strategy_config_json: String,
 
     /// Timer clock interval in milliseconds (default 1000 = 1 Hz).
     #[serde(default = "default_timer_interval")]
@@ -99,8 +111,11 @@ pub struct EngineRuntimeConfig {
 
     // -- from provided --
     pub strategy_key: String,
+    pub strategy_type_key: String,
     pub account_ids: Vec<i64>,
     pub instruments: Vec<String>,
+    pub oms_id: String,
+    pub strategy_config_json: String,
     pub timer_interval_ms: u64,
     pub kline_interval: String,
 
@@ -126,6 +141,10 @@ pub fn load_provided_from_env() -> Result<EngineProvidedConfig, BootstrapConfigE
     use std::env;
 
     let strategy_key = env::var("ZK_STRATEGY_KEY").unwrap_or_default();
+    let strategy_type_key = env::var("ZK_STRATEGY_TYPE_KEY")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| strategy_key.clone());
 
     let account_ids: Vec<i64> = env::var("ZK_ACCOUNT_IDS")
         .unwrap_or_default()
@@ -145,6 +164,9 @@ pub fn load_provided_from_env() -> Result<EngineProvidedConfig, BootstrapConfigE
         .filter(|s| !s.is_empty())
         .collect();
 
+    let oms_id = env::var("ZK_OMS_ID").unwrap_or_default();
+    let strategy_config_json = env::var("ZK_STRATEGY_CONFIG_JSON").unwrap_or_default();
+
     let timer_interval_ms: u64 = env::var("ZK_TIMER_INTERVAL_MS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -154,8 +176,11 @@ pub fn load_provided_from_env() -> Result<EngineProvidedConfig, BootstrapConfigE
 
     Ok(EngineProvidedConfig {
         strategy_key,
+        strategy_type_key,
         account_ids,
         instruments,
+        oms_id,
+        strategy_config_json,
         timer_interval_ms,
         kline_interval,
     })

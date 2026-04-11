@@ -11,6 +11,10 @@ pub async fn connect(url: &str) -> Result<Client, async_nats::ConnectError> {
 /// Using functions rather than string literals prevents typos and centralises
 /// any future subject renames.
 pub mod subject {
+    fn canonical_venue(venue: &str) -> String {
+        venue.to_ascii_uppercase()
+    }
+
     // ── Gateway ───────────────────────────────────────────────────────────────
 
     /// `zk.gw.{gw_id}.report` — gateway OrderReport stream
@@ -46,22 +50,31 @@ pub mod subject {
 
     /// `zk.rtmd.tick.{venue}.{instrument_exch}`
     pub fn rtmd_tick(venue: &str, instrument_exch: &str) -> String {
-        format!("zk.rtmd.tick.{venue}.{instrument_exch}")
+        format!("zk.rtmd.tick.{}.{}", canonical_venue(venue), instrument_exch)
     }
 
     /// `zk.rtmd.kline.{venue}.{instrument_exch}.{interval}`
     pub fn rtmd_kline(venue: &str, instrument_exch: &str, interval: &str) -> String {
-        format!("zk.rtmd.kline.{venue}.{instrument_exch}.{interval}")
+        format!(
+            "zk.rtmd.kline.{}.{}.{}",
+            canonical_venue(venue),
+            instrument_exch,
+            interval
+        )
     }
 
     /// `zk.rtmd.orderbook.{venue}.{instrument_exch}`
     pub fn rtmd_orderbook(venue: &str, instrument_exch: &str) -> String {
-        format!("zk.rtmd.orderbook.{venue}.{instrument_exch}")
+        format!(
+            "zk.rtmd.orderbook.{}.{}",
+            canonical_venue(venue),
+            instrument_exch
+        )
     }
 
     /// `zk.rtmd.funding.{venue}.{instrument_exch}`
     pub fn rtmd_funding(venue: &str, instrument_exch: &str) -> String {
-        format!("zk.rtmd.funding.{venue}.{instrument_exch}")
+        format!("zk.rtmd.funding.{}.{}", canonical_venue(venue), instrument_exch)
     }
 
     // ── Recorder ──────────────────────────────────────────────────────────

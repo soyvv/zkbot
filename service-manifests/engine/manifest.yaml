@@ -2,16 +2,20 @@ schema_id: svc/engine
 version: 1
 config_schema: schemas/engine_config.schema.json
 field_descriptors:
-  - path: /nats_url
+  # Current engine service consumes only these provided-config fields.
+  # Bootstrap-owned fields such as nats_url, grpc_host, grpc_port,
+  # discovery_bucket, env, engine_id, and bootstrap_token are not part of
+  # the Pilot-managed engine schema.
+  #
+  # Note: the current engine runtime does not implement config hot-reload.
+  # Even timer/kline settings are effectively restart-required today.
+  - path: /strategy_type_key
     reloadable: false
-  - path: /grpc_port
+  - path: /account_ids
     reloadable: false
-  - path: /grpc_host
+  - path: /instruments
     reloadable: false
   - path: /timer_interval_ms
-    reloadable: true
-  - path: /kline_interval
-    reloadable: true
-  - path: /bootstrap_token
     reloadable: false
-    resolved_secret: true
+  - path: /kline_interval
+    reloadable: false

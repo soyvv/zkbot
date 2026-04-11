@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Python Wrapper Strategy Config",
+  "type": "object",
+  "description": "Outer wrapper config for a Python strategy hosted by the engine runtime.",
+  "properties": {
+    "python_module": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Importable Python module containing the strategy class."
+    },
+    "python_class": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Strategy class name inside the configured module."
+    },
+    "python_search_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional search path prepended to sys.path before importing the module."
+    },
+    "python_strategy_config": {
+      "type": "object",
+      "default": {},
+      "description": "Nested strategy-owned JSON config passed through to the wrapped Python strategy."
+    }
+  },
+  "required": ["python_module", "python_class"],
+  "additionalProperties": false
+}

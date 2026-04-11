@@ -2,10 +2,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_nats::jetstream;
 use zk_proto_rs::zk::common::v1::{
-    AuditMeta, BasicOrderType, BuySellType, OpenCloseType, TimeInForceType,
+    AuditMeta, BasicOrderType, BuySellType, TimeInForceType,
 };
 use zk_proto_rs::zk::oms::v1::{
     oms_response, Balance as ProtoBalance, BalanceUpdateEvent, BatchCancelOrdersRequest,
@@ -26,10 +27,15 @@ use crate::id_gen::SnowflakeIdGen;
 use crate::model::{CommandAck, OrderType, Side, TradingCancel, TradingOrder};
 use crate::oms::OmsChannelPool;
 use crate::refdata::RefdataSdk;
-use crate::rtmd_sub::{funding_topic, kline_topic, orderbook_topic, tick_topic};
+use crate::rtmd_sub::{
+    default_lease_expiry_ms, funding_topic, kline_topic, orderbook_topic, tick_topic,
+    RtmdInterestManager, RtmdInterestSpec,
+};
 use crate::stream::{
     balance_update_topic, order_update_topic, position_update_topic, spawn_protobuf_subscription,
 };
+
+const RTMD_INTEREST_REFRESH_SECS: u64 = 20;
 
 /// The main trading client.
 pub struct TradingClient {
@@ -38,6 +44,7 @@ pub struct TradingClient {
     discovery: OmsDiscovery,
     oms_pool: OmsChannelPool,
     refdata: RefdataSdk,
+    rtmd_interest: RtmdInterestManager,
     id_gen: Arc<SnowflakeIdGen>,
 }
 
@@ -58,10 +65,13 @@ impl TradingClient {
         let (discovery, snapshot_ready) = OmsDiscovery::start(&js, &config).await?;
 
         if !snapshot_ready && !config.account_ids.is_empty() {
+            let seen_types = discovery.snapshot_service_type_counts().await;
             return Err(SdkError::Config(
-                "discovery timed out: no service registry entries found within 2s; \
-                 cannot resolve configured account_ids"
-                    .into(),
+                format!(
+                    "discovery timed out after {}ms; cannot resolve configured account_ids={:?} \
+                     for oms_id={:?}; seen registry service types={:?}",
+                    config.discovery_timeout_ms, config.account_ids, config.oms_id, seen_types
+                ),
             ));
         }
 
@@ -74,6 +84,7 @@ impl TradingClient {
         };
         let refdata = RefdataSdk::start(nats.clone(), refdata_endpoint).await?;
         let oms_pool = OmsChannelPool::new();
+        let rtmd_interest = RtmdInterestManager::start(&js).await?;
         let id_gen = Arc::new(SnowflakeIdGen::new(config.client_instance_id)?);
 
         let client = Self {
@@ -82,6 +93,7 @@ impl TradingClient {
             discovery,
             oms_pool,
             refdata,
+            rtmd_interest,
             id_gen,
         };
         client.preconnect_oms().await?;
@@ -325,13 +337,8 @@ impl TradingClient {
     where
         F: Fn(ProtoTickData) + Send + Sync + 'static,
     {
-        let subject = self.rtmd_subject(instrument_id, RtmdChannel::Tick).await?;
-        Ok(spawn_protobuf_subscription(
-            self.nats.clone(),
-            subject,
-            std::convert::identity,
-            Arc::new(handler),
-        ))
+        let (subject, interest) = self.rtmd_subscription(instrument_id, RtmdChannel::Tick).await?;
+        Ok(self.spawn_rtmd_subscription(subject, interest, std::convert::identity, handler))
     }
 
     pub async fn subscribe_klines<F>(
@@ -343,18 +350,13 @@ impl TradingClient {
     where
         F: Fn(ProtoKline) + Send + Sync + 'static,
     {
-        let subject = self
-            .rtmd_subject(
+        let (subject, interest) = self
+            .rtmd_subscription(
                 instrument_id,
                 RtmdChannel::Kline(Some(interval.to_string())),
             )
             .await?;
-        Ok(spawn_protobuf_subscription(
-            self.nats.clone(),
-            subject,
-            std::convert::identity,
-            Arc::new(handler),
-        ))
+        Ok(self.spawn_rtmd_subscription(subject, interest, std::convert::identity, handler))
     }
 
     pub async fn subscribe_funding<F>(
@@ -365,15 +367,10 @@ impl TradingClient {
     where
         F: Fn(ProtoFundingRate) + Send + Sync + 'static,
     {
-        let subject = self
-            .rtmd_subject(instrument_id, RtmdChannel::Funding)
+        let (subject, interest) = self
+            .rtmd_subscription(instrument_id, RtmdChannel::Funding)
             .await?;
-        Ok(spawn_protobuf_subscription(
-            self.nats.clone(),
-            subject,
-            std::convert::identity,
-            Arc::new(handler),
-        ))
+        Ok(self.spawn_rtmd_subscription(subject, interest, std::convert::identity, handler))
     }
 
     pub async fn subscribe_orderbook<F>(
@@ -384,15 +381,10 @@ impl TradingClient {
     where
         F: Fn(ProtoOrderBook) + Send + Sync + 'static,
     {
-        let subject = self
-            .rtmd_subject(instrument_id, RtmdChannel::OrderBook)
+        let (subject, interest) = self
+            .rtmd_subscription(instrument_id, RtmdChannel::OrderBook)
             .await?;
-        Ok(spawn_protobuf_subscription(
-            self.nats.clone(),
-            subject,
-            std::convert::identity,
-            Arc::new(handler),
-        ))
+        Ok(self.spawn_rtmd_subscription(subject, interest, std::convert::identity, handler))
     }
 
     async fn preconnect_oms(&self) -> Result<(), SdkError> {
@@ -418,7 +410,9 @@ impl TradingClient {
     }
 
     async fn resolve_account_endpoint(&self, account_id: i64) -> Result<OmsEndpoint, SdkError> {
-        self.discovery.refresh_account_cache().await?;
+        self.discovery
+            .refresh_account_cache(self.config.oms_id.as_deref())
+            .await?;
         self.discovery
             .resolve_oms(account_id)
             .await
@@ -436,7 +430,10 @@ impl TradingClient {
     }
 
     async fn order_update_subjects(&self) -> Vec<String> {
-        let _ = self.discovery.refresh_account_cache().await;
+        let _ = self
+            .discovery
+            .refresh_account_cache(self.config.oms_id.as_deref())
+            .await;
         let snapshot = self.discovery.snapshot().await;
         self.config
             .account_ids
@@ -450,7 +447,10 @@ impl TradingClient {
     }
 
     async fn balance_update_subjects(&self, asset: &str) -> Vec<String> {
-        let _ = self.discovery.refresh_account_cache().await;
+        let _ = self
+            .discovery
+            .refresh_account_cache(self.config.oms_id.as_deref())
+            .await;
         let snapshot = self.discovery.snapshot().await;
         unique_oms(snapshot)
             .into_values()
@@ -459,7 +459,10 @@ impl TradingClient {
     }
 
     async fn position_update_subjects(&self, instrument: &str) -> Vec<String> {
-        let _ = self.discovery.refresh_account_cache().await;
+        let _ = self
+            .discovery
+            .refresh_account_cache(self.config.oms_id.as_deref())
+            .await;
         let snapshot = self.discovery.snapshot().await;
         unique_oms(snapshot)
             .into_values()
@@ -467,23 +470,99 @@ impl TradingClient {
             .collect()
     }
 
-    async fn rtmd_subject(
+    async fn rtmd_subscription(
         &self,
         instrument_id: &str,
         channel: RtmdChannel,
-    ) -> Result<String, SdkError> {
+    ) -> Result<(String, RtmdInterestSpec), SdkError> {
         let instrument = self.refdata.query_instrument(instrument_id).await?;
-        Ok(match channel {
-            RtmdChannel::Tick => tick_topic(&instrument.venue, &instrument.instrument_exch),
+        let subscriber_id = format!("trading-client-{}", self.config.client_instance_id);
+        let (subject, channel_type, channel_param) = match channel {
+            RtmdChannel::Tick => (
+                tick_topic(&instrument.venue, &instrument.instrument_exch),
+                "tick".to_string(),
+                None,
+            ),
             RtmdChannel::Kline(Some(interval)) => {
-                kline_topic(&instrument.venue, &instrument.instrument_exch, &interval)
+                (
+                    kline_topic(&instrument.venue, &instrument.instrument_exch, &interval),
+                    "kline".to_string(),
+                    Some(interval),
+                )
             }
-            RtmdChannel::Funding => funding_topic(&instrument.venue, &instrument.instrument_exch),
-            RtmdChannel::OrderBook => {
-                orderbook_topic(&instrument.venue, &instrument.instrument_exch)
-            }
+            RtmdChannel::Funding => (
+                funding_topic(&instrument.venue, &instrument.instrument_exch),
+                "funding".to_string(),
+                None,
+            ),
+            RtmdChannel::OrderBook => (
+                orderbook_topic(&instrument.venue, &instrument.instrument_exch),
+                "orderbook".to_string(),
+                None,
+            ),
             RtmdChannel::Kline(None) => {
                 return Err(SdkError::Config("kline interval is required".into()));
+            }
+        };
+        let interest = RtmdInterestSpec {
+            subscriber_id,
+            scope: "logical".to_string(),
+            instrument_id: instrument_id.to_string(),
+            channel_type,
+            channel_param,
+            venue: instrument.venue,
+            instrument_exch: instrument.instrument_exch,
+            lease_expiry_ms: default_lease_expiry_ms(Duration::from_secs(60)),
+            updated_at_ms: now_ms(),
+        };
+        Ok((subject, interest))
+    }
+
+    fn spawn_rtmd_subscription<T, F, M>(
+        &self,
+        subject: String,
+        interest: RtmdInterestSpec,
+        map: M,
+        handler: F,
+    ) -> tokio::task::JoinHandle<()>
+    where
+        T: prost::Message + Default + Send + 'static,
+        F: Fn(T) + Send + Sync + 'static,
+        M: Fn(T) -> T + Send + Sync + 'static,
+    {
+        let nc = self.nats.clone();
+        let manager = self.rtmd_interest.clone();
+        let handler = Arc::new(handler);
+        tokio::spawn(async move {
+            let lease = match manager.register_interest(interest).await {
+                Ok(lease) => lease,
+                Err(error) => {
+                    tracing::warn!(subject, error = %error, "failed to register RTMD interest");
+                    return;
+                }
+            };
+
+            let mut subscription_handle =
+                spawn_protobuf_subscription(nc, subject, map, Arc::clone(&handler));
+            let mut refresh = tokio::time::interval(Duration::from_secs(RTMD_INTEREST_REFRESH_SECS));
+            refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            refresh.tick().await;
+
+            loop {
+                tokio::select! {
+                    _ = refresh.tick() => {
+                        if let Err(error) = manager.refresh_interest(&lease).await {
+                            tracing::warn!(key = %lease.key, error = %error, "failed to refresh RTMD interest");
+                        }
+                    }
+                    _ = &mut subscription_handle => {
+                        break;
+                    }
+                }
+            }
+
+            if let Err(error) = manager.drop_interest(lease).await {
+                tracing::warn!(error = %error, "failed to drop RTMD interest");
             }
         })
     }
@@ -513,7 +592,7 @@ fn map_order_request(account_id: i64, order: &TradingOrder) -> OrderRequest {
             Side::Buy => BuySellType::BsBuy as i32,
             Side::Sell => BuySellType::BsSell as i32,
         },
-        open_close_type: OpenCloseType::OcUnspecified as i32,
+        open_close_type: order.open_close_type,
         order_type: match order.order_type {
             OrderType::Limit => BasicOrderType::OrdertypeLimit as i32,
             OrderType::Market => BasicOrderType::OrdertypeMarket as i32,

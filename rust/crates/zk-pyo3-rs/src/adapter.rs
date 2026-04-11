@@ -285,6 +285,7 @@ fn build_order(
         qty,
         price,
         side: side as i32,
+        open_close_type: zk_proto_rs::zk::common::v1::OpenCloseType::OcOpen as i32,
     })
 }
 

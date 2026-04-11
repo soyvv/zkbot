@@ -40,8 +40,22 @@ public class DesiredConfigRepository {
                     "FROM cfg.oms_instance WHERE oms_id = ?";
             case "GW" -> "SELECT provided_config::text AS config, config_version, config_hash " +
                     "FROM cfg.gateway_instance WHERE gw_id = ?";
-            case "ENGINE" -> "SELECT provided_config::text AS config, config_version, config_hash " +
-                    "FROM cfg.engine_instance WHERE engine_id = ?";
+            case "ENGINE" -> """
+                    SELECT (
+                        COALESCE(ei.provided_config, '{}'::jsonb) ||
+                        jsonb_build_object(
+                            'strategy_key', ei.strategy_id,
+                            'strategy_type_key', COALESCE(sd.strategy_type_key, ''),
+                            'strategy_config_json', COALESCE(sd.config_json::text, ''),
+                            'oms_id', COALESCE(ei.target_oms_id, '')
+                        )
+                    )::text AS config,
+                    ei.config_version,
+                    ei.config_hash
+                    FROM cfg.engine_instance ei
+                    JOIN cfg.strategy_definition sd ON sd.strategy_id = ei.strategy_id
+                    WHERE ei.engine_id = ?
+                    """;
             case "MDGW" -> "SELECT provided_config::text AS config, config_version, config_hash " +
                     "FROM cfg.mdgw_instance WHERE mdgw_id = ?";
             case "REFDATA" -> "SELECT provided_config::text AS config, config_version, config_hash " +

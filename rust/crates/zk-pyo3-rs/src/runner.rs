@@ -36,7 +36,7 @@ use zk_backtest_rs::{
 };
 use zk_proto_rs::zk::{
     common::v1::{BuySellType, InstrumentRefData},
-    rtmd::v1::{kline::KlineType, Kline},
+    rtmd::v1::{kline::KlineType, Kline, PriceLevel, TickData},
 };
 
 use crate::py_strategy::PyStrategyAdapter;
@@ -46,8 +46,8 @@ use crate::py_strategy::PyStrategyAdapter;
 #[pyclass(name = "RustBacktester")]
 pub struct RustBacktester {
     backtester: Backtester,
-    /// Bars accumulated via `push_bar`; flushed as a single sorted stream in `run()`.
-    pending_bars: Vec<(i64, BtEventKind)>,
+    /// Replay events accumulated via `push_bar`/`push_tick`; flushed as one sorted stream in `run()`.
+    pending_events: Vec<(i64, BtEventKind)>,
     /// When true, `push_bar` also records bars in `pending_klines` for result output.
     include_klines: bool,
     /// Kline rows captured when `include_klines` is true.
@@ -104,7 +104,7 @@ impl RustBacktester {
 
         Ok(Self {
             backtester: Backtester::new(config),
-            pending_bars: Vec::new(),
+            pending_events: Vec::new(),
             include_klines: include_klines_in_result,
             pending_klines: Vec::new(),
         })
@@ -138,12 +138,52 @@ impl RustBacktester {
             kline_end_timestamp: ts_ms,
             source: String::new(),
         };
-        self.pending_bars.push((ts_ms, BtEventKind::Bar(kline)));
+        self.pending_events.push((ts_ms, BtEventKind::Bar(kline)));
 
         if self.include_klines {
             self.pending_klines
                 .push((ts_ms, symbol.to_string(), open, high, low, close, volume));
         }
+    }
+
+    /// Push one orderbook tick event into the replay queue.
+    ///
+    /// `bids` / `asks` are `(price, qty)` tuples. Use at least one level on each side
+    /// for simple strategy unit tests.
+    #[pyo3(signature = (ts_ms, symbol, bids, asks, trade_price=None, trade_qty=None))]
+    fn push_tick(
+        &mut self,
+        ts_ms: i64,
+        symbol: &str,
+        bids: Vec<(f64, f64)>,
+        asks: Vec<(f64, f64)>,
+        trade_price: Option<f64>,
+        trade_qty: Option<f64>,
+    ) {
+        let tick = TickData {
+            instrument_code: symbol.to_string(),
+            original_timestamp: ts_ms,
+            buy_price_levels: bids
+                .into_iter()
+                .map(|(price, qty)| PriceLevel {
+                    price,
+                    qty,
+                    ..Default::default()
+                })
+                .collect(),
+            sell_price_levels: asks
+                .into_iter()
+                .map(|(price, qty)| PriceLevel {
+                    price,
+                    qty,
+                    ..Default::default()
+                })
+                .collect(),
+            latest_trade_price: trade_price.unwrap_or_default(),
+            latest_trade_qty: trade_qty.unwrap_or_default(),
+            ..Default::default()
+        };
+        self.pending_events.push((ts_ms, BtEventKind::Tick(tick)));
     }
 
     /// Run the backtest.
@@ -171,9 +211,10 @@ impl RustBacktester {
         progress_callback: Option<PyObject>,
     ) -> PyResult<PyObject> {
         // Flush accumulated bars as a single sorted stream (O(n log n) sort once).
-        let bars = std::mem::take(&mut self.pending_bars);
-        if !bars.is_empty() {
-            self.backtester.add_sorted_stream(bars);
+        let mut events = std::mem::take(&mut self.pending_events);
+        if !events.is_empty() {
+            events.sort_by_key(|event| event.0);
+            self.backtester.add_sorted_stream(events);
         }
 
         // If a Python init_data_fetcher was provided, wrap it so the Rust

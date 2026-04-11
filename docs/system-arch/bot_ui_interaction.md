@@ -26,7 +26,8 @@ and makes the bot lifecycle explicit as three separate concepts:
 It owns:
 
 - strategy identity such as `strategy_id`
-- semantic `strategy_key` used for runtime strategy selection, for example `MM_OKX_BTC_PERP_V1`
+- logical `strategy_key` / `strategy_id` used as the authored strategy identity
+- `strategy_type_key` used for runtime implementation selection, for example `smoke-test`
 - runtime type and code reference
 - strategy parameter schema and config payload
 - strategy metadata such as description, tags, and enablement
@@ -55,6 +56,8 @@ It owns:
 - bot description and enablement
 - common engine fields
 - target OMS binding
+- connected account configuration
+- interested instrument configuration
 - deployment or runtime profile
 - desired provided config for the engine runtime
 - selected `strategy_definition`
@@ -64,8 +67,10 @@ Design rule:
 - one bot selects one strategy definition as its strategy template
 - many bots may reference the same strategy definition
 - bot config is the place for engine/common fields and strategy selection
-- account, gateway, and symbol scope do not belong on `engine_instance`
-- `engine_instance` binds the bot to one OMS workspace and provides the engine runtime envelope
+- `engine_instance` binds the bot to one OMS workspace and also declares the concrete connected
+  accounts and interested instruments required by the engine runtime
+- engine config is the physical connectivity/config layer used by `TradingClient` and RTMD
+  subscription setup
 
 ### 3. Strategy Instance
 
@@ -104,6 +109,16 @@ Expected actions:
 - validate strategy schema/config
 - enable or disable strategy definition for selection
 
+Manifest rule:
+
+- strategy authoring should load the manifest/schema for the selected `strategy_type_key`
+- Rust-native strategies should use their own strategy-family schema
+- the umbrella Python-wrapper strategy should use:
+  - one outer wrapper schema for Python module/class/path fields
+  - one nested JSON config payload for the wrapped Python strategy
+- where a strategy manifest provides dynamic option descriptors, the UI should resolve those fields
+  from Pilot metadata instead of treating them as plain free-text inputs
+
 ### Phase 2: Bot Onboarding
 
 Operators create a bot as an `engine_instance`.
@@ -114,6 +129,8 @@ Expected fields:
 - display name / description
 - selected `strategy_id`
 - target `oms_id`
+- connected account set for the engine runtime
+- interested instruments for RTMD and strategy-facing market data
 - engine runtime profile
 - engine-level provided config
 - operational policy fields such as restart mode or environment tags
@@ -124,7 +141,11 @@ Expected validation:
 - OMS target exists
 - required topology dependencies are configured
 - engine config validates against the engine schema
-- the selected strategy's logical scope is feasible inside the chosen OMS workspace
+- strategy config validates against the selected strategy manifest/schema
+- the selected strategy's logical account and symbol names can be resolved by the configured engine
+  accounts and instruments
+- dynamic select fields such as OMS, accounts, instruments, and strategy-type selectors should be
+  loaded from Pilot metadata and topology APIs when available
 
 ### Phase 3: Bot Run
 
@@ -153,9 +174,10 @@ Lifecycle:
    - selected `engine_instance`
    - effective merged runtime config
 5. launched engine runtime bootstraps against that pre-created run
-6. engine validates that the strategy's logical account, gateway, and symbol scope can be realized
-   inside the selected OMS workspace
-7. engine resolves the physical runtime scope through OMS queries and RTMD dynamic subscriptions
+6. engine uses its configured OMS binding, connected accounts, and interested instruments to
+   initialize `TradingClient` and RTMD subscriptions
+7. strategy logic resolves its logical names such as `mm_main_accnt` or `hedge_symbol` against that
+   configured engine runtime scope
 8. runtime registers in discovery under stable bot identity
 9. runtime reports current run via `execution_id`
 
@@ -164,6 +186,8 @@ Design rules:
 - discovery identity remains stable at the bot or engine level
 - run identity remains `execution_id`
 - the current run can change while the bot identity stays the same
+- UI forms should use `schema + field_descriptors + metadata APIs`, not JSON Schema alone, for
+  fields whose valid choices depend on live topology
 
 ## Config Model
 
@@ -180,13 +204,18 @@ Examples:
 - rebalance thresholds
 - model feature flags
 - strategy timer thresholds
+- logical names such as `mm_main_accnt`, `hedge_symbol`, or other strategy-local aliases
 
 These are generic strategy parameters, not direct engine bindings.
 
 Design rule:
 
-- generic strategy config should not carry account or symbol selections
-- `strategy_key` is the semantic selector used by runtime dispatch and operator workflows
+- strategy config may carry logical account or symbol names used by the strategy
+- generic strategy config should not carry the concrete engine connectivity set such as final
+  `account_ids` or subscribed instrument lists
+- `strategy_key` is the logical strategy identity used by operator workflows and execution
+  correlation
+- `strategy_type_key` is the runtime selector used by engine dispatch and strategy manifest lookup
 - if strategy-specific scope is needed later, it should be modeled explicitly rather than mixed into
   generic strategy parameter config
 
@@ -197,6 +226,8 @@ Stored on `engine_instance`.
 Examples:
 
 - OMS binding
+- connected account IDs
+- interested instruments
 - runtime mode
 - supervision mode
 - restart policy
@@ -204,8 +235,12 @@ Examples:
 
 Design rule:
 
-- `engine_instance` provides the execution workspace by binding to an OMS
-- it should not duplicate account, gateway, or symbol scope already declared by the strategy
+- `engine_instance` provides the concrete execution workspace by binding to an OMS and declaring the
+  connected accounts and interested instruments used by the engine runtime
+- the operator is responsible for ensuring that this concrete engine config satisfies the logical
+  names referenced by the selected strategy
+- Pilot should render and validate this config from the engine service-kind manifest/schema, similar
+  to gateway host config loading
 
 ### Run Snapshot
 
@@ -226,6 +261,8 @@ Design rule:
 - `binding_snapshot` should capture the resolved physical scope derived at start time from:
   - strategy identity and runtime selection metadata
   - OMS workspace binding
+  - connected accounts
+  - interested instruments
   - runtime feasibility checks
 
 ## Event Correlation Model
@@ -351,7 +388,7 @@ Primary steps:
 2. click `Create Bot`
 3. fill bot identity and common engine fields
 4. select one strategy definition
-5. choose OMS workspace
+5. choose OMS workspace, connected accounts, and interested instruments
 6. validate readiness
 7. save bot definition
 
@@ -393,7 +430,8 @@ Suggested bot readiness states:
 `startable` should mean:
 
 - the target OMS is reachable
-- the selected strategy's logical scope can be satisfied inside that OMS workspace
+- the selected strategy's logical account and symbol names can be satisfied by the configured engine
+  accounts and instruments
 - required RTMD subscriptions can be established dynamically
 
 Suggested strategy-definition readiness states:
@@ -420,7 +458,8 @@ Recommended relational model:
 - `cfg.strategy_definition`
   - reusable strategy template and strategy-only config
 - `cfg.engine_instance`
-  - bot definition, OMS binding, and engine/common desired config
+  - bot definition, OMS binding, connected accounts, interested instruments, and engine/common
+    desired config
 - `cfg.strategy_instance`
   - run snapshot with `execution_id`, `engine_id`, `strategy_id`
 
@@ -430,7 +469,10 @@ Recommended schema changes:
 - keep `strategy_id` foreign key to `cfg.strategy_definition`
 - store run-time config snapshots on `cfg.strategy_instance`
 - keep `cfg.engine_instance.provided_config` as the bot/engine desired config authority
-- do not duplicate strategy account, gateway, or symbol scope onto `cfg.engine_instance`
+- concrete engine connectivity such as connected accounts and interested instruments belongs on
+  `cfg.engine_instance`
+- strategy config should not duplicate that concrete connectivity set; it may still use logical
+  names that resolve against it
 
 ## Gaps
 
@@ -439,11 +481,13 @@ Recommended schema changes:
 - current `/v1/bot` API is strategy-first; it does not expose a first-class bot or `engine_instance` authoring resource
 - `BotService` starts from `strategyKey` instead of a stable bot identity
 - `StrategyRepository` and `MetaRepository` join only `strategy_definition` to running `strategy_instance`, ignoring `cfg.engine_instance`
-- strategy create/update requests need to clearly own logical account, gateway, and symbol scope
+- strategy create/update requests need to clearly own logical account and symbol naming semantics
 - execution creation does not snapshot both bot config and strategy config separately
-- current start flow resolves OMS from strategy-oriented data, not from a dedicated bot definition that binds only to OMS
+- current start flow resolves OMS from strategy-oriented data, not from a dedicated bot definition
+  that owns concrete engine connectivity
 - validation is strategy-centric and does not validate a full bot onboarding object
-- Pilot lacks a readiness check that answers whether a strategy's logical scope is feasible in the chosen OMS workspace
+- Pilot lacks a readiness check that answers whether the strategy's logical names can be satisfied by
+  the configured engine accounts and instruments
 - orchestrator ownership is not yet explicit enough in the bot API and lifecycle model
 - local process orchestration exists, but the production-target Kubernetes orchestration contract is
   not yet made first-class in the bot workflow
@@ -457,9 +501,10 @@ Recommended schema changes:
   - engine config from `engine_instance`
   - run snapshot metadata from `strategy_instance`
 - engine needs an explicit resolution phase that maps:
-  - strategy logical scope
-  - OMS workspace binding
-  into resolved physical account, gateway, and RTMD subscription scope
+  - strategy logical names
+  - engine OMS binding
+  - engine connected accounts and interested instruments
+  into resolved physical trading and RTMD subscription scope
 - engine lifecycle reporting should expose enough data for Pilot to answer "what is the current run for this bot?" without reconstructing from strategy-only records
 
 ### Recorder / Event Gaps

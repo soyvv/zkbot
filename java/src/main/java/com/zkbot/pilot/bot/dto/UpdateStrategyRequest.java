@@ -5,6 +5,7 @@ import java.util.Map;
 
 public record UpdateStrategyRequest(
     String description,
+    String strategyTypeKey,
     List<Long> defaultAccounts,
     List<String> defaultSymbols,
     Map<String, Object> config,

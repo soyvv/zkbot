@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 
 use zk_proto_rs::zk::{
-    common::v1::{BuySellType, InstrumentRefData},
+    common::v1::{BuySellType, InstrumentRefData, OpenCloseType},
     oms::v1::{OrderStatus, OrderUpdateEvent, PositionUpdateEvent},
     rtmd::v1::{PriceLevel, TickData},
 };
@@ -68,6 +68,7 @@ fn order(id: i64, sym: &str, side: BuySellType, price: f64, qty: f64, acc: i64) 
         price,
         qty,
         side: side as i32,
+        open_close_type: OpenCloseType::OcOpen as i32,
         account_id: acc,
     }
 }

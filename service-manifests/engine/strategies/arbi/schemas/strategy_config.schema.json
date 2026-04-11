@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Arbitrage Placeholder Strategy Config",
+  "type": "object",
+  "description": "Placeholder config schema for the future arbitrage strategy.",
+  "additionalProperties": false
+}

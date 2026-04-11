@@ -28,7 +28,12 @@ public class SecurityConfig {
                 .requestMatchers("/v1/accounts/**").hasAnyRole("ADMIN", "OPS")
                 // Topology
                 .requestMatchers("/v1/topology/**").hasAnyRole("ADMIN", "OPS")
-                // Bot management
+                // Bot management — definitions
+                .requestMatchers(HttpMethod.GET, "/v1/bot/definitions/**").hasAnyRole("ADMIN", "OPS", "TRADER")
+                .requestMatchers(HttpMethod.POST, "/v1/bot/definitions/*/start").hasAnyRole("ADMIN", "OPS", "TRADER")
+                .requestMatchers(HttpMethod.POST, "/v1/bot/definitions/*/stop").hasAnyRole("ADMIN", "OPS", "TRADER")
+                .requestMatchers("/v1/bot/definitions/**").hasAnyRole("ADMIN", "OPS")
+                // Bot management — executions
                 .requestMatchers(HttpMethod.POST, "/v1/bot/executions/start").hasAnyRole("ADMIN", "OPS", "TRADER")
                 .requestMatchers(HttpMethod.POST, "/v1/bot/executions/*/stop").hasAnyRole("ADMIN", "OPS", "TRADER")
                 .requestMatchers(HttpMethod.POST, "/v1/bot/executions/*/pause").hasAnyRole("ADMIN", "OPS", "TRADER")
@@ -38,6 +43,8 @@ public class SecurityConfig {
                 // Legacy compat aliases (same permissions as bot execution endpoints)
                 .requestMatchers(HttpMethod.POST, "/v1/strategy-executions/**").hasAnyRole("ADMIN", "OPS", "TRADER")
                 .requestMatchers(HttpMethod.GET, "/v1/strategies/**").hasAnyRole("ADMIN", "OPS", "TRADER")
+                // Schema — strategy schemas readable by all roles
+                .requestMatchers(HttpMethod.GET, "/v1/schema/strategies/**").hasAnyRole("ADMIN", "OPS", "TRADER")
                 // Ops
                 .requestMatchers("/v1/ops/**").hasAnyRole("ADMIN", "OPS")
                 // Everything else requires ADMIN

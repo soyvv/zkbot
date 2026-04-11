@@ -5,6 +5,9 @@ edition = "2021"
 description = "Placeholder smoke-test strategy covering basic engine callbacks"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 zk-proto-rs = { path = "../../crates/zk-proto-rs" }
 zk-strategy-sdk-rs = { path = "../../crates/zk-strategy-sdk-rs" }
 
+[dev-dependencies]
+zk-backtest-rs = { path = "../../crates/zk-backtest-rs" }

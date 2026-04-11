@@ -58,19 +58,19 @@ services:
 
   vault:
     image: hashicorp/vault:1.17
-    environment:
-      VAULT_DEV_ROOT_TOKEN_ID: "dev-root-token"
-      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    entrypoint: ["/bin/sh", "/init/entrypoint.sh"]
     ports:
       - "8200:8200"
     cap_add:
       - IPC_LOCK
-    command: ["vault", "server", "-dev"]
+    volumes:
+      - vault_data:/vault/data
+      - ./init/vault/entrypoint.sh:/init/entrypoint.sh:ro
     healthcheck:
       test: ["CMD", "vault", "status", "-address=http://localhost:8200"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
 
   gw-sim:
     build:
@@ -206,3 +206,4 @@ volumes:
   postgres_data:
   mongo_data:
   redis_data:
+  vault_data:

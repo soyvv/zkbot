@@ -9,7 +9,7 @@ use zk_engine_rs::{
     ControlCommand, EngineEvent, EventEnvelope, LifecycleState, LiveEngine, RecordingDispatcher,
 };
 use zk_proto_rs::zk::{
-    common::v1::{BuySellType, InstrumentRefData},
+    common::v1::{BuySellType, InstrumentRefData, OpenCloseType},
     rtmd::v1::{Kline, TickData},
 };
 use zk_strategy_sdk_rs::{
@@ -60,6 +60,7 @@ impl Strategy for OnceOrderStrategy {
                 qty: 1.0,
                 price: bar.close,
                 side: BuySellType::BsBuy as i32,
+                open_close_type: OpenCloseType::OcOpen as i32,
                 account_id: 1,
             })]
         } else {

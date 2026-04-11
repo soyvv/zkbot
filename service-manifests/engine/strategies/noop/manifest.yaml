@@ -1,0 +1,12 @@
+strategy_type_key: noop
+schema_id: strategy/noop
+version: 1
+runtime_kind: rust_native
+label: No-op Placeholder
+description: Minimal no-op strategy contract used for engine wiring and bring-up.
+config_schema: schemas/strategy_config.schema.json
+metadata:
+  crate: zk-strategy-noop-rs
+  tags:
+    - rust
+    - placeholder

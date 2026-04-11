@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use zk_proto_rs::zk::discovery::v1::{ServiceRegistration, TransportEndpoint};
-use zk_trading_sdk_rs::discovery::{build_account_map, resolve_refdata_endpoint};
+use zk_trading_sdk_rs::config::TradingClientConfig;
+use zk_trading_sdk_rs::discovery::{
+    build_account_map, resolve_refdata_endpoint, snapshot_satisfies_requirements,
+};
 
 fn make_reg(
     key: &str,
@@ -385,4 +388,64 @@ fn test_refdata_discovery_returns_none_when_not_present() {
 
     let endpoint = resolve_refdata_endpoint(&snapshot);
     assert!(endpoint.is_none());
+}
+
+#[test]
+fn test_snapshot_requirements_need_refdata_and_accounts() {
+    let mut snapshot = HashMap::new();
+    snapshot.extend([make_reg(
+        "svc.oms.oms_dev_1",
+        "oms",
+        "oms_dev_1",
+        vec![9001],
+        "localhost:50051",
+    )]);
+
+    let cfg = TradingClientConfig {
+        nats_url: "nats://localhost:4222".to_string(),
+        env: "dev".to_string(),
+        account_ids: vec![9001],
+        oms_id: None,
+        client_instance_id: 1,
+        discovery_bucket: "zk-svc-registry-v1".to_string(),
+        discovery_timeout_ms: 15_000,
+        refdata_grpc: None,
+    };
+
+    assert!(!snapshot_satisfies_requirements(&snapshot, &cfg).unwrap());
+
+    snapshot.extend([make_reg(
+        "svc.refdata.refdata_dev_1",
+        "refdata",
+        "refdata_dev_1",
+        vec![],
+        "localhost:50070",
+    )]);
+
+    assert!(snapshot_satisfies_requirements(&snapshot, &cfg).unwrap());
+}
+
+#[test]
+fn test_snapshot_requirements_accept_refdata_override() {
+    let mut snapshot = HashMap::new();
+    snapshot.extend([make_reg(
+        "svc.oms.oms_dev_1",
+        "oms",
+        "oms_dev_1",
+        vec![9001],
+        "localhost:50051",
+    )]);
+
+    let cfg = TradingClientConfig {
+        nats_url: "nats://localhost:4222".to_string(),
+        env: "dev".to_string(),
+        account_ids: vec![9001],
+        oms_id: None,
+        client_instance_id: 1,
+        discovery_bucket: "zk-svc-registry-v1".to_string(),
+        discovery_timeout_ms: 15_000,
+        refdata_grpc: Some("http://127.0.0.1:50052".to_string()),
+    };
+
+    assert!(snapshot_satisfies_requirements(&snapshot, &cfg).unwrap());
 }

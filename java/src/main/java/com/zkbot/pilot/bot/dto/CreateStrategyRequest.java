@@ -7,6 +7,7 @@ public record CreateStrategyRequest(
     String strategyKey,
     String runtimeType,
     String codeRef,
+    String strategyTypeKey,
     String description,
     List<Long> defaultAccounts,
     List<String> defaultSymbols,

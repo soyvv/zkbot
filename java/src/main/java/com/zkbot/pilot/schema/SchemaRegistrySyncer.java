@@ -60,6 +60,17 @@ public class SchemaRegistrySyncer {
             }
         }
 
+        // Sync per-strategy manifests (nested under service-manifests/{kind}/strategies/)
+        if (serviceManifestsRoot != null && !serviceManifestsRoot.isBlank()) {
+            Path root = Path.of(serviceManifestsRoot);
+            if (Files.isDirectory(root)) {
+                var result = syncStrategyManifests(root);
+                newCount += result[0];
+                unchangedCount += result[1];
+                mismatchCount += result[2];
+            }
+        }
+
         // Sync venue-capability manifests
         if (venueIntegrationsRoot != null && !venueIntegrationsRoot.isBlank()) {
             Path root = Path.of(venueIntegrationsRoot);
@@ -110,6 +121,61 @@ public class SchemaRegistrySyncer {
                 Path manifestFile = venueDir.resolve("manifest.yaml");
                 if (Files.isRegularFile(manifestFile)) {
                     syncVenueCapabilities(manifestFile, venueDir, counts);
+                }
+            });
+        } catch (IOException e) {
+            log.warn("schema-sync: error scanning {}: {}", root, e.getMessage());
+        }
+        return counts;
+    }
+
+    /**
+     * Sync per-strategy manifests from nested directories:
+     *   service-manifests/engine/strategies/smoke-test/manifest.yaml
+     *   service-manifests/engine/strategies/mm/manifest.yaml
+     *
+     * Each strategy manifest is registered as resource_type=strategy_kind,
+     * resource_key=strategy_type_key (from manifest payload, validated against folder name).
+     */
+    @SuppressWarnings("unchecked")
+    private int[] syncStrategyManifests(Path root) {
+        int[] counts = new int[3];
+        try (Stream<Path> kindDirs = Files.list(root)) {
+            kindDirs.filter(Files::isDirectory).forEach(kindDir -> {
+                Path strategiesDir = kindDir.resolve("strategies");
+                if (!Files.isDirectory(strategiesDir)) return;
+                try (Stream<Path> strategyDirs = Files.list(strategiesDir)) {
+                    strategyDirs.filter(Files::isDirectory).forEach(stratDir -> {
+                        Path manifestFile = stratDir.resolve("manifest.yaml");
+                        if (!Files.isRegularFile(manifestFile)) return;
+
+                        String folderName = stratDir.getFileName().toString();
+                        // Validate strategy_type_key in manifest matches folder name
+                        try {
+                            String content = Files.readString(manifestFile, StandardCharsets.UTF_8);
+                            Yaml yaml = new Yaml();
+                            Map<String, Object> doc = yaml.load(content);
+                            String manifestKey = (String) doc.get("strategy_type_key");
+                            if (manifestKey == null || manifestKey.isBlank()) {
+                                log.warn("schema-sync: strategy manifest {} has no strategy_type_key, skipping", manifestFile);
+                                return;
+                            }
+                            if (!folderName.equals(manifestKey)) {
+                                log.error("schema-sync: strategy manifest {} declares strategy_type_key='{}' " +
+                                        "but folder is '{}' — skipping (rename folder or fix manifest)",
+                                        manifestFile, manifestKey, folderName);
+                                return;
+                            }
+                        } catch (Exception e) {
+                            log.warn("schema-sync: failed to pre-validate strategy manifest {}: {}",
+                                    manifestFile, e.getMessage());
+                            return;
+                        }
+
+                        syncOneManifest(manifestFile, "strategy_kind", folderName, counts);
+                    });
+                } catch (IOException e) {
+                    log.warn("schema-sync: error scanning strategies in {}: {}", kindDir, e.getMessage());
                 }
             });
         } catch (IOException e) {

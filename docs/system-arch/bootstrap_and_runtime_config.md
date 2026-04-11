@@ -148,6 +148,8 @@ Recommended rule:
 - venue-backed services such as `gw`, `mdgw`, and refdata should use the venue integration manifest
 - non-venue services such as `oms`, `engine`, and other managed runtimes should use a service-kind
   manifest/schema contract with the same logical purpose
+- services that host pluggable workloads such as `engine` may also need a second manifest layer for
+  the hosted workload itself, such as strategy manifests keyed by `strategy_type_key`
 - the bundled manifest/schema shipped with the codebase or binary is the authoritative contract
 - any Pilot-stored schema/manifest metadata is an operational mirror/registry of that authoritative
   contract, not an independent authoring source
@@ -160,6 +162,22 @@ The manifest/schema contract should define:
 - which fields are reloadable vs restart-required
 - which fields are secret references vs ordinary config
 - which fields conceptually belong to `provided_config` rather than `bootstrap_config`
+
+Hosted-workload rule:
+
+- when one managed service hosts multiple workload families behind one runtime, keep the contracts
+  split
+- example:
+  - engine host config belongs to the engine service-kind manifest/schema
+  - strategy config belongs to the selected strategy manifest/schema
+- Pilot may compose multiple schemas in the UI, but it should not flatten them into one
+  undifferentiated authoring contract
+
+Python-wrapper rule:
+
+- a generic Python-wrapper strategy may use one outer strategy manifest/schema for wrapper fields
+- the wrapped Python strategy config may remain a nested JSON payload
+- when a strategy-specific Python schema exists, Pilot should validate that nested payload too
 
 Pilot should use this manifest/schema contract to:
 

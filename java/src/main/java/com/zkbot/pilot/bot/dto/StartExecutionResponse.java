@@ -5,6 +5,7 @@ import java.util.Map;
 public record StartExecutionResponse(
     String executionId,
     String strategyId,
+    String engineId,
     String status,
     Map<String, Object> enrichedConfig
 ) {}

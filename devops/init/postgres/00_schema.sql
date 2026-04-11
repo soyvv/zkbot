@@ -185,6 +185,7 @@ create table cfg.strategy_definition (
   strategy_id       text primary key,
   runtime_type      text not null,
   code_ref          text not null,
+  strategy_type_key text not null,
   description       text,
   default_accounts  bigint[] not null default '{}',
   default_symbols   text[] not null default '{}',
@@ -197,18 +198,24 @@ create table cfg.strategy_definition (
 create table cfg.strategy_instance (
   execution_id     text primary key,
   strategy_id      text not null references cfg.strategy_definition(strategy_id),
+  engine_id        text references cfg.engine_instance(engine_id),
   target_oms_id    text not null references cfg.oms_instance(oms_id),
   status           text not null,
   error_message    text,
   started_at       timestamptz,
   ended_at         timestamptz,
   config_override  jsonb not null default '{}'::jsonb,
+  strategy_config_snapshot jsonb,
+  engine_config_snapshot   jsonb,
+  binding_snapshot         jsonb,
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now()
 );
 
 create index idx_strategy_instance_strategy on cfg.strategy_instance(strategy_id);
+create index idx_strategy_instance_engine   on cfg.strategy_instance(engine_id);
 create index idx_strategy_instance_status   on cfg.strategy_instance(status);
+create index idx_strategy_instance_engine_started on cfg.strategy_instance(engine_id, started_at desc);
 
 create table cfg.logical_instance (
   logical_id       text primary key,
@@ -255,6 +262,8 @@ create table cfg.engine_instance (
   description      text,
   enabled          boolean not null default true,
   provided_config  jsonb not null default '{}'::jsonb,
+  strategy_id      text references cfg.strategy_definition(strategy_id),
+  target_oms_id    text references cfg.oms_instance(oms_id),
   schema_resource_type text,
   schema_resource_key  text,
   schema_version       integer,

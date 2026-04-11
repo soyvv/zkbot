@@ -39,7 +39,7 @@ impl OmsDiscovery {
     /// specific accounts should treat `false` as a warning and verify resolution.
     pub async fn start(
         js: &jetstream::Context,
-        _config: &TradingClientConfig,
+        config: &TradingClientConfig,
     ) -> Result<(Self, bool), SdkError> {
         let inner = KvDiscoveryClient::start(js).await?;
         let watch = inner.spawn_watch_loop();
@@ -50,8 +50,8 @@ impl OmsDiscovery {
             cache,
         };
 
-        let snapshot_ready = discovery.wait_for_initial_snapshot().await?;
-        discovery.refresh_account_cache().await?;
+        let snapshot_ready = discovery.wait_for_required_snapshot(config).await?;
+        discovery.refresh_account_cache(config.oms_id.as_deref()).await?;
         Ok((discovery, snapshot_ready))
     }
 
@@ -63,30 +63,56 @@ impl OmsDiscovery {
         self.cache.read().await.clone()
     }
 
+    pub async fn snapshot_service_type_counts(&self) -> HashMap<String, usize> {
+        let snapshot = self.inner.snapshot().await;
+        snapshot_service_type_counts(&snapshot)
+    }
+
     pub async fn resolve_refdata(&self) -> Option<String> {
         let snapshot = self.inner.snapshot().await;
         resolve_refdata_endpoint(&snapshot)
     }
 
-    pub async fn refresh_account_cache(&self) -> Result<(), SdkError> {
+    pub async fn refresh_account_cache(&self, oms_id: Option<&str>) -> Result<(), SdkError> {
         let snapshot = self.inner.snapshot().await;
-        let account_map = build_account_map(&snapshot)?;
+        let account_map = build_account_map_with_target(&snapshot, oms_id)?;
         *self.cache.write().await = account_map;
         Ok(())
     }
 
-    /// Poll until the KV watcher delivers at least one entry, or timeout.
-    /// Returns `true` if a snapshot was observed, `false` if timed out empty.
-    async fn wait_for_initial_snapshot(&self) -> Result<bool, SdkError> {
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(2000);
+    /// Poll until discovery has the dependencies required by the client config:
+    /// all configured OMS accounts and, unless overridden, one live refdata service.
+    /// Returns `true` when those requirements are satisfied; `false` on timeout.
+    async fn wait_for_required_snapshot(
+        &self,
+        config: &TradingClientConfig,
+    ) -> Result<bool, SdkError> {
+        let deadline =
+            tokio::time::Instant::now() + Duration::from_millis(config.discovery_timeout_ms);
         while tokio::time::Instant::now() < deadline {
-            if !self.inner.snapshot().await.is_empty() {
+            let snapshot = self.inner.snapshot().await;
+            if snapshot_satisfies_requirements(&snapshot, config)? {
                 return Ok(true);
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         Ok(false)
     }
+}
+
+pub fn snapshot_service_type_counts(
+    snapshot: &HashMap<String, ServiceRegistration>,
+) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for reg in snapshot.values() {
+        let service_type = if reg.service_type.is_empty() {
+            "unknown".to_string()
+        } else {
+            reg.service_type.to_ascii_lowercase()
+        };
+        *counts.entry(service_type).or_insert(0) += 1;
+    }
+    counts
 }
 
 impl Drop for OmsDiscovery {
@@ -101,6 +127,13 @@ impl Drop for OmsDiscovery {
 /// `SdkError::DiscoveryConflict` if two OMS registrations claim the same account.
 pub fn build_account_map(
     snapshot: &HashMap<String, ServiceRegistration>,
+) -> Result<HashMap<i64, OmsEndpoint>, SdkError> {
+    build_account_map_with_target(snapshot, None)
+}
+
+pub fn build_account_map_with_target(
+    snapshot: &HashMap<String, ServiceRegistration>,
+    target_oms_id: Option<&str>,
 ) -> Result<HashMap<i64, OmsEndpoint>, SdkError> {
     let mut map: HashMap<i64, OmsEndpoint> = HashMap::new();
     let now_ms = now_ms();
@@ -123,6 +156,11 @@ pub fn build_account_map(
             Some(endpoint.authority.clone())
         };
         let oms_id = extract_service_id(key, reg);
+        if let Some(target_oms_id) = target_oms_id {
+            if oms_id != target_oms_id {
+                continue;
+            }
+        }
 
         for &account_id in &reg.account_ids {
             if let Some(existing) = map.get(&account_id) {
@@ -186,4 +224,23 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+pub fn snapshot_satisfies_requirements(
+    snapshot: &HashMap<String, ServiceRegistration>,
+    config: &TradingClientConfig,
+) -> Result<bool, SdkError> {
+    if snapshot.is_empty() {
+        return Ok(false);
+    }
+
+    let account_map = build_account_map_with_target(snapshot, config.oms_id.as_deref())?;
+    let accounts_ready = config
+        .account_ids
+        .iter()
+        .all(|account_id| account_map.contains_key(account_id));
+
+    let refdata_ready = config.refdata_grpc.is_some() || resolve_refdata_endpoint(snapshot).is_some();
+
+    Ok(accounts_ready && refdata_ready)
 }

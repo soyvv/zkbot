@@ -1,11 +1,15 @@
 package com.zkbot.pilot.bot;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zkbot.pilot.bot.dto.CreateStrategyRequest;
 import com.zkbot.pilot.bot.dto.StartExecutionRequest;
 import com.zkbot.pilot.bot.dto.UpdateStrategyRequest;
+import com.zkbot.pilot.bootstrap.TokenService;
+import com.zkbot.pilot.config.PilotProperties;
 import com.zkbot.pilot.discovery.DiscoveryResolver;
 import com.zkbot.pilot.grpc.OmsGrpcClient;
 import com.zkbot.pilot.orchestrator.ProcessOrchestrator;
+import com.zkbot.pilot.orchestrator.RuntimeOrchestrator.OrchestratorProfile;
 import com.zkbot.pilot.orchestrator.RuntimeOrchestrator.RuntimeStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -16,6 +20,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,17 +36,21 @@ class BotServiceTest {
 
     @Mock StrategyRepository strategyRepo;
     @Mock ExecutionRepository executionRepo;
+    @Mock BotDefinitionRepository botDefRepo;
     @Mock ProcessOrchestrator orchestrator;
     @Mock OmsGrpcClient omsClient;
     @Mock DiscoveryResolver discoveryResolver;
     @Mock JdbcTemplate jdbc;
+    @Mock TokenService tokenService;
 
     BotService service;
 
     @BeforeEach
     void setUp() {
-        service = new BotService(strategyRepo, executionRepo, orchestrator,
-                omsClient, discoveryResolver, jdbc);
+        var props = new PilotProperties(
+                "nats://localhost:4222", "test", "pilot_test", 60, null, null, "zk-engine-svc", "logs");
+        service = new BotService(strategyRepo, executionRepo, botDefRepo,
+                orchestrator, omsClient, discoveryResolver, jdbc, new ObjectMapper(), props, tokenService);
     }
 
     // ── Strategy CRUD ─────────────────────────────────────────────────────
@@ -50,7 +60,7 @@ class BotServiceTest {
 
         @Test
         void create_strategy_rejects_blank_key() {
-            var req = new CreateStrategyRequest("", "RUST", "ref", "desc", null, null, null);
+            var req = new CreateStrategyRequest("", "RUST", "ref", "smoke-test", "desc", null, null, null);
 
             assertThatThrownBy(() -> service.createStrategy(req))
                     .isInstanceOf(ResponseStatusException.class)
@@ -59,7 +69,7 @@ class BotServiceTest {
 
         @Test
         void create_strategy_rejects_duplicate() {
-            var req = new CreateStrategyRequest("strat_1", "RUST", "ref", "desc", null, null, null);
+            var req = new CreateStrategyRequest("strat_1", "RUST", "ref", "smoke-test", "desc", null, null, null);
             when(strategyRepo.getStrategy("strat_1")).thenReturn(Map.of("strategy_id", "strat_1"));
 
             assertThatThrownBy(() -> service.createStrategy(req))
@@ -72,7 +82,7 @@ class BotServiceTest {
             when(strategyRepo.getStrategy("nonexistent")).thenReturn(null);
 
             assertThatThrownBy(() -> service.updateStrategy("nonexistent",
-                    new UpdateStrategyRequest("desc", null, null, null, null)))
+                    new UpdateStrategyRequest("desc", null, null, null, null, null)))
                     .isInstanceOf(ResponseStatusException.class)
                     .hasMessageContaining("not found");
         }
@@ -260,6 +270,50 @@ class BotServiceTest {
 
         assertThat(result.processRunning()).isEqualTo(false);
         assertThat(result.processExitCode()).isEqualTo(137);
+    }
+
+    @Test
+    void start_bot_uses_engine_binary_path_not_strategy_code_ref() throws Exception {
+        Path engine = Files.createTempFile("zk-engine-svc-test", "");
+        engine.toFile().setExecutable(true);
+
+        var props = new PilotProperties(
+                "nats://localhost:4222", "test", "pilot_test", 60, null, null,
+                engine.toString(), "logs");
+        service = new BotService(strategyRepo, executionRepo, botDefRepo,
+                orchestrator, omsClient, discoveryResolver, jdbc, new ObjectMapper(), props, tokenService);
+
+        var bot = new HashMap<String, Object>();
+        bot.put("engine_id", "bot-1");
+        bot.put("enabled", true);
+        bot.put("strategy_id", "strat_1");
+        bot.put("target_oms_id", "oms_1");
+        bot.put("provided_config", """
+                {"account_ids":[100],"instruments":["BTC/USD@SIM1"],"timer_interval_ms":500}
+                """);
+        when(botDefRepo.getBotDefinition("bot-1")).thenReturn(bot);
+
+        var strategy = new HashMap<String, Object>();
+        strategy.put("strategy_id", "strat_1");
+        strategy.put("enabled", true);
+        strategy.put("strategy_type_key", "smoke-test");
+        strategy.put("code_ref", "smoke-test");
+        strategy.put("config_json", """
+                {"quote_qty":1.0}
+                """);
+        when(strategyRepo.getStrategy("strat_1")).thenReturn(strategy);
+
+        when(jdbc.queryForList("SELECT 1 FROM cfg.oms_instance WHERE oms_id = ?", "oms_1"))
+                .thenReturn(List.of(Map.of("1", 1)));
+        when(executionRepo.findRunningExecutionForEngine("bot-1")).thenReturn(null);
+        when(orchestrator.start(eq("bot-1"), any()))
+                .thenReturn(new com.zkbot.pilot.orchestrator.RuntimeOrchestrator.StartResult(true, "ok"));
+
+        service.startBot("bot-1");
+
+        var profileCaptor = org.mockito.ArgumentCaptor.forClass(OrchestratorProfile.class);
+        verify(orchestrator).start(eq("bot-1"), profileCaptor.capture());
+        assertThat(profileCaptor.getValue().command()).isEqualTo(engine.toString());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

@@ -1,0 +1,22 @@
+strategy_type_key: smoke-test
+schema_id: strategy/smoke-test
+version: 1
+runtime_kind: rust_native
+label: Smoke Test
+description: Basic two-sided quoting strategy used to validate engine callbacks and OMS round-trips.
+config_schema: schemas/strategy_config.schema.json
+field_descriptors:
+  - path: /quote_interval_ms
+    reloadable: false
+  - path: /quote_qty
+    reloadable: false
+  - path: /buy_tick_distance
+    reloadable: false
+  - path: /sell_tick_distance
+    reloadable: false
+metadata:
+  crate: strategy-smoke-test
+  tags:
+    - rust
+    - smoke
+    - validation
