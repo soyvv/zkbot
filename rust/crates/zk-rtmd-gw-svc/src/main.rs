@@ -120,6 +120,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         (cfg, registration)
     };
 
+    // ── 3b. Resolve venue config secrets (Python venues) ────────────────────
+    // Read secret_ref from venue_config → fetch whole Vault document →
+    // project allowed keys into venue_config. Venue-specific mapping lives
+    // here, NOT in zk-infra-rs.
+    #[cfg(feature = "python-venue")]
+    let mut cfg = cfg;
+    #[cfg(feature = "python-venue")]
+    if let Some(ref venue_root) = cfg.venue_root {
+        let root = std::path::PathBuf::from(venue_root);
+        if let Ok(manifest) = zk_pyo3_bridge::manifest::load_manifest(&root, &cfg.venue) {
+            if let Ok(cap) =
+                zk_pyo3_bridge::manifest::resolve_capability(&manifest, zk_pyo3_bridge::manifest::CAP_RTMD)
+            {
+                let secret_paths = zk_pyo3_bridge::manifest::secret_ref_paths(cap);
+                if !secret_paths.is_empty() {
+                    let resolver: Box<dyn zk_infra_rs::vault::SecretResolver> =
+                        if let Some(identity) = zk_infra_rs::vault::VaultIdentity::from_env() {
+                            Box::new(
+                                zk_infra_rs::vault::VaultSecretResolver::login(&identity)
+                                    .await
+                                    .expect("Vault login failed"),
+                            )
+                        } else {
+                            Box::new(zk_infra_rs::vault::DevSecretResolver::new())
+                        };
+
+                    for pointer in &secret_paths {
+                        if let Some(vault_path) =
+                            zk_infra_rs::vault::extract_secret_ref(&cfg.venue_config, pointer)
+                        {
+                            let doc = resolver
+                                .read_document(&vault_path)
+                                .await
+                                .expect("failed to read secret document from Vault");
+
+                            // Host-side projection: map Vault keys → adaptor config keys.
+                            let projections: &[(&str, &str)] = match cfg.venue.as_str() {
+                                "oanda" => &[("apikey", "token")],
+                                _ => &[],
+                            };
+                            let obj = cfg
+                                .venue_config
+                                .as_object_mut()
+                                .expect("venue_config must be a JSON object");
+                            for &(vault_key, config_key) in projections {
+                                if let Some(val) = doc.get(vault_key) {
+                                    obj.insert(
+                                        config_key.into(),
+                                        serde_json::Value::String(val.clone()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    info!("venue config secrets resolved");
+                }
+            }
+        }
+    }
+
     // ── Venue adapter ────────────────────────────────────────────────────────
     let adapter = {
         #[cfg(feature = "python-venue")]

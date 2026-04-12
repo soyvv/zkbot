@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 import httpx
 from loguru import logger
 
 from . import normalize as norm
+
+# Type for the async dedup callback: (event_dict, txn_dict) -> None
+_EmitFn = Callable[[dict, dict], Coroutine[Any, Any, None]]
 
 
 class OandaTransactionStream:
@@ -27,11 +32,13 @@ class OandaTransactionStream:
         token: str,
         account_id: str,
         event_queue: asyncio.Queue,
+        emit_order_event: _EmitFn | None = None,
     ) -> None:
         self._stream_base_url = stream_base_url
         self._token = token
         self._account_id = account_id
         self._event_queue = event_queue
+        self._emit_order_event = emit_order_event
         self._last_transaction_id: str | None = None
         self._running = True
         self._connected_event = asyncio.Event()
@@ -130,26 +137,33 @@ class OandaTransactionStream:
         # Order creation transactions
         if txn_type in ("MARKET_ORDER", "LIMIT_ORDER", "STOP_ORDER"):
             event = norm.order_create_event(data)
-            await self._event_queue.put(event)
+            await self._emit(event, data)
             return
 
         # Order fill
         if txn_type == "ORDER_FILL":
             event = norm.order_fill_event(data)
-            await self._event_queue.put(event)
+            await self._emit(event, data)
             return
 
         # Order cancel
         if txn_type == "ORDER_CANCEL":
             event = norm.order_cancel_event(data)
-            await self._event_queue.put(event)
+            await self._emit(event, data)
             return
 
         # Rejection events
         if txn_type.endswith("_REJECT"):
             event = norm.order_reject_event(data)
-            await self._event_queue.put(event)
+            await self._emit(event, data)
             return
 
         # Log but skip other transaction types
         logger.debug(f"OANDA stream: unhandled transaction type={txn_type}")
+
+    async def _emit(self, event: dict, txn: dict) -> None:
+        """Route order event through dedup callback if available."""
+        if self._emit_order_event is not None:
+            await self._emit_order_event(event, txn)
+        else:
+            await self._event_queue.put(event)

@@ -163,7 +163,14 @@ pub struct ResolvedSecret {
 /// Async trait for resolving secret references.
 #[async_trait::async_trait]
 pub trait SecretResolver: Send + Sync {
+    /// Resolve a single field from a secret path.
     async fn resolve(&self, logical_ref: &str, field_key: &str) -> Result<String, SecretError>;
+
+    /// Read all fields from a secret path as a string map.
+    async fn read_document(
+        &self,
+        path: &str,
+    ) -> Result<HashMap<String, String>, SecretError>;
 
     async fn resolve_all(&self, refs: &[SecretRef]) -> Vec<Result<ResolvedSecret, SecretError>> {
         let mut results = Vec::with_capacity(refs.len());
@@ -262,6 +269,51 @@ impl VaultSecretResolver {
         })
     }
 
+    /// Read all fields from a Vault KV v2 secret path as a string map.
+    ///
+    /// Returns the full secret document. Callers pick which fields they need.
+    pub async fn read_document(
+        &self,
+        path: &str,
+    ) -> Result<HashMap<String, String>, SecretError> {
+        let (mount, rest) = path
+            .split_once('/')
+            .ok_or_else(|| SecretError::PathNotFound(format!("invalid vault path: {path}")))?;
+        let url = format!("{}/v1/{}/data/{}", self.vault_addr, mount, rest);
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("X-Vault-Token", &self.token)
+            .send()
+            .await
+            .map_err(|e| SecretError::NetworkError(e.to_string()))?;
+
+        if resp.status().as_u16() == 404 {
+            return Err(SecretError::PathNotFound(path.into()));
+        }
+
+        if !resp.status().is_success() {
+            return Err(SecretError::NetworkError(format!(
+                "HTTP {}: reading {}",
+                resp.status(),
+                path
+            )));
+        }
+
+        let data: VaultReadResponse = resp
+            .json()
+            .await
+            .map_err(|e| SecretError::NetworkError(e.to_string()))?;
+
+        Ok(data
+            .data
+            .data
+            .into_iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+            .collect())
+    }
+
     /// Read a single field from a Vault KV v2 secret path.
     async fn read_kv(&self, path: &str, field_key: &str) -> Result<String, SecretError> {
         // KV v2 read URL: /v1/{mount}/data/{path}
@@ -311,8 +363,14 @@ impl VaultSecretResolver {
 #[async_trait::async_trait]
 impl SecretResolver for VaultSecretResolver {
     async fn resolve(&self, logical_ref: &str, field_key: &str) -> Result<String, SecretError> {
-        // logical_ref should already be expanded to a vault path by the caller
         self.read_kv(logical_ref, field_key).await
+    }
+
+    async fn read_document(
+        &self,
+        path: &str,
+    ) -> Result<HashMap<String, String>, SecretError> {
+        self.read_document(path).await
     }
 }
 
@@ -353,6 +411,47 @@ impl SecretResolver for DevSecretResolver {
             field: field_key.into(),
         })
     }
+
+    async fn read_document(
+        &self,
+        path: &str,
+    ) -> Result<HashMap<String, String>, SecretError> {
+        // Scan env vars matching ZK_SECRET_{PATH}_* and collect them.
+        let prefix = {
+            let ref_part = path.replace('/', "_").replace('-', "_").to_uppercase();
+            format!("ZK_SECRET_{ref_part}_")
+        };
+        let mut doc = HashMap::new();
+        for (key, value) in env::vars() {
+            if let Some(suffix) = key.strip_prefix(&prefix) {
+                doc.insert(suffix.to_lowercase(), value);
+            }
+        }
+        if doc.is_empty() {
+            return Err(SecretError::PathNotFound(format!(
+                "no env vars with prefix {prefix}"
+            )));
+        }
+        Ok(doc)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Secret document helpers
+// ---------------------------------------------------------------------------
+
+/// Extract a Vault path from `venue_config` at a given JSON pointer.
+///
+/// Returns `None` if the pointer is absent or the value is empty.
+pub fn extract_secret_ref(
+    venue_config: &serde_json::Value,
+    pointer: &str,
+) -> Option<String> {
+    venue_config
+        .pointer(pointer)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -426,5 +525,53 @@ mod tests {
             DevSecretResolver::env_key("okx/trading-primary", "secret_key"),
             "ZK_SECRET_OKX_TRADING_PRIMARY_SECRET_KEY"
         );
+    }
+
+    #[test]
+    fn test_extract_secret_ref_present() {
+        let config = serde_json::json!({
+            "secret_ref": "kv/trading/gw/8003"
+        });
+        assert_eq!(
+            extract_secret_ref(&config, "/secret_ref"),
+            Some("kv/trading/gw/8003".into())
+        );
+    }
+
+    #[test]
+    fn test_extract_secret_ref_empty() {
+        let config = serde_json::json!({ "secret_ref": "" });
+        assert_eq!(extract_secret_ref(&config, "/secret_ref"), None);
+    }
+
+    #[test]
+    fn test_extract_secret_ref_missing() {
+        let config = serde_json::json!({ "environment": "practice" });
+        assert_eq!(extract_secret_ref(&config, "/secret_ref"), None);
+    }
+
+    #[tokio::test]
+    async fn test_dev_resolver_read_document() {
+        let key1 = "ZK_SECRET_KV_TRADING_GW_8003_APIKEY";
+        let key2 = "ZK_SECRET_KV_TRADING_GW_8003_EXTRA";
+        env::set_var(key1, "my-token");
+        env::set_var(key2, "extra-val");
+
+        let resolver = DevSecretResolver::new();
+        let doc = resolver.read_document("kv/trading/gw/8003").await.unwrap();
+        assert_eq!(doc.get("apikey").unwrap(), "my-token");
+        assert_eq!(doc.get("extra").unwrap(), "extra-val");
+
+        env::remove_var(key1);
+        env::remove_var(key2);
+    }
+
+    #[tokio::test]
+    async fn test_dev_resolver_read_document_empty() {
+        let resolver = DevSecretResolver::new();
+        let result = resolver
+            .read_document("kv/nonexistent/path/999")
+            .await;
+        assert!(result.is_err());
     }
 }

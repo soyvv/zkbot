@@ -466,19 +466,47 @@ Recommended flow:
 2. Pilot returns or authorizes:
    - logical identity
    - effective enriched runtime config
-   - `secret_ref` metadata only
+   - `secret_ref` metadata only, where `secret_ref` is the Vault path reference
 3. gateway authenticates to Vault using deployment identity
    - Kubernetes service account
    - AppRole
    - or another deployment-native auth mechanism
-4. gateway reads the secret material directly from Vault via `secret_ref`
-5. adaptor uses those credentials to establish the venue session
+4. gateway reads the Vault secret document directly from Vault via `secret_ref`
+5. gateway projects that document into adaptor-facing config fields
+   - example: `apikey -> token`
+   - example: `apikey/secretkey/passphrase -> api_key/secret_key/passphrase`
+6. adaptor uses those credentials to establish the venue session
 
 Design rules:
 
 - Pilot manages references and policy, not raw trading secrets
 - Vault remains the source of truth for secrets
 - gateway runtime is the component that actually fetches secrets
+- shared infra/Vault code should not hardcode venue-specific field mappings
+- venue adaptors should consume resolved credentials rather than owning Vault client logic
+
+Reference sequence:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant GW as gw
+    participant Pilot as pilot
+    participant Vault as vault
+    participant Adaptor as gw_venue_adaptor
+
+    GW->>Pilot: BootstrapRegister(logical_id, token, instance_type=GW)
+    Pilot-->>GW: BootstrapGrant + runtime_config
+    Note over Pilot,GW: venue_config.secret_ref = "kv/trading/gw/8003"
+
+    GW->>Vault: Read secret at secret_ref path
+    Vault-->>GW: Secret document with credential fields
+
+    GW->>GW: Project secret document into adaptor-facing config
+    GW->>Adaptor: Construct adaptor with resolved config
+    GW->>Adaptor: connect()
+    Adaptor-->>GW: Venue session established
+```
 
 ### Config Management
 

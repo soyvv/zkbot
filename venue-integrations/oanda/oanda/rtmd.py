@@ -62,7 +62,9 @@ class OandaRtmdAdaptor:
         self._connected = False
 
         # Subscription tracking
-        # Key: (instrument_exch, channel_type_str)
+        # Key: (instrument_exch, channel_type_str) — for kline, channel_type_str
+        # includes the interval (e.g. "kline:1m") so distinct intervals are not
+        # collapsed into a single subscription.
         self._active_subs: dict[tuple[str, str], dict] = {}
         # instrument_code → instrument_exch mapping
         self._instrument_map: dict[str, str] = {}
@@ -109,7 +111,7 @@ class OandaRtmdAdaptor:
         channel_type = channel["type"]
 
         self._instrument_map[instrument_code] = instrument_exch
-        sub_key = (instrument_exch, channel_type)
+        sub_key = self._sub_key(instrument_exch, channel)
 
         if sub_key in self._active_subs:
             return
@@ -142,7 +144,7 @@ class OandaRtmdAdaptor:
         channel = stream_key["channel"]
         channel_type = channel["type"]
 
-        sub_key = (instrument_exch, channel_type)
+        sub_key = self._sub_key(instrument_exch, channel)
         self._active_subs.pop(sub_key, None)
 
         if channel_type == "tick":
@@ -259,6 +261,15 @@ class OandaRtmdAdaptor:
         logger.info("OANDA RTMD adaptor shut down")
 
     # ── internal ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _sub_key(instrument_exch: str, channel: dict) -> tuple[str, str]:
+        """Build a unique subscription key, including interval for kline channels."""
+        channel_type = channel["type"]
+        if channel_type == "kline":
+            interval = channel.get("interval", "1m")
+            return (instrument_exch, f"kline:{interval}")
+        return (instrument_exch, channel_type)
 
     async def _kline_poll_loop(self, instrument_exch: str, granularity: str) -> None:
         """Periodically poll REST candles and emit new completed klines."""

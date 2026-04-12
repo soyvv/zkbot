@@ -21,12 +21,37 @@ pub struct VenueManifest {
     pub metadata: Option<serde_json::Value>,
 }
 
+/// A field descriptor from the manifest's `field_descriptors` list.
+#[derive(Debug, Deserialize)]
+pub struct FieldDescriptor {
+    /// JSON pointer path (e.g. "/secret_ref").
+    pub path: String,
+    /// True if this field holds a Vault secret reference.
+    #[serde(default)]
+    pub secret_ref: bool,
+    /// True if the field can be changed without restarting the adaptor.
+    #[serde(default)]
+    pub reloadable: bool,
+}
+
 /// A single capability entry within the manifest.
 #[derive(Debug, Deserialize)]
 pub struct CapabilityEntry {
     pub language: String,
     pub entrypoint: String,
     pub config_schema: Option<String>,
+    /// Field-level metadata declared per capability in the manifest.
+    #[serde(default)]
+    pub field_descriptors: Vec<FieldDescriptor>,
+}
+
+/// Return the JSON pointer paths of fields marked `secret_ref: true`.
+pub fn secret_ref_paths(cap: &CapabilityEntry) -> Vec<&str> {
+    cap.field_descriptors
+        .iter()
+        .filter(|fd| fd.secret_ref)
+        .map(|fd| fd.path.as_str())
+        .collect()
 }
 
 /// Parsed Python entrypoint from `"python:module.path:ClassName"`.
@@ -190,5 +215,66 @@ mod tests {
     fn test_resolve_module_path_no_prefix() {
         let ep = parse_python_entrypoint("python:fake_gw:FakeGatewayAdaptor").unwrap();
         assert_eq!(resolve_module_path(&ep, "test_venue"), "fake_gw");
+    }
+
+    #[test]
+    fn test_field_descriptors_parsed() {
+        let yaml = r#"
+venue: test
+version: 1
+capabilities:
+  gw:
+    language: python
+    entrypoint: "python:test.gw:TestGw"
+    field_descriptors:
+      - path: /secret_ref
+        secret_ref: true
+        reloadable: false
+      - path: /environment
+        reloadable: false
+"#;
+        let manifest: VenueManifest = serde_yaml::from_str(yaml).unwrap();
+        let cap = resolve_capability(&manifest, "gw").unwrap();
+        assert_eq!(cap.field_descriptors.len(), 2);
+        assert!(cap.field_descriptors[0].secret_ref);
+        assert!(!cap.field_descriptors[1].secret_ref);
+    }
+
+    #[test]
+    fn test_secret_ref_paths() {
+        let yaml = r#"
+venue: test
+version: 1
+capabilities:
+  gw:
+    language: python
+    entrypoint: "python:test.gw:TestGw"
+    field_descriptors:
+      - path: /secret_ref
+        secret_ref: true
+      - path: /environment
+      - path: /api_key
+        secret_ref: true
+"#;
+        let manifest: VenueManifest = serde_yaml::from_str(yaml).unwrap();
+        let cap = resolve_capability(&manifest, "gw").unwrap();
+        let paths = secret_ref_paths(cap);
+        assert_eq!(paths, vec!["/secret_ref", "/api_key"]);
+    }
+
+    #[test]
+    fn test_field_descriptors_default_empty() {
+        let yaml = r#"
+venue: test
+version: 1
+capabilities:
+  gw:
+    language: rust
+    entrypoint: "rust::test::gw::TestGw"
+"#;
+        let manifest: VenueManifest = serde_yaml::from_str(yaml).unwrap();
+        let cap = resolve_capability(&manifest, "gw").unwrap();
+        assert!(cap.field_descriptors.is_empty());
+        assert!(secret_ref_paths(cap).is_empty());
     }
 }

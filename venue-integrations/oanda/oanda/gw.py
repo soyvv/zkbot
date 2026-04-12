@@ -15,6 +15,7 @@ Bridge constraints:
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 
 from loguru import logger
 
@@ -33,6 +34,7 @@ _STREAM_URLS = {
 
 _QUERY_AFTER_ACTION_DELAY = 0.5
 _RECONCILE_INTERVAL = 30.0
+_MAX_SEEN_TXNS = 10_000
 
 
 class OandaGatewayAdaptor:
@@ -63,6 +65,9 @@ class OandaGatewayAdaptor:
         self._stream_task: asyncio.Task | None = None
         self._reconcile_task: asyncio.Task | None = None
         self._connected = False
+        # Dedup order events emitted from both REST responses and the transaction
+        # stream.  Keyed by OANDA transaction ID; bounded FIFO eviction.
+        self._seen_txn_ids: OrderedDict[str, None] = OrderedDict()
 
     @property
     def connected(self) -> bool:
@@ -86,6 +91,7 @@ class OandaGatewayAdaptor:
             token=self._token,
             account_id=self._oanda_account_id,
             event_queue=self._event_queue,
+            emit_order_event=self._emit_order_event,
         )
         self._stream_task = asyncio.create_task(self._stream.run(), name="oanda-txn-stream")
         # Wait for the stream to confirm its first connection before reporting ready.
@@ -150,16 +156,16 @@ class OandaGatewayAdaptor:
         create_txn = resp.get("orderCreateTransaction")
         if create_txn:
             exch_order_ref = str(create_txn.get("id", ""))
-            await self._event_queue.put(norm.order_create_event(create_txn))
+            await self._emit_order_event(norm.order_create_event(create_txn), create_txn)
 
         fill_txn = resp.get("orderFillTransaction")
         if fill_txn:
             exch_order_ref = exch_order_ref or str(fill_txn.get("orderID", ""))
-            await self._event_queue.put(norm.order_fill_event(fill_txn))
+            await self._emit_order_event(norm.order_fill_event(fill_txn), fill_txn)
 
         cancel_txn = resp.get("orderCancelTransaction")
         if cancel_txn:
-            await self._event_queue.put(norm.order_cancel_event(cancel_txn))
+            await self._emit_order_event(norm.order_cancel_event(cancel_txn), cancel_txn)
 
         if create_txn and not fill_txn and not cancel_txn and exch_order_ref:
             asyncio.create_task(
@@ -177,7 +183,7 @@ class OandaGatewayAdaptor:
             return {"success": False, "exch_order_ref": exch_order_ref, "error_message": str(e)}
         cancel_txn = resp.get("orderCancelTransaction")
         if cancel_txn:
-            await self._event_queue.put(norm.order_cancel_event(cancel_txn))
+            await self._emit_order_event(norm.order_cancel_event(cancel_txn), cancel_txn)
         return {"success": True, "exch_order_ref": exch_order_ref, "error_message": None}
 
     # ── queries ──────────────────────────────────────────────────────────────
@@ -258,6 +264,24 @@ class OandaGatewayAdaptor:
         return await self._event_queue.get()
 
     # ── internal ─────────────────────────────────────────────────────────────
+
+    async def _emit_order_event(self, event: dict, txn: dict) -> None:
+        """Emit an order event, deduplicating by OANDA transaction ID.
+
+        Both REST command responses and the transaction stream call this so
+        the same logical event is only delivered once to the downstream consumer.
+        """
+        txn_id = str(txn.get("id", ""))
+        if not txn_id:
+            await self._event_queue.put(event)
+            return
+        if txn_id in self._seen_txn_ids:
+            logger.debug(f"dedup: skipping duplicate order event txn_id={txn_id}")
+            return
+        self._seen_txn_ids[txn_id] = None
+        while len(self._seen_txn_ids) > _MAX_SEEN_TXNS:
+            self._seen_txn_ids.popitem(last=False)
+        await self._event_queue.put(event)
 
     async def _query_after_action(self, exch_order_ref: str) -> None:
         await asyncio.sleep(_QUERY_AFTER_ACTION_DELAY)

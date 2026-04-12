@@ -276,8 +276,10 @@ This applies to all services that need private credentials, especially trading g
 
 The default runtime contract is:
 
-- Pilot returns only logical secret references in desired/runtime config
+- Pilot returns only Vault secret path references in desired/runtime config
 - the runtime host resolves those references before constructing venue/client adaptors
+- the shared Vault/infra layer reads the referenced secret document as generic key/value data
+- the runtime host projects that secret document into the adaptor-facing enriched config
 - adaptors should receive resolved secret fields such as `token`, `api_key`, `secret_key`, or
   `passphrase`, not Vault client logic
 
@@ -285,14 +287,68 @@ Recommended layering:
 
 - Pilot owns desired config and reference metadata
 - Vault owns secret material
-- the runtime host owns secret resolution
+- the shared infra layer owns Vault transport and document retrieval
+- the runtime host owns secret-to-config projection and enrichment
 - venue adaptors own venue protocol logic only
+
+For this contract, `secret_ref` is a Vault path reference by convention, for example:
+
+- `kv/trading/gw/8003`
+- `kv/trading/gw/9001`
+
+The runtime host should treat that value as directly readable from Vault rather than introducing a
+second logical-ref-to-path mapping layer.
+
+Projection rule:
+
+- the Vault layer should return the secret document as generic JSON/object data
+- the runtime host may rename, select, or normalize fields when enriching adaptor config
+- the runtime host should not blindly flatten every Vault field into runtime config
+- venue adaptors should read only their intended config keys
+
+Example:
+
+- Vault document at `kv/trading/gw/8003`
+  - `apikey`
+- host-enriched adaptor config
+  - `token`
+
+That mapping belongs in the host integration layer, not in the shared Vault/infra library.
 
 This keeps secret handling consistent across:
 
 - local process orchestration for dev/debug
 - future Kubernetes or k3s orchestration
 - different venue adaptor implementations
+
+Example gateway startup flow:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant GW as gw
+    participant Pilot as pilot
+    participant Vault as vault
+    participant Adaptor as gw_venue_adaptor
+
+    GW->>Pilot: BootstrapRegister(logical_id, token, instance_type=GW)
+    Pilot-->>GW: BootstrapGrant + runtime_config
+    Note over Pilot,GW: runtime_config.venue_config.secret_ref = "kv/trading/gw/8003"
+
+    GW->>GW: Parse runtime_config
+    GW->>GW: Extract secret_ref Vault path from venue_config
+    GW->>Vault: Read secret at kv/trading/gw/8003
+    Vault-->>GW: Secret document with credential fields
+
+    GW->>GW: Project secret document into adaptor-facing config
+    Note over GW: e.g. apikey -> token, or apikey/secretkey/passphrase -> api_key/secret_key/passphrase
+
+    GW->>Adaptor: Construct adaptor with resolved config
+    Adaptor-->>GW: Adaptor instance
+
+    GW->>Adaptor: connect()
+    Adaptor-->>GW: Venue session established
+```
 
 ### Runtime identity and Vault access
 
@@ -314,20 +370,15 @@ Pilot should not return a long-lived generic Vault token in bootstrap responses.
 
 ### Secret reference shape
 
-Pilot should persist and return stable logical references rather than raw Vault paths when possible.
+Pilot should persist and return `secret_ref` as the Vault path reference the runtime is expected to
+read directly.
 
-Recommended forms:
+Recommended form:
 
-- logical ref
-  - `oanda/main`
-  - `okx/trading_primary`
-- explicit Vault-backed ref when needed
-  - `vault:kv/zkbot/<env>/venues/<venue>/accounts/<account_id>#token`
+- `kv/trading/gw/<account_id>`
 
-The runtime host may expand a logical ref into an environment-specific Vault path using:
-
-- `env`
-- service kind
+The `secret_ref` value should identify the Vault secret document, while the runtime host determines
+which credential fields from that document are injected into the adaptor config.
 - logical instance id
 - venue/account identity from enriched runtime config
 

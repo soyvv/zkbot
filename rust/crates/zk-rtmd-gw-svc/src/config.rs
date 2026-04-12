@@ -192,7 +192,10 @@ impl ServiceBootstrap for MdgwService {
             grpc_host: bootstrap.grpc_host.clone(),
             venue: provided.venue,
             venue_config: provided.venue_config,
-            venue_root: provided.venue_root,
+            venue_root: provided
+                .venue_root
+                .filter(|s| !s.is_empty())
+                .or_else(|| std::env::var("ZK_VENUE_ROOT").ok()),
             gateway_kv_prefix: provided.gateway_kv_prefix,
             rtmd_sub_bucket: provided.rtmd_sub_bucket,
             sub_lease_ttl_s: provided.sub_lease_ttl_s,

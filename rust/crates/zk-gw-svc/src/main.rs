@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bootstrap_runtime_config::<GwBootstrap>(&bootstrap, mode)
             .expect("config assembly failed");
 
-    let runtime_cfg = &outcome.runtime_config;
+    let mut runtime_cfg = outcome.runtime_config;
     info!(
         gw_id = runtime_cfg.gw_id,
         venue = runtime_cfg.venue,
@@ -95,6 +95,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         source = ?outcome.source,
         "runtime config assembled"
     );
+
+    // ── 5b. Resolve venue config secrets (Python venues) ────────────────
+    // Read secret_ref from venue_config → fetch whole Vault document →
+    // project allowed keys into venue_config. Venue-specific mapping lives
+    // here, NOT in zk-infra-rs.
+    #[cfg(feature = "python-venue")]
+    if let Some(ref venue_root) = runtime_cfg.venue_root {
+        let root = std::path::PathBuf::from(venue_root);
+        if let Ok(manifest) = zk_pyo3_bridge::manifest::load_manifest(&root, &runtime_cfg.venue) {
+            if let Ok(cap) =
+                zk_pyo3_bridge::manifest::resolve_capability(&manifest, zk_pyo3_bridge::manifest::CAP_GW)
+            {
+                let secret_paths = zk_pyo3_bridge::manifest::secret_ref_paths(cap);
+                if !secret_paths.is_empty() {
+                    let resolver: Box<dyn zk_infra_rs::vault::SecretResolver> =
+                        if let Some(identity) = zk_infra_rs::vault::VaultIdentity::from_env() {
+                            Box::new(
+                                zk_infra_rs::vault::VaultSecretResolver::login(&identity)
+                                    .await
+                                    .expect("Vault login failed"),
+                            )
+                        } else {
+                            Box::new(zk_infra_rs::vault::DevSecretResolver::new())
+                        };
+
+                    // For each secret_ref pointer, fetch the Vault doc and
+                    // project venue-appropriate fields into venue_config.
+                    for pointer in &secret_paths {
+                        if let Some(vault_path) =
+                            zk_infra_rs::vault::extract_secret_ref(&runtime_cfg.venue_config, pointer)
+                        {
+                            let doc = resolver
+                                .read_document(&vault_path)
+                                .await
+                                .expect("failed to read secret document from Vault");
+
+                            // Host-side projection: map Vault keys → adaptor config keys.
+                            // OANDA: Vault field "apikey" → adaptor config "token"
+                            let projections: &[(&str, &str)] = match runtime_cfg.venue.as_str() {
+                                "oanda" => &[("apikey", "token")],
+                                _ => &[],
+                            };
+                            let obj = runtime_cfg
+                                .venue_config
+                                .as_object_mut()
+                                .expect("venue_config must be a JSON object");
+                            for &(vault_key, config_key) in projections {
+                                if let Some(val) = doc.get(vault_key) {
+                                    obj.insert(
+                                        config_key.into(),
+                                        serde_json::Value::String(val.clone()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    info!("venue config secrets resolved");
+                }
+            }
+        }
+    }
 
     // ── Gateway state ────────────────────────────────────────────────────
     let gw_state = Arc::new(Mutex::new(GatewayState::Starting));
@@ -125,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut registration: Option<ServiceRegistration> = None;
 
     // ── 8. Build venue adapter via factory ───────────────────────────────
-    let built = zk_gw_svc::venue::build_adapter(runtime_cfg).await?;
+    let built = zk_gw_svc::venue::build_adapter(&runtime_cfg).await?;
     let adapter = built.adapter;
 
     // Connect adapter.

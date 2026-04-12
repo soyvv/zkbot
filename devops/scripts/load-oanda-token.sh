@@ -13,3 +13,7 @@ fi
 export ZK_OANDA_TOKEN
 ZK_OANDA_TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
 echo "Loaded OANDA token (${#ZK_OANDA_TOKEN} chars)"
+
+# DevSecretResolver fallback for host-level secret resolution.
+# Maps Vault path kv/trading/gw/8003 + field "apikey" to env var.
+export ZK_SECRET_KV_TRADING_GW_8003_APIKEY="$ZK_OANDA_TOKEN"

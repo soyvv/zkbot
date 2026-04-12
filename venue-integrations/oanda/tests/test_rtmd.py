@@ -72,7 +72,7 @@ class TestSubscribeUnsubscribe:
         spec = _make_subscribe_spec("EUR_USD", "kline", interval="1m")
         await adaptor.subscribe(spec)
 
-        assert ("EUR_USD", "kline") in adaptor._active_subs
+        assert ("EUR_USD", "kline:1m") in adaptor._active_subs
         assert ("EUR_USD", "M1") in adaptor._kline_tasks
         task = adaptor._kline_tasks[("EUR_USD", "M1")]
         task.cancel()

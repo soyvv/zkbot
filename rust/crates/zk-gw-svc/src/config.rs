@@ -289,7 +289,10 @@ impl ServiceBootstrap for GwBootstrap {
             account_id: provided.account_id,
             exch_account_id: provided.exch_account_id,
             venue_config: provided.venue_config,
-            venue_root: provided.venue_root,
+            venue_root: provided
+                .venue_root
+                .filter(|s| !s.is_empty())
+                .or_else(|| std::env::var("ZK_VENUE_ROOT").ok()),
             exec_shard_count: provided.exec_shard_count,
             exec_queue_capacity: provided.exec_queue_capacity,
             simulator,

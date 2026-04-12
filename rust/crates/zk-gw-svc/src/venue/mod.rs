@@ -107,7 +107,7 @@ pub async fn build_adapter(cfg: &GwRuntimeConfig) -> anyhow::Result<BuiltVenue> 
             "ibkr venue requires manifest-driven loading: set ZK_VENUE_ROOT to the venue-integrations directory"
         )),
         "oanda" => Err(anyhow::anyhow!(
-            "venue adaptor placeholder exists for oanda but implementation is not wired yet"
+            "oanda requires manifest-driven Python loading: set ZK_VENUE_ROOT and build with --features python-venue"
         )),
         other => Err(anyhow::anyhow!("unsupported venue: {other}")),
     }

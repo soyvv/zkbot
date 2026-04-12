@@ -104,8 +104,8 @@ public class AccountService {
             return resp.getBalancesList().stream()
                     .map(b -> new BalanceEntry(b.getAsset(), b.getTotalQty(), b.getFrozenQty(), b.getAvailQty()))
                     .toList();
-        } catch (io.grpc.StatusRuntimeException e) {
-            log.warn("OMS query balances failed for account {} ({}): {}", accountId, omsId, e.getStatus());
+        } catch (io.grpc.StatusRuntimeException | IllegalStateException e) {
+            log.warn("OMS query balances failed for account {} ({}): {}", accountId, omsId, e.getMessage());
             return List.of();
         }
     }
@@ -129,8 +129,8 @@ public class AccountService {
                             shortLongShort(p.getLongShortType()),
                             p.getTotalQty(), p.getFrozenQty(), p.getAvailQty()))
                     .toList();
-        } catch (io.grpc.StatusRuntimeException e) {
-            log.warn("OMS query positions failed for account {} ({}): {}", accountId, omsId, e.getStatus());
+        } catch (io.grpc.StatusRuntimeException | IllegalStateException e) {
+            log.warn("OMS query positions failed for account {} ({}): {}", accountId, omsId, e.getMessage());
             return List.of();
         }
     }
@@ -157,8 +157,8 @@ public class AccountService {
                         o.getCreatedAt(), o.getUpdatedAt()));
             }
             return orders;
-        } catch (io.grpc.StatusRuntimeException e) {
-            log.warn("OMS query open orders failed for account {} ({}): {}", accountId, omsId, e.getStatus());
+        } catch (io.grpc.StatusRuntimeException | IllegalStateException e) {
+            log.warn("OMS query open orders failed for account {} ({}): {}", accountId, omsId, e.getMessage());
             return List.of();
         }
     }

@@ -4,6 +4,7 @@
         oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-run-release oms-redis-clear \
         gw-check gw-build gw-test gw-run gw-okx-demo gw-okx-demo-pilot \
         rtmd-sim-run rtmd-okx-demo rtmd-okx-demo-pilot \
+        oanda-venv gw-oanda-demo gw-oanda-demo-pilot rtmd-oanda-demo rtmd-oanda-demo-pilot \
         refdata-run pilot-run engine-run \
         pilot-java-build pilot-java-test pilot-java-run \
         oms-run-pilot gw-run-pilot \
@@ -253,6 +254,90 @@ rtmd-okx-demo-pilot: ## Run OKX RTMD gateway with Pilot bootstrap (requires: mak
 	           ZK_ENV=dev \
 	           RUST_LOG=zk_rtmd_gw_svc=debug,zk_rtmd_rs=debug,zk_venue_okx=debug,zk_infra_rs=debug,info \
 	           cargo run --release -p zk-rtmd-gw-svc'
+
+# ── OANDA venue venv ─────────────────────────────────────────────────────────
+# The venv and PYTHONHOME must use the same Python that PyO3 links against.
+# Use pyenv 3.11 explicitly to avoid VIRTUAL_ENV/CONDA_PREFIX conflicts.
+PYO3_PYTHON_BIN  := $(HOME)/.pyenv/versions/3.11.5/bin/python3
+PYO3_PYTHON_HOME := $(HOME)/.pyenv/versions/3.11.5
+oanda-venv: ## Create/update OANDA Python venv
+	cd venue-integrations/oanda && uv venv .venv --python $(PYO3_PYTHON_BIN) && \
+	uv pip install -e ".[dev]" --python .venv/bin/python \
+	$(if $(ZK_PYPI_EXTRA_INDEX),--extra-index-url $(ZK_PYPI_EXTRA_INDEX),)
+
+# ── OANDA gateway service ───────────────────────────────────────────────────
+gw-oanda-demo: oanda-venv ## Run OANDA gateway (practice, direct mode)
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh gw-oanda-demo \
+	  bash -c 'source devops/scripts/load-oanda-token.sh && \
+	  cd rust && \
+	  unset VIRTUAL_ENV CONDA_PREFIX && \
+	  PYO3_PYTHON=$(PYO3_PYTHON_BIN) \
+	  PYTHONHOME=$(PYO3_PYTHON_HOME) \
+	  ZK_GW_ID=gw_oanda_demo \
+	  ZK_VENUE=oanda \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_ACCOUNT_ID=8003 \
+	  ZK_EXCH_ACCOUNT_ID=101-003-26138765-001 \
+	  ZK_GRPC_PORT=51055 \
+	  ZK_VENUE_ROOT=$(CURDIR)/venue-integrations \
+	  ZK_VENUE_CONFIG='"'"'{"environment":"practice","account_id":"101-003-26138765-001","secret_ref":"kv/trading/gw/8003"}'"'"' \
+	  RUST_LOG=zk_gw_svc=debug,zk_pyo3_bridge=info,warn \
+	  cargo run --release -p zk-gw-svc --features python-venue'
+
+gw-oanda-demo-pilot: oanda-venv ## Run OANDA gateway with Pilot bootstrap
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh gw-oanda-demo-pilot \
+	  bash -c 'cd rust && \
+	  unset VIRTUAL_ENV CONDA_PREFIX && \
+	  PYO3_PYTHON=$(PYO3_PYTHON_BIN) \
+	  PYTHONHOME=$(PYO3_PYTHON_HOME) \
+	  ZK_GW_ID=gw_oanda_demo1 \
+	  ZK_VENUE=oanda \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_GRPC_PORT=51055 \
+	  ZK_VENUE_ROOT=$(CURDIR)/venue-integrations \
+	  VAULT_ADDR=http://localhost:8200 \
+	  VAULT_TOKEN=dev-root-token \
+	  ZK_BOOTSTRAP_TOKEN=$(ZK_OANDA_GW_BOOTSTRAP_TOKEN) \
+	  ZK_INSTANCE_TYPE=GW \
+	  ZK_ENV=dev \
+	  RUST_LOG=zk_gw_svc=debug,zk_pyo3_bridge=info,zk_infra_rs=debug,warn \
+	  cargo run --release -p zk-gw-svc --features python-venue'
+
+# ── OANDA RTMD gateway service ──────────────────────────────────────────────
+rtmd-oanda-demo: oanda-venv ## Run OANDA RTMD gateway (practice, direct mode)
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh rtmd-oanda-demo \
+	  bash -c 'source devops/scripts/load-oanda-token.sh && \
+	  cd rust && \
+	  unset VIRTUAL_ENV CONDA_PREFIX && \
+	  PYO3_PYTHON=$(PYO3_PYTHON_BIN) \
+	  PYTHONHOME=$(PYO3_PYTHON_HOME) \
+	  ZK_MDGW_ID=mdgw_oanda_demo \
+	  ZK_VENUE=oanda \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_GRPC_PORT=52055 \
+	  ZK_VENUE_ROOT=$(CURDIR)/venue-integrations \
+	  ZK_VENUE_CONFIG='"'"'{"environment":"practice","account_id":"101-003-26138765-001","secret_ref":"kv/trading/gw/8003"}'"'"' \
+	  RUST_LOG=zk_rtmd_gw_svc=debug,zk_pyo3_bridge=info,warn \
+	  cargo run --release -p zk-rtmd-gw-svc --features python-venue'
+
+rtmd-oanda-demo-pilot: oanda-venv ## Run OANDA RTMD gateway with Pilot bootstrap
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh rtmd-oanda-demo-pilot \
+	  bash -c 'cd rust && \
+	  unset VIRTUAL_ENV CONDA_PREFIX && \
+	  PYO3_PYTHON=$(PYO3_PYTHON_BIN) \
+	  PYTHONHOME=$(PYO3_PYTHON_HOME) \
+	  ZK_MDGW_ID=mdgw_oanda_demo1 \
+	  ZK_VENUE=oanda \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_GRPC_PORT=52055 \
+	  ZK_VENUE_ROOT=$(CURDIR)/venue-integrations \
+	  VAULT_ADDR=http://localhost:8200 \
+	  VAULT_TOKEN=dev-root-token \
+	  ZK_BOOTSTRAP_TOKEN=$(ZK_OANDA_MDGW_BOOTSTRAP_TOKEN) \
+	  ZK_INSTANCE_TYPE=MDGW \
+	  ZK_ENV=dev \
+	  RUST_LOG=zk_rtmd_gw_svc=debug,zk_pyo3_bridge=info,zk_infra_rs=debug,warn \
+	  cargo run --release -p zk-rtmd-gw-svc --features python-venue'
 
 # ── Refdata service ───────────────────────────────────────────────────────────
 refdata-run: ## Run refdata-svc locally (requires NATS+PG: make dev-up)

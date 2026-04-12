@@ -93,6 +93,55 @@ impl PyRuntime {
         let event_loop = Arc::new(PyEventLoop::start()?);
 
         Python::with_gil(|py| {
+            // ── Venv site-packages discovery ────────────────────────────────
+            // Ensures venue-local Python deps are importable before loading
+            // the adaptor module. Checks ZK_VENUE_VENV override first, then
+            // falls back to {venue_root}/{venue}/.venv/.
+            if let Some(v) = venue {
+                let sys = py.import_bound("sys").map_err(|e| {
+                    PyBridgeError::PythonImport(format!("failed to import sys: {e}"))
+                })?;
+                let sys_path = sys.getattr("path").map_err(|e| {
+                    PyBridgeError::PythonImport(format!("failed to get sys.path: {e}"))
+                })?;
+                let path: &Bound<'_, PyList> = sys_path.downcast::<PyList>().map_err(|e| {
+                    PyBridgeError::PythonImport(format!("sys.path is not a list: {e}"))
+                })?;
+
+                let venue_root_str: String = path.get_item(0)
+                    .map_err(|e| PyBridgeError::PythonImport(format!("sys.path empty: {e}")))?
+                    .extract()
+                    .map_err(|e| PyBridgeError::PythonImport(format!("sys.path[0] not str: {e}")))?;
+
+                let venv_base = if let Ok(override_path) = std::env::var("ZK_VENUE_VENV") {
+                    std::path::PathBuf::from(override_path)
+                } else {
+                    std::path::PathBuf::from(&venue_root_str).join(v).join(".venv")
+                };
+
+                if venv_base.is_dir() {
+                    let lib_dir = venv_base.join("lib");
+                    if let Ok(entries) = std::fs::read_dir(&lib_dir) {
+                        for entry in entries.flatten() {
+                            let sp = entry.path().join("site-packages");
+                            if sp.is_dir() {
+                                // Use site.addsitedir() so .pth files are processed
+                                // (editable installs rely on .pth for path injection).
+                                let sp_str = sp.to_string_lossy().to_string();
+                                let site = py.import_bound("site").map_err(|e| {
+                                    PyBridgeError::PythonImport(format!("failed to import site: {e}"))
+                                })?;
+                                site.call_method1("addsitedir", (&sp_str,)).map_err(|e| {
+                                    PyBridgeError::PythonImport(format!("site.addsitedir failed: {e}"))
+                                })?;
+                                tracing::debug!(site_packages = %sp_str, "added venv site-packages via site.addsitedir()");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
             // Resolve the import path based on the venue's directory layout.
             let import_path = if let Some(v) = venue {
                 let sys = py.import_bound("sys").map_err(|e| {
