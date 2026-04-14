@@ -29,7 +29,7 @@ use crate::control_api::ControlApiState;
 use crate::dispatcher::TradingDispatcher;
 use crate::proto::engine_svc::engine_service_server::{EngineService, EngineServiceServer};
 use crate::query_api::QueryApiState;
-use crate::supervision::{self, ShutdownReason};
+use crate::supervision;
 
 use zk_proto_rs::zk::common::v1::{CommandAck, DummyRequest, ServiceHealthResponse};
 use zk_proto_rs::zk::engine::v1::{
@@ -306,7 +306,7 @@ pub async fn run(
 
     // ── 12. Supervise — wait for shutdown trigger ────────────────────────
     info!("zk-engine-svc running — press Ctrl-C to stop");
-    let reason = supervision::wait_for_shutdown(&mut registration).await;
+    let reason = registration.wait_shutdown().await;
 
     // ── 13. Graceful shutdown ────────────────────────────────────────────
     info!("initiating graceful shutdown");
@@ -333,14 +333,11 @@ pub async fn run(
     let _ = engine_handle.await;
 
     // Deregister from KV only on clean shutdown (not when fenced).
-    match reason {
-        ShutdownReason::Signal => {
-            registration.deregister().await.ok();
-            info!("deregistered from NATS KV");
-        }
-        ShutdownReason::Fenced => {
-            warn!("skipping KV deregister — fenced by another instance");
-        }
+    if !reason.is_fenced() {
+        registration.deregister().await.ok();
+        info!("deregistered from NATS KV");
+    } else {
+        warn!("skipping KV deregister — fenced by another instance");
     }
 
     info!("zk-engine-svc stopped");

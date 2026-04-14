@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time as _time
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -40,12 +41,18 @@ class OandaTransactionStream:
         self._event_queue = event_queue
         self._emit_order_event = emit_order_event
         self._last_transaction_id: str | None = None
+        self._last_activity: float = 0.0
         self._running = True
         self._connected_event = asyncio.Event()
 
     @property
     def last_transaction_id(self) -> str | None:
         return self._last_transaction_id
+
+    @property
+    def last_activity(self) -> float:
+        """Monotonic timestamp of last received stream data (including heartbeats)."""
+        return self._last_activity
 
     async def wait_connected(self, timeout: float = 15.0) -> bool:
         """Wait for the stream to establish its first connection.
@@ -114,6 +121,7 @@ class OandaTransactionStream:
                 async for line in response.aiter_lines():
                     if not line.strip():
                         continue
+                    self._last_activity = _time.monotonic()
                     try:
                         data = json.loads(line)
                     except json.JSONDecodeError:

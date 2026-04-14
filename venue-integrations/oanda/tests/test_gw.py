@@ -177,6 +177,8 @@ class TestOandaGatewayAdaptor:
         short_fact = [f for f in facts if f["long_short_type"] == 2][0]
         assert long_fact["qty"] == 1000.0
         assert short_fact["qty"] == 500.0
+        assert long_fact["instrument_type"] == 4  # CFD
+        assert short_fact["instrument_type"] == 4
 
     @pytest.mark.asyncio
     async def test_query_funding_fees_returns_empty(self, adaptor_config):

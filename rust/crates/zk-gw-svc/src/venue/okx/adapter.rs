@@ -38,32 +38,17 @@ fn okx_pos_side(req: &VenuePlaceOrder) -> Option<&'static str> {
         return None;
     }
 
-    match (
-        req.buysell_type,
-        req.openclose_type,
-    ) {
-        (x, y)
-            if x == BuySellType::BsBuy as i32
-                && y == OpenCloseType::OcOpen as i32 =>
-        {
+    match (req.buysell_type, req.openclose_type) {
+        (x, y) if x == BuySellType::BsBuy as i32 && y == OpenCloseType::OcOpen as i32 => {
             Some("long")
         }
-        (x, y)
-            if x == BuySellType::BsSell as i32
-                && y == OpenCloseType::OcClose as i32 =>
-        {
+        (x, y) if x == BuySellType::BsSell as i32 && y == OpenCloseType::OcClose as i32 => {
             Some("long")
         }
-        (x, y)
-            if x == BuySellType::BsSell as i32
-                && y == OpenCloseType::OcOpen as i32 =>
-        {
+        (x, y) if x == BuySellType::BsSell as i32 && y == OpenCloseType::OcOpen as i32 => {
             Some("short")
         }
-        (x, y)
-            if x == BuySellType::BsBuy as i32
-                && y == OpenCloseType::OcClose as i32 =>
-        {
+        (x, y) if x == BuySellType::BsBuy as i32 && y == OpenCloseType::OcClose as i32 => {
             Some("short")
         }
         _ => None,
@@ -128,6 +113,7 @@ impl OkxVenueAdapter {
                                 avail_qty: f.avail_qty,
                                 frozen_qty: 0.0,
                                 account_id,
+                                instrument_type: 0,
                             })
                             .collect(),
                     ),
@@ -524,6 +510,7 @@ impl VenueAdapter for OkxVenueAdapter {
                     avail_qty: f.avail_qty,
                     frozen_qty: 0.0,
                     account_id: self.account_id,
+                    instrument_type: 0,
                 }
             })
             .collect())

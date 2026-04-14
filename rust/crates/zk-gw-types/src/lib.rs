@@ -162,6 +162,10 @@ pub struct VenuePositionFact {
     pub avail_qty: f64,
     pub frozen_qty: f64,
     pub account_id: i64,
+    /// Venue-authoritative instrument type (proto `InstrumentType` i32).
+    /// When non-zero, the gateway host uses this instead of string heuristics.
+    #[serde(default)]
+    pub instrument_type: i32,
 }
 
 /// A system event from the venue (connectivity changes, etc.).
@@ -256,4 +260,11 @@ pub trait VenueAdapter: Send + Sync {
     /// Receive the next venue event (order report, balance, position, system).
     /// Blocks until an event is available.
     async fn next_event(&self) -> anyhow::Result<VenueEvent>;
+
+    /// Gracefully shut down the adapter: cancel background tasks, close
+    /// connections, and release resources. Called by the gateway host before
+    /// process exit. The default implementation is a no-op.
+    async fn shutdown(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }

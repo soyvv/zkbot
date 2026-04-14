@@ -43,6 +43,7 @@
 //! # }
 //! ```
 
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -51,13 +52,31 @@ use bytes::Bytes;
 use prost::Message;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::bootstrap::{PilotPayload, PilotRegistration};
 use crate::nats_kv::{KvRegistryClient, REGISTRY_BUCKET};
 use zk_proto_rs::zk::pilot::v1::{
     BootstrapDeregisterRequest, BootstrapRegisterRequest, BootstrapRegisterResponse,
 };
+
+const PILOT_DUPLICATE_RETRY_DELAY: Duration = Duration::from_secs(2);
+const PILOT_DUPLICATE_RETRY_WINDOW: Duration = Duration::from_secs(50);
+
+fn duplicate_retry_delay(
+    status: &str,
+    now: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+) -> Option<Duration> {
+    if status != "DUPLICATE" || now >= deadline {
+        return None;
+    }
+
+    Some(std::cmp::min(
+        PILOT_DUPLICATE_RETRY_DELAY,
+        deadline.saturating_duration_since(now),
+    ))
+}
 
 // ── Pilot bootstrap grant (split-phase) ─────────────────────────────────────
 
@@ -202,39 +221,57 @@ impl ServiceRegistration {
             env: env.to_string(),
             runtime_info,
         };
-
         let payload = Bytes::from(req.encode_to_vec());
-        let reply = nats
-            .request("zk.bootstrap.register", payload)
-            .await
-            .map_err(|e| RegistrationError::Nats(e.into()))?;
+        let deadline = tokio::time::Instant::now() + PILOT_DUPLICATE_RETRY_WINDOW;
 
-        let resp = BootstrapRegisterResponse::decode(reply.payload.as_ref())
-            .map_err(|e| RegistrationError::Proto(e.to_string()))?;
+        loop {
+            let reply = nats
+                .request("zk.bootstrap.register", payload.clone())
+                .await
+                .map_err(|e| RegistrationError::Nats(e.into()))?;
 
-        if resp.status != "OK" {
+            let resp = BootstrapRegisterResponse::decode(reply.payload.as_ref())
+                .map_err(|e| RegistrationError::Proto(e.to_string()))?;
+
+            if resp.status == "OK" {
+                let pilot_payload = PilotPayload {
+                    runtime_config_json: resp.runtime_config,
+                    config_metadata: resp.config_metadata,
+                    secret_refs: resp.secret_refs,
+                    server_time_ms: resp.server_time_ms,
+                };
+
+                return Ok(PilotBootstrapGrant {
+                    kv_key: resp.kv_key,
+                    lock_key: resp.lock_key,
+                    lease_ttl_ms: resp.lease_ttl_ms as u64,
+                    owner_session_id: resp.owner_session_id,
+                    scoped_credential: resp.scoped_credential,
+                    instance_id: resp.instance_id,
+                    payload: pilot_payload,
+                });
+            }
+
+            let now = tokio::time::Instant::now();
+            if let Some(delay) = duplicate_retry_delay(&resp.status, now, deadline) {
+                warn!(
+                    logical_id,
+                    instance_type,
+                    env,
+                    retry_in_ms = delay.as_millis() as u64,
+                    deadline_in_ms = deadline.saturating_duration_since(now).as_millis() as u64,
+                    error = %resp.error_message,
+                    "Pilot reported duplicate live session during bootstrap; retrying"
+                );
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+
             return Err(RegistrationError::Pilot {
                 status: resp.status,
                 message: resp.error_message,
             });
         }
-
-        let pilot_payload = PilotPayload {
-            runtime_config_json: resp.runtime_config,
-            config_metadata: resp.config_metadata,
-            secret_refs: resp.secret_refs,
-            server_time_ms: resp.server_time_ms,
-        };
-
-        Ok(PilotBootstrapGrant {
-            kv_key: resp.kv_key,
-            lock_key: resp.lock_key,
-            lease_ttl_ms: resp.lease_ttl_ms as u64,
-            owner_session_id: resp.owner_session_id,
-            scoped_credential: resp.scoped_credential,
-            instance_id: resp.instance_id,
-            payload: pilot_payload,
-        })
     }
 
     /// Phase 2 of split-phase Pilot registration: write KV entry and start heartbeat.
@@ -354,6 +391,64 @@ impl ServiceRegistration {
 
     // ── Deregister ───────────────────────────────────────────────────────────
 
+    // ── Shutdown ─────────────────────────────────────────────────────────
+
+    /// Wait for a termination signal (SIGINT, SIGTERM, SIGHUP) or KV fencing.
+    ///
+    /// Returns the reason for shutdown. Does **not** call [`deregister`](Self::deregister) —
+    /// the caller controls when to remove the service from discovery, allowing
+    /// internal task drain before deregistration.
+    ///
+    /// # Crash fallback
+    /// SIGKILL and abnormal crashes bypass signal handlers entirely. The KV
+    /// entry expires via its TTL and Pilot's KvReconciler cleans up the stale
+    /// session. This is by design.
+    pub async fn wait_shutdown(&mut self) -> ShutdownReason {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+            let mut sighup =
+                signal(SignalKind::hangup()).expect("failed to register SIGHUP handler");
+
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("received SIGINT");
+                    ShutdownReason::Signal(ShutdownSignal::SigInt)
+                }
+                _ = sigterm.recv() => {
+                    info!("received SIGTERM");
+                    ShutdownReason::Signal(ShutdownSignal::SigTerm)
+                }
+                _ = sighup.recv() => {
+                    info!("received SIGHUP");
+                    ShutdownReason::Signal(ShutdownSignal::SigHup)
+                }
+                _ = self.wait_fenced() => {
+                    warn!("KV fencing detected — another instance owns this identity");
+                    ShutdownReason::Fenced
+                }
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("received SIGINT");
+                    ShutdownReason::Signal(ShutdownSignal::SigInt)
+                }
+                _ = self.wait_fenced() => {
+                    warn!("KV fencing detected — another instance owns this identity");
+                    ShutdownReason::Fenced
+                }
+            }
+        }
+    }
+
+    // ── Deregister ───────────────────────────────────────────────────────────
+
     /// Delete the KV entry and, if registered via Pilot, notify Pilot to release
     /// the session. Call before process exit for a clean shutdown.
     pub async fn deregister(&self) -> Result<(), async_nats::Error> {
@@ -377,9 +472,73 @@ impl ServiceRegistration {
     }
 }
 
+// ── Shutdown reason ──────────────────────────────────────────────────────────
+
+/// OS signal that triggered shutdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShutdownSignal {
+    SigInt,
+    SigTerm,
+    SigHup,
+}
+
+/// Reason a registered service is shutting down.
+///
+/// Returned by [`ServiceRegistration::wait_shutdown`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShutdownReason {
+    /// Clean shutdown requested via an OS signal.
+    Signal(ShutdownSignal),
+    /// CAS heartbeat detected a conflicting writer (fenced by another instance).
+    Fenced,
+}
+
+impl ShutdownReason {
+    /// Returns `true` if the shutdown was caused by KV fencing.
+    pub fn is_fenced(self) -> bool {
+        matches!(self, Self::Fenced)
+    }
+}
+
+impl fmt::Display for ShutdownReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Signal(ShutdownSignal::SigInt) => write!(f, "SIGINT"),
+            Self::Signal(ShutdownSignal::SigTerm) => write!(f, "SIGTERM"),
+            Self::Signal(ShutdownSignal::SigHup) => write!(f, "SIGHUP"),
+            Self::Fenced => write!(f, "fenced"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
     use tokio::sync::watch;
+
+    #[test]
+    fn duplicate_retry_delay_only_retries_duplicate_before_deadline() {
+        let now = tokio::time::Instant::now();
+        let deadline = now + Duration::from_secs(5);
+
+        assert_eq!(
+            duplicate_retry_delay("DUPLICATE", now, deadline),
+            Some(PILOT_DUPLICATE_RETRY_DELAY)
+        );
+        assert_eq!(duplicate_retry_delay("ERROR", now, deadline), None);
+        assert_eq!(duplicate_retry_delay("DUPLICATE", deadline, deadline), None);
+    }
+
+    #[test]
+    fn duplicate_retry_delay_caps_sleep_at_remaining_window() {
+        let now = tokio::time::Instant::now();
+        let deadline = now + Duration::from_millis(750);
+
+        assert_eq!(
+            duplicate_retry_delay("DUPLICATE", now, deadline),
+            Some(Duration::from_millis(750))
+        );
+    }
 
     #[tokio::test]
     async fn wait_fenced_returns_when_signal_is_sent() {
@@ -395,6 +554,43 @@ mod tests {
             }
         }
         assert!(*rx.borrow(), "receiver should see true after sender fires");
+    }
+
+    #[test]
+    fn shutdown_reason_is_fenced() {
+        assert!(ShutdownReason::Fenced.is_fenced());
+        assert!(!ShutdownReason::Signal(ShutdownSignal::SigInt).is_fenced());
+        assert!(!ShutdownReason::Signal(ShutdownSignal::SigTerm).is_fenced());
+        assert!(!ShutdownReason::Signal(ShutdownSignal::SigHup).is_fenced());
+    }
+
+    #[test]
+    fn shutdown_reason_display() {
+        assert_eq!(
+            ShutdownReason::Signal(ShutdownSignal::SigInt).to_string(),
+            "SIGINT"
+        );
+        assert_eq!(
+            ShutdownReason::Signal(ShutdownSignal::SigTerm).to_string(),
+            "SIGTERM"
+        );
+        assert_eq!(
+            ShutdownReason::Signal(ShutdownSignal::SigHup).to_string(),
+            "SIGHUP"
+        );
+        assert_eq!(ShutdownReason::Fenced.to_string(), "fenced");
+    }
+
+    #[test]
+    fn shutdown_reason_equality() {
+        assert_eq!(
+            ShutdownReason::Signal(ShutdownSignal::SigTerm),
+            ShutdownReason::Signal(ShutdownSignal::SigTerm)
+        );
+        assert_ne!(
+            ShutdownReason::Signal(ShutdownSignal::SigInt),
+            ShutdownReason::Fenced
+        );
     }
 }
 

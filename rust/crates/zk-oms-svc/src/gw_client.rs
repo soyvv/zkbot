@@ -46,8 +46,7 @@ impl GwClientPool {
         gw_key: String,
         addr: &str,
     ) -> Result<(), tonic::transport::Error> {
-        let endpoint = Endpoint::from_shared(addr.to_string())
-            ?
+        let endpoint = Endpoint::from_shared(addr.to_string())?
             .connect_timeout(Duration::from_secs(5))
             .tcp_keepalive(Some(Duration::from_secs(30)));
 

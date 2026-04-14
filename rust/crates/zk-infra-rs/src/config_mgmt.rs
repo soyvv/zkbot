@@ -88,10 +88,8 @@ pub fn normalize_json(value: &Value) -> String {
 fn sort_keys(value: &Value) -> Value {
     match value {
         Value::Object(map) => {
-            let sorted: BTreeMap<String, Value> = map
-                .iter()
-                .map(|(k, v)| (k.clone(), sort_keys(v)))
-                .collect();
+            let sorted: BTreeMap<String, Value> =
+                map.iter().map(|(k, v)| (k.clone(), sort_keys(v))).collect();
             Value::Object(sorted.into_iter().collect())
         }
         Value::Array(arr) => Value::Array(arr.iter().map(sort_keys).collect()),
@@ -369,7 +367,10 @@ mod tests {
             is_secret_ref: false,
             is_resolved_secret: false,
         }];
-        assert_eq!(classify_drift(&diffs, &descriptors), DriftStatus::Reloadable);
+        assert_eq!(
+            classify_drift(&diffs, &descriptors),
+            DriftStatus::Reloadable
+        );
     }
 
     #[test]
@@ -417,9 +418,6 @@ mod tests {
             old_value: Some(json!(1)),
             new_value: Some(json!(2)),
         }];
-        assert_eq!(
-            classify_drift(&diffs, &[]),
-            DriftStatus::RestartRequired
-        );
+        assert_eq!(classify_drift(&diffs, &[]), DriftStatus::RestartRequired);
     }
 }

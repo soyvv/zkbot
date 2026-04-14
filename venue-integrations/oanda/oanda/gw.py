@@ -15,6 +15,7 @@ Bridge constraints:
 from __future__ import annotations
 
 import asyncio
+import time as _time
 from collections import OrderedDict
 
 from loguru import logger
@@ -35,6 +36,8 @@ _STREAM_URLS = {
 _QUERY_AFTER_ACTION_DELAY = 0.5
 _RECONCILE_INTERVAL = 30.0
 _MAX_SEEN_TXNS = 10_000
+_IDLE_CHECK_INTERVAL = 30.0
+_STREAM_STALE_THRESHOLD = 120.0  # seconds without any stream data (including heartbeats)
 
 
 class OandaGatewayAdaptor:
@@ -103,6 +106,28 @@ class OandaGatewayAdaptor:
             self._periodic_reconcile(), name="oanda-reconcile"
         )
         self._connected = True
+
+        # Emit initial balance snapshot so OMS has balances immediately.
+        balance = float(acct.get("balance", 0))
+        if balance > 0:
+            await self._event_queue.put({
+                "event_type": "balance",
+                "payload": [{
+                    "asset": acct.get("currency", "USD"),
+                    "total_qty": balance,
+                    "avail_qty": float(acct.get("marginAvailable", 0)),
+                    "frozen_qty": float(acct.get("marginUsed", 0)),
+                }],
+            })
+
+        # Emit initial position snapshot so OMS has positions immediately.
+        positions = await self._client.get_positions()
+        pos_facts = norm.normalize_positions(positions, self._oms_account_id)
+        if pos_facts:
+            await self._event_queue.put({
+                "event_type": "position",
+                "payload": pos_facts,
+            })
 
     async def shutdown(self) -> None:
         if self._stream:
@@ -261,9 +286,75 @@ class OandaGatewayAdaptor:
         return norm.normalize_positions(resp, self._oms_account_id)
 
     async def next_event(self) -> dict:
-        return await self._event_queue.get()
+        while True:
+            try:
+                return await asyncio.wait_for(
+                    self._event_queue.get(), timeout=_IDLE_CHECK_INTERVAL
+                )
+            except asyncio.TimeoutError:
+                await self._check_stream_health()
+                continue
 
     # ── internal ─────────────────────────────────────────────────────────────
+
+    async def _check_stream_health(self) -> None:
+        """Periodic health check during idle periods.
+
+        Health is defined by observed activity (last heartbeat/data timestamp),
+        not just task liveness — the stream task stays alive during reconnect
+        backoff even when disconnected.
+        """
+        # 1. Task completely dead — restart with fresh stream object.
+        if self._stream_task and self._stream_task.done():
+            exc = self._stream_task.exception() if not self._stream_task.cancelled() else None
+            logger.warning(f"stream task exited unexpectedly: {exc}, restarting")
+            await self._restart_stream()
+            return
+
+        # 2. Task alive but stale — connected but no data flowing.
+        if self._stream and self._stream.last_activity > 0:
+            stale_secs = _time.monotonic() - self._stream.last_activity
+            if stale_secs > _STREAM_STALE_THRESHOLD:
+                logger.warning(
+                    f"stream stale for {stale_secs:.0f}s, restarting with fresh stream"
+                )
+                await self._restart_stream()
+                return
+
+        # 3. Reconcile task health.
+        if self._reconcile_task and self._reconcile_task.done():
+            exc = (
+                self._reconcile_task.exception()
+                if not self._reconcile_task.cancelled()
+                else None
+            )
+            logger.warning(f"reconcile task died: {exc}, restarting")
+            self._reconcile_task = asyncio.create_task(
+                self._periodic_reconcile(), name="oanda-reconcile"
+            )
+
+        logger.debug("idle health check: stream and reconcile healthy")
+
+    async def _restart_stream(self) -> None:
+        """Stop old stream and start a fresh one with clean internal state."""
+        if self._stream:
+            await self._stream.stop()
+        if self._stream_task:
+            self._stream_task.cancel()
+            try:
+                await self._stream_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        self._stream = OandaTransactionStream(
+            stream_base_url=self._stream_base_url,
+            token=self._token,
+            account_id=self._oanda_account_id,
+            event_queue=self._event_queue,
+            emit_order_event=self._emit_order_event,
+        )
+        self._stream_task = asyncio.create_task(self._stream.run(), name="oanda-txn-stream")
+        logger.info("stream restarted with fresh connection")
 
     async def _emit_order_event(self, event: dict, txn: dict) -> None:
         """Emit an order event, deduplicating by OANDA transaction ID.
@@ -358,6 +449,15 @@ class OandaGatewayAdaptor:
                             "avail_qty": float(state.get("marginAvailable", 0)),
                             "frozen_qty": float(state.get("marginUsed", 0)),
                         }],
+                    })
+
+                # Emit position snapshot from venue
+                pos_resp = await self._client.get_positions()
+                pos_facts = norm.normalize_positions(pos_resp, self._oms_account_id)
+                if pos_facts:
+                    await self._event_queue.put({
+                        "event_type": "position",
+                        "payload": pos_facts,
                     })
 
                 # Update stream watermark if response provides it

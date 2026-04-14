@@ -144,6 +144,8 @@ class TestNormalize:
         assert len(facts) == 2  # EUR_USD long + short, GBP_USD skipped
         instruments = {f["instrument"] for f in facts}
         assert instruments == {"EUR_USD"}
+        # All OANDA positions are CFDs (instrument_type=4)
+        assert all(f["instrument_type"] == 4 for f in facts)
 
     def test_normalize_trades(self):
         resp = {

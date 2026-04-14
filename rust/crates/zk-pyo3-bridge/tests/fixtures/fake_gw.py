@@ -52,6 +52,35 @@ class FakeGatewayAdaptor:
     async def next_event(self) -> dict:
         return await self._event_queue.get()
 
+    async def push_event(self, event: dict) -> None:
+        """Test helper: inject an event into the queue."""
+        await self._event_queue.put(event)
+
+
+class IdleTimeoutGatewayAdaptor:
+    """Adaptor whose next_event uses wait_for — matches real adaptor contract.
+
+    Ensures timed-out coroutines complete (raise TimeoutError) so they don't
+    steal events from later retry attempts.
+    """
+
+    def __init__(self, config: dict):
+        self.config = config
+        self._event_queue: asyncio.Queue = asyncio.Queue()
+        self._connected = False
+
+    async def connect(self) -> None:
+        self._connected = True
+
+    async def next_event(self) -> dict:
+        # Short internal timeout — the bridge's 2s timeout will fire after this.
+        # When wait_for times out, the coroutine raises TimeoutError and completes,
+        # preventing zombie queue consumers.
+        return await asyncio.wait_for(self._event_queue.get(), timeout=1.0)
+
+    async def push_event(self, event: dict) -> None:
+        await self._event_queue.put(event)
+
 
 class ErrorGatewayAdaptor:
     """Gateway adaptor that raises errors for testing error mapping."""

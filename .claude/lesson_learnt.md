@@ -63,3 +63,10 @@
 - Spot inventory legitimately appears in both domains: as exchange-owned `Balance` and as derived operational `Position`
 - If the projection boundary is not explicit, code drifts back toward one overloaded balance-like model
 - Keep the rule explicit in code and tests: canonical spot asset state is balance, derived sellable exposure is position
+
+## 2026-04-14: Pilot bootstrap duplicate handling on service restart
+
+### Rust Pilot clients should treat `DUPLICATE` bootstrap as transient for a bounded window
+- Pilot duplicate rejection is correct while the prior KV lease is still present, especially after crash or abrupt session teardown
+- Java Pilot currently learns TTL expiry through a periodic KV sweep, so a restarted service can be rejected for longer than the raw 30s lease
+- The shared Rust bootstrap client should retry `DUPLICATE` for a bounded window rather than panic immediately; this preserves singleton ownership while making restart-after-crash workable

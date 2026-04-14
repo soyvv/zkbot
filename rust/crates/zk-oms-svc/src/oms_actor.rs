@@ -59,7 +59,9 @@ use zk_oms_rs::{
     utils::gen_timestamp_ms,
 };
 use zk_proto_rs::zk::{
-    exch_gw::v1::{BalanceUpdate, OrderReport},
+    common::v1::InstrumentType,
+    exch_gw::v1::{BalanceUpdate, OrderReport, PositionReport},
+    gateway::v1::PositionResponse,
     oms::v1::{
         oms_response, ExecType, OmsErrorType, OmsResponse, OrderCancelRequest, OrderRequest,
         OrderStatus,
@@ -79,6 +81,82 @@ use crate::{
 
 /// Atomic read replica — shared between the writer task and all gRPC query handlers.
 pub type ReadReplica = Arc<ArcSwap<OmsSnapshotV2>>;
+
+// ── Balance/position normalization helpers ──────────────────────────────────
+
+pub fn exch_account_code_for_gw(confdata: &ConfdataManager, gw_key: &str) -> Option<String> {
+    confdata
+        .gw_key_to_account_ids
+        .get(gw_key)
+        .and_then(|account_ids| {
+            account_ids
+                .iter()
+                .find_map(|account_id| confdata.account_routes.get(account_id))
+        })
+        .map(|route| route.exch_account_id.clone())
+}
+
+pub fn normalize_gw_balance_update_for_oms(
+    confdata: &ConfdataManager,
+    gw_key: &str,
+    mut update: BalanceUpdate,
+) -> BalanceUpdate {
+    let fallback_exch_account = exch_account_code_for_gw(confdata, gw_key).unwrap_or_default();
+    for balance in &mut update.balances {
+        if balance.exch_account_code.trim().is_empty() {
+            balance.exch_account_code = fallback_exch_account.clone();
+        }
+    }
+    update
+}
+
+fn infer_gateway_instrument_type(instrument_code: &str) -> i32 {
+    if instrument_code.contains("SWAP") {
+        InstrumentType::InstTypePerp as i32
+    } else if instrument_code.contains("FUTURES")
+        || instrument_code.contains('-') && instrument_code.matches('-').count() >= 2
+    {
+        InstrumentType::InstTypeFuture as i32
+    } else if instrument_code.contains('_') {
+        InstrumentType::InstTypeCfd as i32
+    } else {
+        InstrumentType::InstTypeSpot as i32
+    }
+}
+
+pub fn position_response_to_balance_update_for_oms(
+    confdata: &ConfdataManager,
+    gw_key: &str,
+    response: &PositionResponse,
+) -> BalanceUpdate {
+    let fallback_exch_account = exch_account_code_for_gw(confdata, gw_key).unwrap_or_default();
+    let balances = response
+        .positions
+        .iter()
+        .map(|p| {
+            let exch_account_code = confdata
+                .account_routes
+                .get(&p.account_id)
+                .map(|route| route.exch_account_id.clone())
+                .unwrap_or_else(|| fallback_exch_account.clone());
+
+            PositionReport {
+                instrument_code: p.instrument_code.clone(),
+                instrument_type: if p.instrument_type != 0 {
+                    p.instrument_type
+                } else {
+                    infer_gateway_instrument_type(&p.instrument_code)
+                },
+                long_short_type: p.long_short_type,
+                qty: p.total_qty,
+                avail_qty: p.avail_qty,
+                exch_account_code,
+                ..Default::default()
+            }
+        })
+        .collect();
+    BalanceUpdate { balances }
+}
 
 fn order_status_label(status: i32) -> &'static str {
     OrderStatus::try_from(status)
@@ -254,6 +332,7 @@ pub fn spawn_writer(
     metrics_interval: Duration,
     metrics_max_pending: usize,
     metrics_max_complete: usize,
+    confdata: ConfdataManager,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(oms_writer_loop(
         core,
@@ -272,6 +351,7 @@ pub fn spawn_writer(
         metrics_interval,
         metrics_max_pending,
         metrics_max_complete,
+        confdata,
     ))
 }
 
@@ -293,6 +373,7 @@ async fn oms_writer_loop(
     metrics_interval: Duration,
     metrics_max_pending: usize,
     metrics_max_complete: usize,
+    confdata: ConfdataManager,
 ) {
     info!("OMS writer loop started");
 
@@ -326,7 +407,22 @@ async fn oms_writer_loop(
                     )
                     .await;
                 } else if let OmsCommand::GatewayDiscovered { gw_key, gw_id, addr } = cmd {
-                    run_gateway_discovered(&mut gw_pool, &gw_executor, gw_key, gw_id, addr).await;
+                    let newly_connected = run_gateway_discovered(
+                        &mut gw_pool, &gw_executor, gw_key.clone(), gw_id, addr,
+                    ).await;
+                    if newly_connected {
+                        run_gateway_resync(
+                            &gw_key,
+                            &mut core,
+                            &mut writer,
+                            &replica,
+                            &mut redis,
+                            &mut gw_pool,
+                            &mut persist_executor,
+                            &mut publish_executor,
+                            &confdata,
+                        ).await;
+                    }
                 } else if let OmsCommand::GatewayRemoved { gw_key, gw_id } = cmd {
                     run_gateway_removed(&mut gw_pool, &gw_executor, &gw_key, gw_id);
                 } else {
@@ -380,26 +476,35 @@ async fn oms_writer_loop(
     info!("OMS writer loop exited");
 }
 
+/// Returns `true` if this was a newly connected gateway (first discovery).
 async fn run_gateway_discovered(
     gw_pool: &mut GwClientPool,
     gw_executor: &GwExecutorPool,
     gw_key: String,
     gw_id: u32,
     addr: String,
-) {
+) -> bool {
     if gw_pool.contains(&gw_key) {
         debug!(gw_key, gw_id, addr, "gateway already registered in OMS");
-        return;
+        return false;
     }
 
     match gw_pool.connect(gw_key.clone(), &addr).await {
         Ok(()) => {
             if let Some(client) = gw_pool.get_client(&gw_key) {
                 gw_executor.register_gateway(gw_id, gw_key.clone(), client);
-                info!(gw_key, gw_id, addr, "gateway registered in OMS from discovery");
+                info!(
+                    gw_key,
+                    gw_id, addr, "gateway registered in OMS from discovery"
+                );
+                return true;
             }
+            false
         }
-        Err(e) => warn!(gw_key, gw_id, addr, error = %e, "late gateway gRPC connect failed"),
+        Err(e) => {
+            warn!(gw_key, gw_id, addr, error = %e, "late gateway gRPC connect failed");
+            false
+        }
     }
 }
 
@@ -412,6 +517,266 @@ fn run_gateway_removed(
     gw_pool.remove(gw_key);
     gw_executor.remove_gateway(gw_id);
     info!(gw_key, gw_id, "gateway removed from OMS discovery state");
+}
+
+// ── Shared reconcile helpers ────────────────────────────────────────────────
+
+/// Query a single gateway for account balances and positions, feed them through
+/// `OmsCoreV2`, and persist results to Redis. Used by both startup (via main.rs)
+/// and late-discovery resync.
+pub async fn resync_gw_balance_position(
+    gw_key: &str,
+    core: &mut OmsCoreV2,
+    redis: &mut RedisWriter,
+    gw_pool: &mut GwClientPool,
+    confdata: &ConfdataManager,
+    log_prefix: &str,
+) {
+    use zk_proto_rs::zk::gateway::v1::{QueryAccountRequest, QueryPositionRequest};
+
+    // ── Balance resync ──────────────────────────────────────────────────────
+    let req = QueryAccountRequest::default();
+    match gw_pool.query_account_balance(gw_key, req).await {
+        Ok(resp) => {
+            if let Some(balance_update) = resp.balance_update {
+                let balance_update =
+                    normalize_gw_balance_update_for_oms(confdata, gw_key, balance_update);
+                let actions = core.process_message(OmsMessage::BalanceUpdate(balance_update));
+                persist_balance_position_actions(core, redis, &actions).await;
+            }
+            info!(gw_key, "{log_prefix}: balance reconcile done");
+        }
+        Err(e) => warn!(gw_key, error = %e, "{log_prefix}: balance query failed"),
+    }
+
+    // ── Position resync ─────────────────────────────────────────────────────
+    match gw_pool
+        .query_position(gw_key, QueryPositionRequest {})
+        .await
+    {
+        Ok(pos_resp) => {
+            if !pos_resp.positions.is_empty() {
+                let balance_update =
+                    position_response_to_balance_update_for_oms(confdata, gw_key, &pos_resp);
+                let actions = core.process_message(OmsMessage::BalanceUpdate(balance_update));
+                persist_balance_position_actions(core, redis, &actions).await;
+            }
+            info!(gw_key, "{log_prefix}: position reconcile done");
+        }
+        Err(e) => warn!(gw_key, error = %e, "{log_prefix}: position query failed"),
+    }
+}
+
+/// Persist balance/position actions from `process_message` to Redis.
+async fn persist_balance_position_actions(
+    core: &OmsCoreV2,
+    redis: &mut RedisWriter,
+    actions: &[OmsActionV2],
+) {
+    for action in actions {
+        match action {
+            OmsActionV2::PersistBalance {
+                account_id,
+                asset_id,
+            } => {
+                persist_balance_to_redis(core, redis, *account_id, *asset_id).await;
+            }
+            OmsActionV2::PersistPosition {
+                account_id,
+                instrument_id,
+            } => {
+                persist_position_to_redis(core, redis, *account_id, *instrument_id).await;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Run two-phase order reconcile for a single gateway against OMS open orders.
+/// Phase 1: compare OMS open orders against GW open orders.
+/// Phase 2: query details for orders absent from GW open set.
+/// Returns true if any changes were made.
+#[allow(clippy::too_many_arguments)]
+pub async fn reconcile_gw_orders(
+    gw_key: &str,
+    snapshots: &[crate::reconcile::OmsOrderSnapshot],
+    now_ms: i64,
+    core: &mut OmsCoreV2,
+    writer: &mut OmsSnapshotWriterV2,
+    redis: &mut RedisWriter,
+    gw_pool: &mut GwClientPool,
+    persist_executor: &mut PersistExecutorPool,
+    publish_executor: &mut PublishExecutorPool,
+    log_prefix: &str,
+) -> bool {
+    use crate::reconcile;
+    use zk_proto_rs::zk::gateway::v1::{
+        QueryOpenOrderRequest, QueryOrderDetailRequest, SingleOrderQuery,
+    };
+
+    // Phase 1: QueryOpenOrders
+    let req = QueryOpenOrderRequest {
+        exch_account_code: String::new(),
+    };
+    let gw_result = tokio::time::timeout(
+        Duration::from_secs(10),
+        gw_pool.query_open_orders(gw_key, req),
+    )
+    .await;
+    let gw_open_orders = match gw_result {
+        Ok(Ok(resp)) => resp.orders,
+        Ok(Err(e)) => {
+            warn!(gw_key, error = %e, "{log_prefix}: open orders query failed, skipping");
+            return false;
+        }
+        Err(_) => {
+            warn!(
+                gw_key,
+                "{log_prefix}: open orders query timed out, skipping"
+            );
+            return false;
+        }
+    };
+
+    let (reports, needs_detail, stats) =
+        reconcile::reconcile_orders_against_gateway(snapshots, &gw_open_orders, gw_key, now_ms);
+
+    if stats.orders_updated > 0 || stats.orders_need_detail > 0 || stats.orders_rejected > 0 {
+        info!(
+            gw_key,
+            matched = stats.orders_matched,
+            updated = stats.orders_updated,
+            need_detail = stats.orders_need_detail,
+            rejected = stats.orders_rejected,
+            "{log_prefix}: order reconcile phase 1",
+        );
+    } else {
+        debug!(
+            gw_key,
+            matched = stats.orders_matched,
+            "{log_prefix}: order reconcile phase 1 — no changes",
+        );
+    }
+
+    let mut any_changes = !reports.is_empty();
+
+    // Apply immediate reports (state divergence + no-exch-ref rejects).
+    for report in reports {
+        dispatch_reconcile_report(
+            report,
+            core,
+            writer,
+            redis,
+            persist_executor,
+            publish_executor,
+        )
+        .await;
+    }
+
+    // Phase 2: QueryOrderDetails for orders absent from open set.
+    if !needs_detail.is_empty() {
+        let queries: Vec<SingleOrderQuery> = needs_detail
+            .iter()
+            .map(|snap| SingleOrderQuery {
+                exch_order_ref: snap.exch_order_ref.clone().unwrap_or_default(),
+                order_id: snap.order_id,
+                symbol: snap.instrument.clone(),
+                ..Default::default()
+            })
+            .collect();
+        let detail_req = QueryOrderDetailRequest {
+            order_queries: queries,
+        };
+        let detail_result = tokio::time::timeout(
+            Duration::from_secs(10),
+            gw_pool.query_order_details(gw_key, detail_req),
+        )
+        .await;
+        let detail_orders = match detail_result {
+            Ok(Ok(resp)) => resp.orders,
+            Ok(Err(e)) => {
+                warn!(gw_key, error = %e, "{log_prefix}: detail query failed, using fallback");
+                vec![]
+            }
+            Err(_) => {
+                warn!(
+                    gw_key,
+                    "{log_prefix}: detail query timed out, using fallback"
+                );
+                vec![]
+            }
+        };
+
+        for snap in &needs_detail {
+            let report = reconcile::resolve_missing_order(snap, &detail_orders, now_ms);
+            dispatch_reconcile_report(
+                report,
+                core,
+                writer,
+                redis,
+                persist_executor,
+                publish_executor,
+            )
+            .await;
+        }
+        info!(
+            gw_key,
+            terminated = needs_detail.len(),
+            detail_found = detail_orders.len(),
+            "{log_prefix}: order reconcile phase 2",
+        );
+        any_changes = true;
+    }
+
+    any_changes
+}
+
+// ── Late-discovery bounded resync ───────────────────────────────────────────
+
+/// Run a bounded resync for a single gateway that was discovered after OMS startup.
+/// Queries balances, positions, and reconciles OMS-known open orders.
+#[allow(clippy::too_many_arguments)]
+async fn run_gateway_resync(
+    gw_key: &str,
+    core: &mut OmsCoreV2,
+    writer: &mut OmsSnapshotWriterV2,
+    replica: &ReadReplica,
+    redis: &mut RedisWriter,
+    gw_pool: &mut GwClientPool,
+    persist_executor: &mut PersistExecutorPool,
+    publish_executor: &mut PublishExecutorPool,
+    confdata: &ConfdataManager,
+) {
+    info!(gw_key, "late-discovery resync: starting bounded resync");
+
+    resync_gw_balance_position(
+        gw_key,
+        core,
+        redis,
+        gw_pool,
+        confdata,
+        "late-discovery resync",
+    )
+    .await;
+
+    let snapshots = crate::reconcile::extract_open_order_snapshots(core);
+    let now_ms = gen_timestamp_ms();
+    reconcile_gw_orders(
+        gw_key,
+        &snapshots,
+        now_ms,
+        core,
+        writer,
+        redis,
+        gw_pool,
+        persist_executor,
+        publish_executor,
+        "late-discovery resync",
+    )
+    .await;
+
+    publish_snapshot(core, writer, replica, true, false);
+    info!(gw_key, "late-discovery resync: complete");
 }
 
 // ── Latency drain ───────────────────────────────────────────────────────────
@@ -630,7 +995,8 @@ fn process_command(
                     if let Some(event) =
                         build_recorder_terminal_order(core, *order_id, &nats.oms_id)
                     {
-                        recorder_executor.dispatch(event.account_id, RecorderAction::TerminalOrder(event));
+                        recorder_executor
+                            .dispatch(event.account_id, RecorderAction::TerminalOrder(event));
                     }
                 }
             }
@@ -874,24 +1240,28 @@ fn process_command(
                     if *include_last_trade {
                         if let Some(trade) = &event.last_trade {
                             if let Some(rec) = build_recorder_trade_event(
-                                core, *order_id, &nats.oms_id, trade, false,
+                                core,
+                                *order_id,
+                                &nats.oms_id,
+                                trade,
+                                false,
                             ) {
-                                recorder_executor.dispatch(
-                                    rec.account_id,
-                                    RecorderAction::Trade(rec),
-                                );
+                                recorder_executor
+                                    .dispatch(rec.account_id, RecorderAction::Trade(rec));
                             }
                         }
                     }
-                    if *include_inferred_trade {
+                    if *include_inferred_trade && should_record_trade(true) {
                         if let Some(trade) = &event.order_inferred_trade {
                             if let Some(rec) = build_recorder_trade_event(
-                                core, *order_id, &nats.oms_id, trade, true,
+                                core,
+                                *order_id,
+                                &nats.oms_id,
+                                trade,
+                                true,
                             ) {
-                                recorder_executor.dispatch(
-                                    rec.account_id,
-                                    RecorderAction::Trade(rec),
-                                );
+                                recorder_executor
+                                    .dispatch(rec.account_id, RecorderAction::Trade(rec));
                             }
                         }
                     }
@@ -973,7 +1343,8 @@ fn process_command(
                     if let Some(event) =
                         build_recorder_terminal_order(core, *order_id, &nats.oms_id)
                     {
-                        recorder_executor.dispatch(event.account_id, RecorderAction::TerminalOrder(event));
+                        recorder_executor
+                            .dispatch(event.account_id, RecorderAction::TerminalOrder(event));
                     }
                 }
             }
@@ -995,24 +1366,28 @@ fn process_command(
                     if *include_last_trade {
                         if let Some(trade) = &event.last_trade {
                             if let Some(rec) = build_recorder_trade_event(
-                                core, *order_id, &nats.oms_id, trade, false,
+                                core,
+                                *order_id,
+                                &nats.oms_id,
+                                trade,
+                                false,
                             ) {
-                                recorder_executor.dispatch(
-                                    rec.account_id,
-                                    RecorderAction::Trade(rec),
-                                );
+                                recorder_executor
+                                    .dispatch(rec.account_id, RecorderAction::Trade(rec));
                             }
                         }
                     }
-                    if *include_inferred_trade {
+                    if *include_inferred_trade && should_record_trade(true) {
                         if let Some(trade) = &event.order_inferred_trade {
                             if let Some(rec) = build_recorder_trade_event(
-                                core, *order_id, &nats.oms_id, trade, true,
+                                core,
+                                *order_id,
+                                &nats.oms_id,
+                                trade,
+                                true,
                             ) {
-                                recorder_executor.dispatch(
-                                    rec.account_id,
-                                    RecorderAction::Trade(rec),
-                                );
+                                recorder_executor
+                                    .dispatch(rec.account_id, RecorderAction::Trade(rec));
                             }
                         }
                     }
@@ -1129,120 +1504,30 @@ async fn run_order_reconcile(
     persist_executor: &mut PersistExecutorPool,
     publish_executor: &mut PublishExecutorPool,
 ) {
-    use crate::reconcile;
-    use zk_proto_rs::zk::gateway::v1::{
-        QueryOpenOrderRequest, QueryOrderDetailRequest, SingleOrderQuery,
-    };
-
-    let snapshots = reconcile::extract_open_order_snapshots(core);
+    let snapshots = crate::reconcile::extract_open_order_snapshots(core);
     if snapshots.is_empty() {
         return;
     }
 
-    let now_ms = zk_oms_rs::utils::gen_timestamp_ms();
+    let now_ms = gen_timestamp_ms();
     let gw_keys: Vec<String> = gw_pool.gw_keys().map(String::from).collect();
     let mut any_changes = false;
 
     for gw_key in &gw_keys {
-        // Phase 1: QueryOpenOrders
-        let req = QueryOpenOrderRequest {
-            exch_account_code: String::new(),
-        };
-        let gw_result = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            gw_pool.query_open_orders(gw_key, req),
+        let changed = reconcile_gw_orders(
+            gw_key,
+            &snapshots,
+            now_ms,
+            core,
+            writer,
+            redis,
+            gw_pool,
+            persist_executor,
+            publish_executor,
+            "periodic order reconcile",
         )
         .await;
-        let gw_open_orders = match gw_result {
-            Ok(Ok(resp)) => resp.orders,
-            Ok(Err(e)) => {
-                warn!(gw_key, error = %e, "order reconcile: open orders query failed, skipping");
-                continue;
-            }
-            Err(_) => {
-                warn!(gw_key, "order reconcile: open orders query timed out, skipping");
-                continue;
-            }
-        };
-
-        let (reports, needs_detail, stats) = reconcile::reconcile_orders_against_gateway(
-            &snapshots,
-            &gw_open_orders,
-            gw_key,
-            now_ms,
-        );
-        if stats.orders_updated > 0 || stats.orders_need_detail > 0 || stats.orders_rejected > 0 {
-            info!(
-                gw_key,
-                matched = stats.orders_matched,
-                updated = stats.orders_updated,
-                need_detail = stats.orders_need_detail,
-                rejected = stats.orders_rejected,
-                "periodic order reconcile phase 1",
-            );
-        } else {
-            tracing::debug!(
-                gw_key,
-                matched = stats.orders_matched,
-                "periodic order reconcile: no changes",
-            );
-        }
-
-        // Apply immediate reports (state divergence + no-exch-ref rejects).
-        for report in reports {
-            dispatch_reconcile_report(
-                report, core, writer, redis, persist_executor, publish_executor,
-            )
-            .await;
-            any_changes = true;
-        }
-
-        // Phase 2: QueryOrderDetails for orders absent from open set.
-        if !needs_detail.is_empty() {
-            let queries: Vec<SingleOrderQuery> = needs_detail
-                .iter()
-                .map(|snap| SingleOrderQuery {
-                    exch_order_ref: snap.exch_order_ref.clone().unwrap_or_default(),
-                    order_id: snap.order_id,
-                    symbol: snap.instrument.clone(),
-                    ..Default::default()
-                })
-                .collect();
-            let detail_req = QueryOrderDetailRequest {
-                order_queries: queries,
-            };
-            let detail_result = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                gw_pool.query_order_details(gw_key, detail_req),
-            )
-            .await;
-            let detail_orders = match detail_result {
-                Ok(Ok(resp)) => resp.orders,
-                Ok(Err(e)) => {
-                    warn!(gw_key, error = %e, "order reconcile: detail query failed, using fallback");
-                    vec![]
-                }
-                Err(_) => {
-                    warn!(gw_key, "order reconcile: detail query timed out, using fallback");
-                    vec![]
-                }
-            };
-
-            for snap in &needs_detail {
-                let report = reconcile::resolve_missing_order(snap, &detail_orders, now_ms);
-                dispatch_reconcile_report(
-                    report, core, writer, redis, persist_executor, publish_executor,
-                )
-                .await;
-                any_changes = true;
-            }
-            info!(
-                gw_key,
-                terminated = needs_detail.len(),
-                detail_found = detail_orders.len(),
-                "periodic order reconcile phase 2",
-            );
-        }
+        any_changes |= changed;
     }
 
     if any_changes {
@@ -1260,8 +1545,7 @@ async fn dispatch_reconcile_report(
     persist_executor: &mut PersistExecutorPool,
     publish_executor: &mut PublishExecutorPool,
 ) {
-    let actions =
-        core.process_message(zk_oms_rs::models::OmsMessage::GatewayOrderReport(report));
+    let actions = core.process_message(zk_oms_rs::models::OmsMessage::GatewayOrderReport(report));
 
     for action in &actions {
         match action {
@@ -1271,8 +1555,7 @@ async fn dispatch_reconcile_report(
                 set_closed,
             } => {
                 if let Some(live) = core.orders.get_live(*order_id) {
-                    let snap_order =
-                        build_snapshot_order_from_live(live, &core.orders.dyn_strings);
+                    let snap_order = build_snapshot_order_from_live(live, &core.orders.dyn_strings);
                     writer.apply_order_update(snap_order, *set_closed);
                 }
                 if let Some(live) = core.orders.get_live(*order_id) {
@@ -1333,18 +1616,17 @@ async fn dispatch_reconcile_report(
 // Used by both the writer loop and startup reconciliation in main.rs.
 
 /// Persist an order to Redis (used by startup reconciliation).
-pub async fn persist_order_to_redis(
-    core: &OmsCoreV2,
-    redis: &mut RedisWriter,
-    order_id: i64,
-) {
+pub async fn persist_order_to_redis(core: &OmsCoreV2, redis: &mut RedisWriter, order_id: i64) {
     if let Some(persisted) = build_persisted_order(core, order_id) {
         let is_terminal = core
             .orders
             .get_live(order_id)
             .map(|l| l.is_in_terminal_state())
             .unwrap_or(false);
-        if let Err(e) = redis.write_order(&persisted, is_terminal, is_terminal).await {
+        if let Err(e) = redis
+            .write_order(&persisted, is_terminal, is_terminal)
+            .await
+        {
             warn!(order_id, error = %e, "Redis write_order failed (reconcile)");
         }
     }
@@ -1497,7 +1779,8 @@ pub fn build_exch_balances(
     Vec<ExchBalanceSnapshot>,
 ) {
     let mut resolved = HashMap::new();
-    let mut unknown: Vec<ExchBalanceSnapshot> = core.balances.all_unknown_balances().cloned().collect();
+    let mut unknown: Vec<ExchBalanceSnapshot> =
+        core.balances.all_unknown_balances().cloned().collect();
     for snap in core.balances.all_balances() {
         let asset_sym = core.metadata.strings.lookup(&snap.asset);
         let asset_id = asset_sym.and_then(|s| core.metadata.asset_by_symbol.get(&s).copied());
@@ -1669,16 +1952,16 @@ fn build_recorder_terminal_order(
         error_msg: live.error_msg.clone(),
         terminal_at_ms: live.terminal_at.unwrap_or(live.updated_at),
         created_at_ms: live.created_at,
-        trades: detail
-            .map(|d| d.trades.clone())
-            .unwrap_or_default(),
+        trades: detail.map(|d| d.trades.clone()).unwrap_or_default(),
         inferred_trades: detail
             .map(|d| d.inferred_trades.clone())
             .unwrap_or_default(),
-        fees: detail
-            .map(|d| d.fees.clone())
-            .unwrap_or_default(),
+        fees: detail.map(|d| d.fees.clone()).unwrap_or_default(),
     })
+}
+
+fn should_record_trade(is_inferred: bool) -> bool {
+    !is_inferred
 }
 
 /// Build a `RecorderTradeEvent` from a trade (explicit or inferred).
@@ -1739,4 +2022,28 @@ pub async fn send_cmd_await(
         .map_err(|_| tonic::Status::unavailable("OMS writer task stopped"))?;
     rx.await
         .map_err(|_| tonic::Status::internal("OMS writer task dropped reply"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{infer_gateway_instrument_type, should_record_trade};
+    use zk_proto_rs::zk::common::v1::InstrumentType;
+
+    #[test]
+    fn recorder_persists_only_real_trades() {
+        assert!(should_record_trade(false));
+        assert!(!should_record_trade(true));
+    }
+
+    #[test]
+    fn infer_gateway_instrument_type_treats_oanda_symbols_as_cfd() {
+        assert_eq!(
+            infer_gateway_instrument_type("BTC_USD"),
+            InstrumentType::InstTypeCfd as i32
+        );
+        assert_eq!(
+            infer_gateway_instrument_type("CHINAH_HKD"),
+            InstrumentType::InstTypeCfd as i32
+        );
+    }
 }

@@ -283,10 +283,7 @@ pub fn bootstrap_runtime_config<S: ServiceBootstrap>(
 /// Skips validation if the metadata hash is empty.
 ///
 /// **Dependency:** Pilot must compute the hash using the same normalization.
-fn validate_config_hash(
-    json: &str,
-    metadata: &ConfigMetadata,
-) -> Result<(), BootstrapConfigError> {
+fn validate_config_hash(json: &str, metadata: &ConfigMetadata) -> Result<(), BootstrapConfigError> {
     if metadata.config_hash.is_empty() {
         return Ok(());
     }
@@ -323,10 +320,7 @@ pub fn wrap_in_envelope<T: Serialize>(
 ///
 /// For direct mode: computes hash from the serialized config.
 /// For Pilot mode: copies version/hash/issued_at from the source tag.
-pub fn build_config_metadata<T: Serialize>(
-    config: &T,
-    source: &ConfigSource,
-) -> ConfigMetadata {
+pub fn build_config_metadata<T: Serialize>(config: &T, source: &ConfigSource) -> ConfigMetadata {
     let now = now_ms();
     match source {
         ConfigSource::Direct => {
@@ -428,8 +422,7 @@ mod tests {
         fn decode_pilot_config(
             payload: &PilotPayload,
         ) -> Result<Self::ProvidedConfig, BootstrapConfigError> {
-            let cfg: TestProvidedConfig =
-                serde_json::from_str(&payload.runtime_config_json)?;
+            let cfg: TestProvidedConfig = serde_json::from_str(&payload.runtime_config_json)?;
             if cfg.venue.is_empty() {
                 return Err(BootstrapConfigError::MissingField {
                     field: "venue".into(),
@@ -473,9 +466,7 @@ mod tests {
         }
 
         fn load_direct_config() -> Result<Self::ProvidedConfig, BootstrapConfigError> {
-            Err(BootstrapConfigError::Validation(
-                "ZK_VENUE not set".into(),
-            ))
+            Err(BootstrapConfigError::Validation("ZK_VENUE not set".into()))
         }
 
         fn assemble_runtime_config(
@@ -665,9 +656,8 @@ mod tests {
     #[test]
     fn direct_mode_failure_propagates() {
         let boot = test_boot_cfg();
-        let err =
-            bootstrap_runtime_config::<FailingDirectService>(&boot, BootstrapMode::Direct)
-                .unwrap_err();
+        let err = bootstrap_runtime_config::<FailingDirectService>(&boot, BootstrapMode::Direct)
+            .unwrap_err();
         assert!(matches!(err, BootstrapConfigError::Validation(_)));
     }
 

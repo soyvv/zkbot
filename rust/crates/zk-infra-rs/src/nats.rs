@@ -50,7 +50,11 @@ pub mod subject {
 
     /// `zk.rtmd.tick.{venue}.{instrument_exch}`
     pub fn rtmd_tick(venue: &str, instrument_exch: &str) -> String {
-        format!("zk.rtmd.tick.{}.{}", canonical_venue(venue), instrument_exch)
+        format!(
+            "zk.rtmd.tick.{}.{}",
+            canonical_venue(venue),
+            instrument_exch
+        )
     }
 
     /// `zk.rtmd.kline.{venue}.{instrument_exch}.{interval}`
@@ -74,7 +78,11 @@ pub mod subject {
 
     /// `zk.rtmd.funding.{venue}.{instrument_exch}`
     pub fn rtmd_funding(venue: &str, instrument_exch: &str) -> String {
-        format!("zk.rtmd.funding.{}.{}", canonical_venue(venue), instrument_exch)
+        format!(
+            "zk.rtmd.funding.{}.{}",
+            canonical_venue(venue),
+            instrument_exch
+        )
     }
 
     // ── Recorder ──────────────────────────────────────────────────────────

@@ -11,8 +11,10 @@ pub const RECORDER_STREAM_NAME: &str = "zk-recorder-oms";
 /// Safe to call from both OMS (publisher) and recorder (consumer).
 pub async fn ensure_recorder_stream(
     js: &jetstream::Context,
-) -> Result<jetstream::stream::Stream, async_nats::error::Error<jetstream::context::CreateStreamErrorKind>>
-{
+) -> Result<
+    jetstream::stream::Stream,
+    async_nats::error::Error<jetstream::context::CreateStreamErrorKind>,
+> {
     js.get_or_create_stream(jetstream::stream::Config {
         name: RECORDER_STREAM_NAME.into(),
         subjects: vec!["zk.recorder.oms.>".into()],

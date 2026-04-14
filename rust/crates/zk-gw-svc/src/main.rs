@@ -19,8 +19,8 @@ use zk_infra_rs::service_registry::{PilotBootstrapGrant, ServiceRegistration};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── 1. Bootstrap config from env ─────────────────────────────────────
-    let bootstrap = GwBootstrapConfig::from_env()
-        .expect("failed to load bootstrap config from env");
+    let bootstrap =
+        GwBootstrapConfig::from_env().expect("failed to load bootstrap config from env");
 
     // ── 2. Tracing ───────────────────────────────────────────────────────
     tracing_subscriber::fmt()
@@ -46,31 +46,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // ── 4. Pilot request (split-phase) or direct-mode flag ───────────────
-    let pilot_grant: Option<PilotBootstrapGrant> =
-        if !bootstrap.bootstrap_token.is_empty() {
-            let nats = nats_client
-                .as_ref()
-                .expect("ZK_NATS_URL is required for Pilot bootstrap");
-            info!("sending Pilot bootstrap request");
-            let mut runtime_info = std::collections::HashMap::new();
-            runtime_info.insert(
-                "grpc_address".into(),
-                format!("{}:{}", bootstrap.grpc_host, bootstrap.grpc_port),
-            );
-            let grant = ServiceRegistration::pilot_request(
-                nats,
-                &bootstrap.bootstrap_token,
-                &bootstrap.gw_id,
-                &bootstrap.instance_type,
-                &bootstrap.env,
-                runtime_info,
-            )
-            .await
-            .expect("Pilot registration failed — is Pilot running?");
-            Some(grant)
-        } else {
-            None
-        };
+    let pilot_grant: Option<PilotBootstrapGrant> = if !bootstrap.bootstrap_token.is_empty() {
+        let nats = nats_client
+            .as_ref()
+            .expect("ZK_NATS_URL is required for Pilot bootstrap");
+        info!("sending Pilot bootstrap request");
+        let mut runtime_info = std::collections::HashMap::new();
+        runtime_info.insert(
+            "grpc_address".into(),
+            format!("{}:{}", bootstrap.grpc_host, bootstrap.grpc_port),
+        );
+        let grant = ServiceRegistration::pilot_request(
+            nats,
+            &bootstrap.bootstrap_token,
+            &bootstrap.gw_id,
+            &bootstrap.instance_type,
+            &bootstrap.env,
+            runtime_info,
+        )
+        .await
+        .expect("Pilot registration failed — is Pilot running?");
+        Some(grant)
+    } else {
+        None
+    };
 
     // ── 5. Assemble runtime config ───────────────────────────────────────
     let mode = if let Some(ref grant) = pilot_grant {
@@ -83,8 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let outcome: BootstrapOutcome<GwRuntimeConfig> =
-        bootstrap_runtime_config::<GwBootstrap>(&bootstrap, mode)
-            .expect("config assembly failed");
+        bootstrap_runtime_config::<GwBootstrap>(&bootstrap, mode).expect("config assembly failed");
 
     let mut runtime_cfg = outcome.runtime_config;
     info!(
@@ -104,9 +102,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref venue_root) = runtime_cfg.venue_root {
         let root = std::path::PathBuf::from(venue_root);
         if let Ok(manifest) = zk_pyo3_bridge::manifest::load_manifest(&root, &runtime_cfg.venue) {
-            if let Ok(cap) =
-                zk_pyo3_bridge::manifest::resolve_capability(&manifest, zk_pyo3_bridge::manifest::CAP_GW)
-            {
+            if let Ok(cap) = zk_pyo3_bridge::manifest::resolve_capability(
+                &manifest,
+                zk_pyo3_bridge::manifest::CAP_GW,
+            ) {
                 let secret_paths = zk_pyo3_bridge::manifest::secret_ref_paths(cap);
                 if !secret_paths.is_empty() {
                     let resolver: Box<dyn zk_infra_rs::vault::SecretResolver> =
@@ -123,9 +122,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // For each secret_ref pointer, fetch the Vault doc and
                     // project venue-appropriate fields into venue_config.
                     for pointer in &secret_paths {
-                        if let Some(vault_path) =
-                            zk_infra_rs::vault::extract_secret_ref(&runtime_cfg.venue_config, pointer)
-                        {
+                        if let Some(vault_path) = zk_infra_rs::vault::extract_secret_ref(
+                            &runtime_cfg.venue_config,
+                            pointer,
+                        ) {
                             let doc = resolver
                                 .read_document(&vault_path)
                                 .await
@@ -207,12 +207,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // ── Event loop: adapter events → pipeline → publisher ────────────────
-    if let Some(ref pub_arc) = publisher {
+    let event_loop_handle = if let Some(ref pub_arc) = publisher {
         let adapter_clone = Arc::clone(&adapter);
         let pipeline_clone = Arc::clone(&pipeline);
         let pub_clone = Arc::clone(pub_arc);
 
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             loop {
                 match adapter_clone.next_event().await {
                     Ok(event) => {
@@ -225,8 +225,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-        });
-    }
+        }))
+    } else {
+        None
+    };
 
     // ── Transition: Starting → Connecting → Live ─────────────────────────
     {
@@ -282,8 +284,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Bind admin listener early (before serving) so the port is guaranteed live.
     let admin_listener = if let Some(ref sim) = runtime_cfg.simulator {
         if sim.enable_admin_controls {
-            let admin_addr: SocketAddr =
-                format!("0.0.0.0:{}", sim.admin_grpc_port).parse()?;
+            let admin_addr: SocketAddr = format!("0.0.0.0:{}", sim.admin_grpc_port).parse()?;
             Some(tokio::net::TcpListener::bind(admin_addr).await?)
         } else {
             None
@@ -363,17 +364,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .serve_with_incoming(admin_incoming);
 
         if let Some(ref mut reg) = registration {
-            fenced = tokio::select! {
-                r = gw_server => { r?; false }
-                r = admin_server => { r?; false }
-                _ = tokio::signal::ctrl_c() => {
-                    info!("shutdown signal received");
-                    false
+            let reason = tokio::select! {
+                r = gw_server => { r?; None }
+                r = admin_server => { r?; None }
+                reason = reg.wait_shutdown() => Some(reason)
+            };
+            fenced = match reason {
+                Some(r) => {
+                    info!(%r, "shutting down");
+                    r.is_fenced()
                 }
-                _ = reg.wait_fenced() => {
-                    tracing::warn!("KV fencing detected — shutting down");
-                    true
-                }
+                None => false,
             };
         } else {
             tokio::select! {
@@ -427,21 +428,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .serve_with_incoming(gw_incoming);
 
         if let Some(ref mut reg) = registration {
-            fenced = tokio::select! {
-                r = gw_server => { r?; false }
-                _ = tokio::signal::ctrl_c() => {
-                    info!("shutdown signal received");
-                    false
+            let reason = tokio::select! {
+                r = gw_server => { r?; None }
+                reason = reg.wait_shutdown() => Some(reason)
+            };
+            fenced = match reason {
+                Some(r) => {
+                    info!(%r, "shutting down");
+                    r.is_fenced()
                 }
-                _ = reg.wait_fenced() => {
-                    tracing::warn!("KV fencing detected — shutting down");
-                    true
-                }
+                None => false,
             };
         } else {
             gw_server.await?;
             fenced = false;
         }
+    }
+
+    // Abort the event-loop consumer task first so it doesn't schedule new
+    // spawn_blocking calls while we're shutting down the adapter.
+    if let Some(h) = event_loop_handle {
+        h.abort();
+    }
+
+    // Shut down the adapter: sets shutdown flag, cancels asyncio tasks (to
+    // unblock in-flight spawn_blocking threads), calls Python shutdown() to
+    // clean up streams/clients, then stops the event loop and joins the thread.
+    if let Err(e) = adapter.shutdown().await {
+        tracing::warn!(error = %e, "adapter shutdown failed");
     }
 
     // Deregister on clean shutdown (not when fenced — new owner holds the key).

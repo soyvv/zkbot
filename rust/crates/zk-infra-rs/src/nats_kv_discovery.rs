@@ -84,7 +84,11 @@ impl KvDiscoveryClient {
         let kv = KvRegistryClient::open(js, REGISTRY_BUCKET).await?;
         let cache = Arc::new(RwLock::new(HashMap::new()));
         let (events_tx, _) = broadcast::channel(256);
-        Ok(Self { kv, cache, events_tx })
+        Ok(Self {
+            kv,
+            cache,
+            events_tx,
+        })
     }
 
     /// Spawn a background task that populates and maintains the cache via KV watch.

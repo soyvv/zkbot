@@ -313,10 +313,7 @@ impl GatewayService for GrpcHandler {
         let venue_req = VenuePositionQuery {};
         match self.adapter.query_positions(venue_req).await {
             Ok(facts) => {
-                let positions = facts
-                    .iter()
-                    .map(venue_position_fact_to_proto)
-                    .collect();
+                let positions = facts.iter().map(venue_position_fact_to_proto).collect();
                 Ok(Response::new(PositionResponse { positions }))
             }
             Err(e) => Err(Status::internal(e.to_string())),
@@ -466,19 +463,28 @@ fn infer_instrument_type(instrument: &str) -> i32 {
 
     if instrument.contains("SWAP") {
         InstrumentType::InstTypePerp as i32
-    } else if instrument.contains("FUTURES") || instrument.contains("-") && instrument.matches('-').count() >= 2 {
+    } else if instrument.contains("FUTURES")
+        || instrument.contains('-') && instrument.matches('-').count() >= 2
+    {
         InstrumentType::InstTypeFuture as i32
+    } else if instrument.contains('_') {
+        InstrumentType::InstTypeCfd as i32
     } else {
         InstrumentType::InstTypeSpot as i32
     }
 }
 
 fn venue_position_fact_to_proto(f: &VenuePositionFact) -> zk_proto_rs::zk::oms::v1::Position {
+    let inst_type = if f.instrument_type != 0 {
+        f.instrument_type
+    } else {
+        infer_instrument_type(&f.instrument)
+    };
     zk_proto_rs::zk::oms::v1::Position {
         account_id: f.account_id,
         instrument_code: f.instrument.clone(),
         long_short_type: f.long_short_type,
-        instrument_type: infer_instrument_type(&f.instrument),
+        instrument_type: inst_type,
         total_qty: f.qty,
         frozen_qty: f.frozen_qty,
         avail_qty: f.avail_qty,
@@ -551,6 +557,10 @@ mod tests {
             infer_instrument_type("BTC-USDT"),
             InstrumentType::InstTypeSpot as i32
         );
+        assert_eq!(
+            infer_instrument_type("BTC_USD"),
+            InstrumentType::InstTypeCfd as i32
+        );
     }
 
     #[test]
@@ -562,6 +572,7 @@ mod tests {
             avail_qty: 2.0,
             frozen_qty: 0.5,
             account_id: 9001,
+            instrument_type: 0,
         };
         let proto = venue_position_fact_to_proto(&fact);
         assert_eq!(proto.account_id, 9001);
@@ -571,5 +582,23 @@ mod tests {
         assert_eq!(proto.avail_qty, 2.0);
         assert_eq!(proto.frozen_qty, 0.5);
         assert!(proto.is_from_exch);
+    }
+
+    #[test]
+    fn venue_position_fact_explicit_instrument_type_overrides_heuristic() {
+        // OANDA-style: underscore symbol would be "spot" by heuristic,
+        // but explicit instrument_type=4 (CFD) takes precedence.
+        let fact = VenuePositionFact {
+            instrument: "BTC_USD".into(),
+            long_short_type: LongShortType::LsLong as i32,
+            qty: 0.01,
+            avail_qty: 0.01,
+            frozen_qty: 0.0,
+            account_id: 8003,
+            instrument_type: InstrumentType::InstTypeCfd as i32,
+        };
+        let proto = venue_position_fact_to_proto(&fact);
+        assert_eq!(proto.instrument_type, InstrumentType::InstTypeCfd as i32);
+        assert_eq!(proto.instrument_code, "BTC_USD");
     }
 }

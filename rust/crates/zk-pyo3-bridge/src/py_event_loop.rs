@@ -1,7 +1,9 @@
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use pyo3::prelude::*;
+use tracing::{info, warn};
 
 use crate::py_errors::PyBridgeError;
 
@@ -16,11 +18,12 @@ use crate::py_errors::PyBridgeError;
 /// during its internal condition-wait, so there is no GIL deadlock.
 pub struct PyEventLoop {
     loop_obj: Py<PyAny>,
-    _thread: JoinHandle<()>,
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 // Safety: Py<PyAny> is Send because PyO3 guarantees GIL-gated access.
-// The thread handle is Send. We only touch loop_obj inside with_gil blocks.
+// The Mutex<Option<JoinHandle>> is Send+Sync. We only touch loop_obj inside
+// with_gil blocks.
 unsafe impl Send for PyEventLoop {}
 unsafe impl Sync for PyEventLoop {}
 
@@ -64,7 +67,7 @@ impl PyEventLoop {
 
         Ok(Self {
             loop_obj,
-            _thread: thread,
+            thread: Mutex::new(Some(thread)),
         })
     }
 
@@ -103,16 +106,81 @@ impl PyEventLoop {
     pub fn loop_ref(&self) -> Py<PyAny> {
         Python::with_gil(|py| self.loop_obj.clone_ref(py))
     }
-}
 
-impl Drop for PyEventLoop {
-    fn drop(&mut self) {
-        // Best-effort stop: loop.call_soon_threadsafe(loop.stop)
-        let _ = Python::with_gil(|py| -> PyResult<()> {
+    /// Cancel all pending asyncio tasks on the event loop.
+    ///
+    /// This causes `concurrent.futures.Future.result()` to raise
+    /// `CancelledError` on any `spawn_blocking` threads waiting for the
+    /// cancelled coroutines, unblocking them promptly. The event loop
+    /// itself keeps running so the cancellations can propagate.
+    pub fn cancel_all_tasks(&self) {
+        let result = Python::with_gil(|py| -> PyResult<()> {
+            let locals = pyo3::types::PyDict::new_bound(py);
+            locals.set_item("loop_obj", self.loop_obj.bind(py))?;
+            py.run_bound(
+                concat!(
+                    "import asyncio, functools\n",
+                    "def _cancel_all(loop):\n",
+                    "    import asyncio as _aio\n",
+                    "    for t in _aio.all_tasks(loop):\n",
+                    "        t.cancel()\n",
+                    "loop_obj.call_soon_threadsafe(",
+                    "    functools.partial(_cancel_all, loop_obj))\n",
+                ),
+                None,
+                Some(&locals),
+            )?;
+            Ok(())
+        });
+        if let Err(e) = result {
+            warn!(error = %e, "failed to cancel asyncio tasks");
+        }
+    }
+
+    /// Stop the event loop and join the background thread.
+    ///
+    /// Call this only after pending tasks have been cancelled and the
+    /// cancellations have had time to propagate (see [`cancel_all_tasks`]).
+    pub fn stop_and_join(&self, timeout: Duration) {
+        // Signal the loop to stop.
+        let stop_ok = Python::with_gil(|py| -> PyResult<()> {
             let stop = self.loop_obj.getattr(py, "stop")?;
             self.loop_obj
                 .call_method1(py, "call_soon_threadsafe", (stop,))?;
             Ok(())
         });
+        if let Err(e) = stop_ok {
+            warn!(error = %e, "failed to send loop.stop to Python event loop");
+        }
+
+        // Join the thread.
+        let handle = self.thread.lock().unwrap().take();
+        if let Some(handle) = handle {
+            let deadline = std::time::Instant::now() + timeout;
+            loop {
+                if handle.is_finished() {
+                    let _ = handle.join();
+                    info!("Python event loop thread joined");
+                    return;
+                }
+                if std::time::Instant::now() >= deadline {
+                    warn!("Python event loop thread did not exit within timeout — abandoning");
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+}
+
+impl Drop for PyEventLoop {
+    fn drop(&mut self) {
+        // If stop_and_join() was already called, thread is None and this is a no-op.
+        if self.thread.get_mut().unwrap().is_some() {
+            self.cancel_all_tasks();
+            // Brief pause to let cancellations propagate before stopping the loop.
+            std::thread::sleep(Duration::from_millis(100));
+            self.stop_and_join(Duration::from_secs(3));
+        }
     }
 }

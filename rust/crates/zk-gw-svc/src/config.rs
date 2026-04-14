@@ -184,17 +184,13 @@ impl ServiceBootstrap for GwBootstrap {
                 field: "account_id (ZK_ACCOUNT_ID)".into(),
             })?
             .parse()
-            .map_err(|e| {
-                BootstrapConfigError::Validation(format!("invalid ZK_ACCOUNT_ID: {e}"))
-            })?;
+            .map_err(|e| BootstrapConfigError::Validation(format!("invalid ZK_ACCOUNT_ID: {e}")))?;
 
-        let exch_account_id =
-            std::env::var("ZK_EXCH_ACCOUNT_ID").unwrap_or_default();
+        let exch_account_id = std::env::var("ZK_EXCH_ACCOUNT_ID").unwrap_or_default();
 
-        let venue_config_str =
-            std::env::var("ZK_VENUE_CONFIG").unwrap_or_else(|_| "{}".into());
-        let venue_config: serde_json::Value = serde_json::from_str(&venue_config_str)
-            .unwrap_or_else(|_| default_venue_config());
+        let venue_config_str = std::env::var("ZK_VENUE_CONFIG").unwrap_or_else(|_| "{}".into());
+        let venue_config: serde_json::Value =
+            serde_json::from_str(&venue_config_str).unwrap_or_else(|_| default_venue_config());
 
         let venue_root = std::env::var("ZK_VENUE_ROOT").ok();
 

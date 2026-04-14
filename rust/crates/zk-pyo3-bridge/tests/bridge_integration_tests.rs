@@ -184,6 +184,80 @@ async fn test_gw_adapter_python_exception_maps_to_error() {
     );
 }
 
+// ─── GW idle-timeout resilience ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_gw_next_event_survives_idle_timeout() {
+    use std::sync::Arc;
+    use std::time::Duration;
+    use pyo3::prelude::*;
+    use pyo3::types::{PyDict, PyDictMethods, PyList};
+    use zk_gw_types::*;
+    use zk_pyo3_bridge::gw_adapter::PyVenueAdapter;
+
+    let rt = init_runtime();
+    // Use IdleTimeoutGatewayAdaptor: its next_event() uses wait_for() so
+    // timed-out coroutines complete and don't steal events from later retries.
+    let ep =
+        manifest::parse_python_entrypoint("python:fake_gw:IdleTimeoutGatewayAdaptor").unwrap();
+    let handle = rt.load_class(&ep, serde_json::json!({}), None).unwrap();
+
+    // Clone references before the adapter takes ownership.
+    let obj_ref = Python::with_gil(|py| handle.inner.clone_ref(py));
+    let event_loop = Arc::clone(&handle.event_loop);
+
+    let mut adapter = PyVenueAdapter::new(handle);
+    // Use a short timeout so we exercise the retry loop quickly.
+    // The fixture's internal timeout is 1s; the bridge timeout is 2s.
+    // The Python TimeoutError fires at 1s, bridge catches it and retries.
+    adapter.set_event_timeout(Duration::from_secs(2));
+    adapter.connect().await.unwrap();
+
+    // Push an event after 5s — at least 2 idle-timeout cycles will have fired.
+    let push_obj = Python::with_gil(|py| obj_ref.clone_ref(py));
+    let push_loop = Arc::clone(&event_loop);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::task::spawn_blocking(move || {
+            Python::with_gil(|py| {
+                let event = PyDict::new_bound(py);
+                event.set_item("event_type", "balance").unwrap();
+                let d = PyDict::new_bound(py);
+                d.set_item("asset", "USDT").unwrap();
+                d.set_item("total_qty", 42.0f64).unwrap();
+                d.set_item("avail_qty", 42.0f64).unwrap();
+                d.set_item("frozen_qty", 0.0f64).unwrap();
+                let payload = PyList::new_bound(py, &[d]);
+                event.set_item("payload", payload).unwrap();
+
+                let coro = push_obj
+                    .call_method1(py, "push_event", (event,))
+                    .expect("push_event call failed");
+                push_loop
+                    .run_coroutine(py, coro.into_bound(py), 5.0)
+                    .expect("push_event coroutine failed");
+            });
+        })
+        .await
+        .unwrap();
+    });
+
+    // next_event must survive multiple 2s timeouts and eventually return.
+    let event = tokio::time::timeout(Duration::from_secs(15), adapter.next_event())
+        .await
+        .expect("test timed out — next_event did not return")
+        .expect("next_event returned an error");
+
+    match event {
+        VenueEvent::Balance(balances) => {
+            assert_eq!(balances.len(), 1);
+            assert_eq!(balances[0].asset, "USDT");
+            assert_eq!(balances[0].total_qty, 42.0);
+        }
+        other => panic!("expected Balance event, got: {other:?}"),
+    }
+}
+
 // ─── RTMD adapter tests ─────────────────────────────────────────────────────
 
 #[tokio::test]

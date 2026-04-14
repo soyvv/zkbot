@@ -403,6 +403,7 @@ impl GatewaySimulatorAdminService for SimAdminHandler {
                     avail_qty: entry.avail_qty,
                     frozen_qty: entry.frozen_qty,
                     account_id,
+                    instrument_type: 0,
                 })
                 .collect();
             drop(state);

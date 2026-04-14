@@ -25,10 +25,10 @@ use zk_oms_rs::{
 use zk_proto_rs::{
     ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     zk::{
-        common::v1::Rejection,
         common::v1::InstrumentRefData,
+        common::v1::Rejection,
         exch_gw::v1::{
-            order_report_entry::Report, BalanceUpdate, ExecReport, ExchExecType, OrderReport,
+            order_report_entry::Report, BalanceUpdate, ExchExecType, ExecReport, OrderReport,
             OrderReportEntry, OrderReportType, PositionReport,
         },
         oms::v1::{oms_response, OmsErrorType, OmsResponse, OrderRequest, OrderStatus},
@@ -365,7 +365,8 @@ async fn test_gateway_exec_reject_by_order_id_marks_order_rejected() {
     let order = snap.orders.get(&order_id).expect("order missing");
     assert_eq!(order.order_status, OrderStatus::Rejected as i32);
     assert!(
-        !snap.open_order_ids_by_account
+        !snap
+            .open_order_ids_by_account
             .get(&9001)
             .map(|s| s.contains(&order_id))
             .unwrap_or(false),
@@ -384,9 +385,9 @@ fn test_core_gateway_exec_reject_emits_immediate_persist_and_publish_actions() {
         test_order_req(order_id, 9001),
     ));
     assert!(
-        place_actions
-            .iter()
-            .any(|a| matches!(a, OmsActionV2::SendOrderToGw { order_id: oid, .. } if *oid == order_id)),
+        place_actions.iter().any(
+            |a| matches!(a, OmsActionV2::SendOrderToGw { order_id: oid, .. } if *oid == order_id)
+        ),
         "place_order should dispatch to gateway"
     );
 
@@ -409,8 +410,9 @@ fn test_core_gateway_exec_reject_emits_immediate_persist_and_publish_actions() {
         ..Default::default()
     };
 
-    let reject_actions =
-        core.process_message(zk_oms_rs::models::OmsMessage::GatewayOrderReport(reject_report));
+    let reject_actions = core.process_message(zk_oms_rs::models::OmsMessage::GatewayOrderReport(
+        reject_report,
+    ));
 
     assert!(
         reject_actions.iter().any(|a| matches!(
@@ -631,8 +633,7 @@ fn test_config_defaults() {
 
     use zk_infra_rs::bootstrap::{bootstrap_runtime_config, BootstrapMode};
     use zk_oms_svc::config::OmsService;
-    let outcome =
-        bootstrap_runtime_config::<OmsService>(&boot, BootstrapMode::Direct).unwrap();
+    let outcome = bootstrap_runtime_config::<OmsService>(&boot, BootstrapMode::Direct).unwrap();
     let cfg = outcome.runtime_config;
     assert_eq!(cfg.oms_id, "test_oms");
     assert_eq!(cfg.grpc_port, 50051);
@@ -930,17 +931,19 @@ fn test_build_exch_balances_preserves_unknown_assets_from_core() {
 
     let conf = test_confdata("oms_test_unknown_balance");
     let mut core = OmsCoreV2::new(&conf, false, true, false, 1024);
-    core.process_message(zk_oms_rs::models::OmsMessage::BalanceUpdate(BalanceUpdate {
-        balances: vec![PositionReport {
-            instrument_code: "MYSTERY_COIN".into(),
-            instrument_type: InstrumentType::InstTypeSpot as i32,
-            exch_account_code: "TEST_ACCT".into(),
-            qty: 42.0,
-            avail_qty: 40.0,
-            update_timestamp: 123,
-            ..Default::default()
-        }],
-    }));
+    core.process_message(zk_oms_rs::models::OmsMessage::BalanceUpdate(
+        BalanceUpdate {
+            balances: vec![PositionReport {
+                instrument_code: "MYSTERY_COIN".into(),
+                instrument_type: InstrumentType::InstTypeSpot as i32,
+                exch_account_code: "TEST_ACCT".into(),
+                qty: 42.0,
+                avail_qty: 40.0,
+                update_timestamp: 123,
+                ..Default::default()
+            }],
+        },
+    ));
 
     let (resolved, unknown) = oms_actor::build_exch_balances(&core);
     assert!(resolved.is_empty());
@@ -1117,14 +1120,8 @@ mod bootstrap_tests {
         let outcome = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap();
         assert_eq!(outcome.runtime_config.oms_id, "oms_test_1");
         assert_eq!(outcome.runtime_config.env, "dev");
-        assert_eq!(
-            outcome.runtime_config.redis_url,
-            "redis://localhost:6379"
-        );
-        assert_eq!(
-            outcome.runtime_config.pg_url,
-            "postgres://localhost/test"
-        );
+        assert_eq!(outcome.runtime_config.redis_url, "redis://localhost:6379");
+        assert_eq!(outcome.runtime_config.pg_url, "postgres://localhost/test");
         // Defaults should be applied for fields not in JSON.
         assert!(outcome.runtime_config.risk_check_enabled);
         assert_eq!(outcome.runtime_config.cmd_channel_buf, 4096);
@@ -1184,16 +1181,11 @@ mod bootstrap_tests {
     fn test_pilot_mode_empty_redis_url_fails() {
         let boot = test_boot_cfg();
         let mode = BootstrapMode::Pilot {
-            payload: pilot_payload(
-                r#"{"redis_url":"","pg_url":"postgres://localhost/test"}"#,
-            ),
+            payload: pilot_payload(r#"{"redis_url":"","pg_url":"postgres://localhost/test"}"#),
             validate_hash: false,
         };
         let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
-        assert!(matches!(
-            err,
-            BootstrapConfigError::MissingField { .. }
-        ));
+        assert!(matches!(err, BootstrapConfigError::MissingField { .. }));
     }
 
     #[test]
@@ -1222,10 +1214,7 @@ mod bootstrap_tests {
             validate_hash: true,
         };
         let outcome = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap();
-        assert_eq!(
-            outcome.runtime_config.redis_url,
-            "redis://localhost:6379"
-        );
+        assert_eq!(outcome.runtime_config.redis_url, "redis://localhost:6379");
     }
 
     #[test]
@@ -1238,10 +1227,7 @@ mod bootstrap_tests {
         };
         // Empty object means redis_url/pg_url are empty strings → MissingField.
         let err = bootstrap_runtime_config::<OmsService>(&boot, mode).unwrap_err();
-        assert!(matches!(
-            err,
-            BootstrapConfigError::MissingField { .. }
-        ));
+        assert!(matches!(err, BootstrapConfigError::MissingField { .. }));
     }
 
     #[test]
@@ -1252,8 +1238,7 @@ mod bootstrap_tests {
         std::env::set_var("ZK_PG_URL", "postgres://localhost/test");
 
         let boot = zk_oms_svc::config::load_bootstrap().unwrap();
-        let outcome =
-            bootstrap_runtime_config::<OmsService>(&boot, BootstrapMode::Direct).unwrap();
+        let outcome = bootstrap_runtime_config::<OmsService>(&boot, BootstrapMode::Direct).unwrap();
         let cfg = outcome.runtime_config;
 
         // Check all defaults.
@@ -1341,12 +1326,8 @@ mod bootstrap_tests {
         std::env::set_var("ZK_PG_URL", "postgres://localhost/test");
 
         let boot = zk_oms_svc::config::load_bootstrap().unwrap();
-        let outcome =
-            bootstrap_runtime_config::<OmsService>(&boot, BootstrapMode::Direct).unwrap();
-        assert_eq!(
-            outcome.source,
-            zk_infra_rs::bootstrap::ConfigSource::Direct
-        );
+        let outcome = bootstrap_runtime_config::<OmsService>(&boot, BootstrapMode::Direct).unwrap();
+        assert_eq!(outcome.source, zk_infra_rs::bootstrap::ConfigSource::Direct);
 
         std::env::remove_var("ZK_OMS_ID");
         std::env::remove_var("ZK_REDIS_URL");

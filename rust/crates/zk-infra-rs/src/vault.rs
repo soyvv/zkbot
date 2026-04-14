@@ -137,10 +137,7 @@ pub fn expand_logical_ref(logical_ref: &str, env: &str, context: &RefContext) ->
                 format!("kv/zkbot/{env}/venues/{venue}/secrets/{label}")
             } else {
                 // Non-venue service → service-kind-scoped secret
-                format!(
-                    "kv/zkbot/{env}/services/{}/{}",
-                    context.service_kind, label
-                )
+                format!("kv/zkbot/{env}/services/{}/{}", context.service_kind, label)
             }
         }
         _ => format!("kv/zkbot/{env}/refs/{logical_ref}"),
@@ -167,10 +164,7 @@ pub trait SecretResolver: Send + Sync {
     async fn resolve(&self, logical_ref: &str, field_key: &str) -> Result<String, SecretError>;
 
     /// Read all fields from a secret path as a string map.
-    async fn read_document(
-        &self,
-        path: &str,
-    ) -> Result<HashMap<String, String>, SecretError>;
+    async fn read_document(&self, path: &str) -> Result<HashMap<String, String>, SecretError>;
 
     async fn resolve_all(&self, refs: &[SecretRef]) -> Vec<Result<ResolvedSecret, SecretError>> {
         let mut results = Vec::with_capacity(refs.len());
@@ -248,9 +242,7 @@ impl VaultSecretResolver {
                 if !resp.status().is_success() {
                     let status = resp.status();
                     let body = resp.text().await.unwrap_or_default();
-                    return Err(SecretError::LoginFailed(format!(
-                        "HTTP {status}: {body}"
-                    )));
+                    return Err(SecretError::LoginFailed(format!("HTTP {status}: {body}")));
                 }
 
                 let login: VaultLoginResponse = resp
@@ -272,10 +264,7 @@ impl VaultSecretResolver {
     /// Read all fields from a Vault KV v2 secret path as a string map.
     ///
     /// Returns the full secret document. Callers pick which fields they need.
-    pub async fn read_document(
-        &self,
-        path: &str,
-    ) -> Result<HashMap<String, String>, SecretError> {
+    pub async fn read_document(&self, path: &str) -> Result<HashMap<String, String>, SecretError> {
         let (mount, rest) = path
             .split_once('/')
             .ok_or_else(|| SecretError::PathNotFound(format!("invalid vault path: {path}")))?;
@@ -366,10 +355,7 @@ impl SecretResolver for VaultSecretResolver {
         self.read_kv(logical_ref, field_key).await
     }
 
-    async fn read_document(
-        &self,
-        path: &str,
-    ) -> Result<HashMap<String, String>, SecretError> {
+    async fn read_document(&self, path: &str) -> Result<HashMap<String, String>, SecretError> {
         self.read_document(path).await
     }
 }
@@ -390,7 +376,10 @@ impl DevSecretResolver {
     }
 
     fn env_key(logical_ref: &str, field_key: &str) -> String {
-        let ref_part = logical_ref.replace('/', "_").replace('-', "_").to_uppercase();
+        let ref_part = logical_ref
+            .replace('/', "_")
+            .replace('-', "_")
+            .to_uppercase();
         let field_part = field_key.replace('-', "_").to_uppercase();
         format!("ZK_SECRET_{ref_part}_{field_part}")
     }
@@ -412,10 +401,7 @@ impl SecretResolver for DevSecretResolver {
         })
     }
 
-    async fn read_document(
-        &self,
-        path: &str,
-    ) -> Result<HashMap<String, String>, SecretError> {
+    async fn read_document(&self, path: &str) -> Result<HashMap<String, String>, SecretError> {
         // Scan env vars matching ZK_SECRET_{PATH}_* and collect them.
         let prefix = {
             let ref_part = path.replace('/', "_").replace('-', "_").to_uppercase();
@@ -443,10 +429,7 @@ impl SecretResolver for DevSecretResolver {
 /// Extract a Vault path from `venue_config` at a given JSON pointer.
 ///
 /// Returns `None` if the pointer is absent or the value is empty.
-pub fn extract_secret_ref(
-    venue_config: &serde_json::Value,
-    pointer: &str,
-) -> Option<String> {
+pub fn extract_secret_ref(venue_config: &serde_json::Value, pointer: &str) -> Option<String> {
     venue_config
         .pointer(pointer)
         .and_then(|v| v.as_str())
@@ -569,9 +552,7 @@ mod tests {
     #[tokio::test]
     async fn test_dev_resolver_read_document_empty() {
         let resolver = DevSecretResolver::new();
-        let result = resolver
-            .read_document("kv/nonexistent/path/999")
-            .await;
+        let result = resolver.read_document("kv/nonexistent/path/999").await;
         assert!(result.is_err());
     }
 }

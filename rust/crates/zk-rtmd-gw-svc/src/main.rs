@@ -260,7 +260,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let adapter_events = Arc::clone(&adapter);
     let publisher_events = Arc::clone(&publisher);
-    tokio::spawn(async move {
+    let event_loop_handle = tokio::spawn(async move {
         loop {
             match adapter_events.next_event().await {
                 Ok(event) => {
@@ -294,22 +294,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(RtmdQueryServiceServer::new(handler))
         .serve_with_incoming(incoming);
 
-    let fenced = tokio::select! {
+    let reason = tokio::select! {
         r = grpc_server => {
             r?;
-            false
+            None
         }
-        _ = tokio::signal::ctrl_c() => {
-            info!("shutdown signal received");
-            false
-        }
-        _ = registration.wait_fenced() => {
-            tracing::warn!("KV fencing detected — shutting down");
-            true
-        }
+        reason = registration.wait_shutdown() => Some(reason)
     };
 
-    if !fenced {
+    let should_deregister = match reason {
+        Some(r) => {
+            info!(%r, "shutting down");
+            !r.is_fenced()
+        }
+        None => true, // gRPC server exited — still deregister
+    };
+
+    // Abort the event-loop consumer task first so it doesn't schedule new
+    // spawn_blocking calls while we're shutting down the adapter.
+    event_loop_handle.abort();
+
+    // Shut down the adapter: sets shutdown flag, cancels asyncio tasks (to
+    // unblock in-flight spawn_blocking threads), calls Python shutdown() to
+    // clean up streams/clients, then stops the event loop and joins the thread.
+    if let Err(e) = adapter.shutdown().await {
+        tracing::warn!(error = %e, "adapter shutdown failed");
+    }
+
+    if should_deregister {
         registration.deregister().await.ok();
     }
 

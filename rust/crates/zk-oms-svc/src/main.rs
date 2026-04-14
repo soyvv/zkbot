@@ -22,19 +22,14 @@
 use zk_oms_svc::{
     config::{self, OmsService},
     config_introspection::OmsConfigIntrospection,
-    db,
-    grpc_handler,
-    gw_client,
+    db, grpc_handler, gw_client,
     gw_executor::GwExecutorPool,
     latency::LatencyEvent,
-    nats_handler,
-    oms_actor,
+    nats_handler, oms_actor,
     persist_executor::PersistExecutorPool,
-    reconcile,
     proto,
     publish_executor::PublishExecutorPool,
-    recorder_executor,
-    redis_writer,
+    reconcile, recorder_executor, redis_writer,
 };
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -61,10 +56,6 @@ use zk_infra_rs::{
     tracing as zk_tracing,
 };
 use zk_oms_rs::{config::ConfdataManager, oms_core_v2::OmsCoreV2};
-use zk_proto_rs::zk::{
-    exch_gw::v1::{BalanceUpdate, PositionReport},
-    gateway::v1::PositionResponse,
-};
 
 fn gateway_addr_from_registration(value: &[u8]) -> anyhow::Result<String> {
     let reg = zk_infra_rs::discovery_registration::decode_registration(value)?;
@@ -73,7 +64,9 @@ fn gateway_addr_from_registration(value: &[u8]) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("gateway registration missing endpoint"))?;
     let addr = endpoint.address.trim();
     if addr.is_empty() {
-        return Err(anyhow::anyhow!("gateway registration has empty endpoint address"));
+        return Err(anyhow::anyhow!(
+            "gateway registration has empty endpoint address"
+        ));
     }
     if addr.starts_with("http://") || addr.starts_with("https://") {
         Ok(addr.to_string())
@@ -82,69 +75,11 @@ fn gateway_addr_from_registration(value: &[u8]) -> anyhow::Result<String> {
     }
 }
 
-fn exch_account_code_for_gw(confdata: &ConfdataManager, gw_key: &str) -> Option<String> {
-    confdata
-        .gw_key_to_account_ids
-        .get(gw_key)
-        .and_then(|account_ids| {
-            account_ids
-                .iter()
-                .find_map(|account_id| confdata.account_routes.get(account_id))
-        })
-        .map(|route| route.exch_account_id.clone())
-}
-
-fn normalize_gw_balance_update_for_oms(
-    confdata: &ConfdataManager,
-    gw_key: &str,
-    mut update: BalanceUpdate,
-) -> BalanceUpdate {
-    let fallback_exch_account = exch_account_code_for_gw(confdata, gw_key).unwrap_or_default();
-    for balance in &mut update.balances {
-        if balance.exch_account_code.trim().is_empty() {
-            balance.exch_account_code = fallback_exch_account.clone();
-        }
-    }
-    update
-}
-
-fn position_response_to_balance_update_for_oms(
-    confdata: &ConfdataManager,
-    gw_key: &str,
-    response: &PositionResponse,
-) -> BalanceUpdate {
-    use zk_proto_rs::zk::common::v1::InstrumentType;
-
-    let fallback_exch_account = exch_account_code_for_gw(confdata, gw_key).unwrap_or_default();
-    let balances = response
-        .positions
-        .iter()
-        .map(|p| {
-            let exch_account_code = confdata
-                .account_routes
-                .get(&p.account_id)
-                .map(|route| route.exch_account_id.clone())
-                .unwrap_or_else(|| fallback_exch_account.clone());
-
-            PositionReport {
-                instrument_code: p.instrument_code.clone(),
-                instrument_type: if p.instrument_type != 0 {
-                    p.instrument_type
-                } else if p.instrument_code.contains("SWAP") {
-                    InstrumentType::InstTypePerp as i32
-                } else {
-                    InstrumentType::InstTypeSpot as i32
-                },
-                long_short_type: p.long_short_type,
-                qty: p.total_qty,
-                avail_qty: p.avail_qty,
-                exch_account_code,
-                ..Default::default()
-            }
-        })
-        .collect();
-    BalanceUpdate { balances }
-}
+// Balance/position normalization helpers are in oms_actor — used in tests.
+#[cfg(test)]
+use crate::oms_actor::{
+    normalize_gw_balance_update_for_oms, position_response_to_balance_update_for_oms,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -165,11 +100,9 @@ async fn main() -> anyhow::Result<()> {
     // ── 4. Determine mode and assemble runtime config ────────────────────────
     let (pilot_grant, outcome) = if boot_cfg.bootstrap_token.is_empty() {
         // Direct mode: load provided config from env vars, assemble runtime config.
-        let outcome = bootstrap::bootstrap_runtime_config::<OmsService>(
-            &boot_cfg,
-            BootstrapMode::Direct,
-        )
-        .expect("Failed to assemble runtime config (direct mode)");
+        let outcome =
+            bootstrap::bootstrap_runtime_config::<OmsService>(&boot_cfg, BootstrapMode::Direct)
+                .expect("Failed to assemble runtime config (direct mode)");
         info!(source = "direct", "runtime config assembled");
         (None, outcome)
     } else {
@@ -340,15 +273,15 @@ async fn main() -> anyhow::Result<()> {
         }
         let kv_key = format!("{}.{}", cfg.gateway_kv_prefix, gw_id);
         match kv_registry.get(&kv_key).await {
-            Ok(Some(value)) => {
-                match gateway_addr_from_registration(value.as_ref()) {
-                    Ok(addr) => match gw_pool.connect(gw_id.clone(), &addr).await {
-                        Ok(_) => info!(gw_id, addr, "gateway gRPC connected (direct KV probe)"),
-                        Err(e) => warn!(gw_id, error = %e, "gateway gRPC connect failed"),
-                    },
-                    Err(e) => warn!(gw_id, kv_key, error = %e, "gateway KV entry missing usable endpoint"),
+            Ok(Some(value)) => match gateway_addr_from_registration(value.as_ref()) {
+                Ok(addr) => match gw_pool.connect(gw_id.clone(), &addr).await {
+                    Ok(_) => info!(gw_id, addr, "gateway gRPC connected (direct KV probe)"),
+                    Err(e) => warn!(gw_id, error = %e, "gateway gRPC connect failed"),
+                },
+                Err(e) => {
+                    warn!(gw_id, kv_key, error = %e, "gateway KV entry missing usable endpoint")
                 }
-            }
+            },
             Ok(None) => warn!(
                 gw_id,
                 kv_key, "gateway not registered in KV — will connect when it registers"
@@ -359,91 +292,18 @@ async fn main() -> anyhow::Result<()> {
 
     // ── 10. Balance/position reconciliation ──────────────────────────────────
     {
-        use zk_oms_rs::models_v2::OmsActionV2;
-        use zk_proto_rs::zk::gateway::v1::{QueryAccountRequest, QueryPositionRequest};
-
-        // Query each connected gateway once for account balances/positions.
         let gw_keys: Vec<String> = gw_pool.gw_keys().map(String::from).collect();
         for gw_key in &gw_keys {
-            let req = QueryAccountRequest::default();
-            match gw_pool.query_account_balance(gw_key, req).await {
-                Ok(resp) => {
-                    if let Some(balance_update) = resp.balance_update {
-                        let balance_update =
-                            normalize_gw_balance_update_for_oms(&confdata, gw_key, balance_update);
-                        let actions = core.process_message(
-                            zk_oms_rs::models::OmsMessage::BalanceUpdate(balance_update),
-                        );
-                        for action in &actions {
-                            match action {
-                                OmsActionV2::PersistBalance {
-                                    account_id,
-                                    asset_id,
-                                } => {
-                                    oms_actor::persist_balance_to_redis(
-                                        &core,
-                                        &mut redis_writer,
-                                        *account_id,
-                                        *asset_id,
-                                    )
-                                    .await;
-                                }
-                                OmsActionV2::PersistPosition {
-                                    account_id,
-                                    instrument_id,
-                                } => {
-                                    oms_actor::persist_position_to_redis(
-                                        &core,
-                                        &mut redis_writer,
-                                        *account_id,
-                                        *instrument_id,
-                                    )
-                                    .await;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    match gw_pool.query_position(gw_key, QueryPositionRequest {}).await {
-                        Ok(pos_resp) => {
-                            if !pos_resp.positions.is_empty() {
-                                let balance_update = position_response_to_balance_update_for_oms(
-                                    &confdata, gw_key, &pos_resp,
-                                );
-                                let actions = core.process_message(
-                                    zk_oms_rs::models::OmsMessage::BalanceUpdate(balance_update),
-                                );
-                                for action in &actions {
-                                    match action {
-                                        OmsActionV2::PersistBalance { account_id, asset_id } => {
-                                            oms_actor::persist_balance_to_redis(
-                                                &core,
-                                                &mut redis_writer,
-                                                *account_id,
-                                                *asset_id,
-                                            )
-                                            .await;
-                                        }
-                                        OmsActionV2::PersistPosition { account_id, instrument_id } => {
-                                            oms_actor::persist_position_to_redis(
-                                                &core,
-                                                &mut redis_writer,
-                                                *account_id,
-                                                *instrument_id,
-                                            )
-                                            .await;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => warn!(gw_key, error = %e, "startup position reconcile failed"),
-                    }
-                    info!(gw_key, "startup reconcile succeeded");
-                }
-                Err(e) => warn!(gw_key, error = %e, "startup reconcile failed"),
-            }
+            oms_actor::resync_gw_balance_position(
+                gw_key,
+                &mut core,
+                &mut redis_writer,
+                &mut gw_pool,
+                &confdata,
+                "startup",
+            )
+            .await;
+            info!(gw_key, "startup balance/position reconcile succeeded");
         }
         info!("startup balance reconciliation complete");
     }
@@ -461,9 +321,8 @@ async fn main() -> anyhow::Result<()> {
             core: &mut zk_oms_rs::oms_core_v2::OmsCoreV2,
             redis_writer: &mut redis_writer::RedisWriter,
         ) {
-            let actions = core.process_message(
-                zk_oms_rs::models::OmsMessage::GatewayOrderReport(report),
-            );
+            let actions =
+                core.process_message(zk_oms_rs::models::OmsMessage::GatewayOrderReport(report));
             for action in &actions {
                 match action {
                     OmsActionV2::PersistOrder { order_id, .. } => {
@@ -510,7 +369,10 @@ async fn main() -> anyhow::Result<()> {
                         continue;
                     }
                     Err(_) => {
-                        warn!(gw_key, "startup order reconcile: open orders query timed out, skipping");
+                        warn!(
+                            gw_key,
+                            "startup order reconcile: open orders query timed out, skipping"
+                        );
                         continue;
                     }
                 };
@@ -560,7 +422,10 @@ async fn main() -> anyhow::Result<()> {
                             vec![]
                         }
                         Err(_) => {
-                            warn!(gw_key, "startup order reconcile: detail query timed out, using fallback");
+                            warn!(
+                                gw_key,
+                                "startup order reconcile: detail query timed out, using fallback"
+                            );
                             vec![]
                         }
                     };
@@ -663,14 +528,19 @@ async fn main() -> anyhow::Result<()> {
         let mut discovery_rx = discovery.subscribe();
         let configured_gws: std::collections::HashSet<String> =
             confdata.gw_configs.keys().cloned().collect();
-        let gw_id_lookup: std::collections::HashMap<String, u32> =
-            gw_id_to_key.iter().map(|(id, key)| (key.clone(), *id)).collect();
+        let gw_id_lookup: std::collections::HashMap<String, u32> = gw_id_to_key
+            .iter()
+            .map(|(id, key)| (key.clone(), *id))
+            .collect();
         let gw_prefix = format!("{}.", cfg.gateway_kv_prefix);
         let cmd_tx = cmd_tx.clone();
         tokio::spawn(async move {
             loop {
                 match discovery_rx.recv().await {
-                    Ok(zk_infra_rs::nats_kv_discovery::DiscoveryEvent::Upsert { key, registration }) => {
+                    Ok(zk_infra_rs::nats_kv_discovery::DiscoveryEvent::Upsert {
+                        key,
+                        registration,
+                    }) => {
                         if registration.service_type != "gw" {
                             continue;
                         }
@@ -750,6 +620,7 @@ async fn main() -> anyhow::Result<()> {
         Duration::from_secs(cfg.metrics_interval_secs),
         cfg.metrics_max_pending,
         cfg.metrics_max_complete,
+        confdata.clone(),
     );
 
     // ── 12. Start gRPC server ────────────────────────────────────────────────
@@ -873,24 +744,14 @@ async fn main() -> anyhow::Result<()> {
         interval.tick().await; // skip first tick — startup reconcile already ran
         loop {
             interval.tick().await;
-            let _ = order_recheck_tx
-                .send(OmsCommand::OrderReconcile)
-                .await;
+            let _ = order_recheck_tx.send(OmsCommand::OrderReconcile).await;
         }
     });
 
     // ── 16. Await shutdown signal or KV fencing ─────────────────────────────
     info!("zk-oms-svc running — press Ctrl-C to stop");
-    let fenced = tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            info!("shutdown signal received");
-            false
-        }
-        _ = registration.wait_fenced() => {
-            warn!("KV fencing detected — another instance owns this identity, shutting down");
-            true
-        }
-    };
+    let reason = registration.wait_shutdown().await;
+    info!(%reason, "shutting down");
 
     // Signal all tasks to stop.
     shutdown.cancel();
@@ -904,19 +765,17 @@ async fn main() -> anyhow::Result<()> {
 
     // Deregister from NATS KV only on clean shutdown (not when fenced — the
     // new owner already holds the key).
-    if !fenced {
+    if !reason.is_fenced() {
         registration.deregister().await.ok();
     }
 
-info!("zk-oms-svc stopped");
+    info!("zk-oms-svc stopped");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        normalize_gw_balance_update_for_oms, position_response_to_balance_update_for_oms,
-    };
+    use super::{normalize_gw_balance_update_for_oms, position_response_to_balance_update_for_oms};
     use zk_oms_rs::config::ConfdataManager;
     use zk_proto_rs::ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry};
     use zk_proto_rs::zk::{
@@ -981,15 +840,36 @@ mod tests {
             }],
         };
 
-        let update = position_response_to_balance_update_for_oms(
-            &confdata,
-            "gw_okx_demo1",
-            &response,
-        );
+        let update =
+            position_response_to_balance_update_for_oms(&confdata, "gw_okx_demo1", &response);
         assert_eq!(update.balances[0].exch_account_code, "OKX-DEMO-1");
         assert_eq!(
             update.balances[0].instrument_type,
             InstrumentType::InstTypePerp as i32
         );
+    }
+
+    #[test]
+    fn startup_position_reconcile_treats_oanda_underscore_symbols_as_cfd() {
+        let confdata = test_confdata();
+        let response = PositionResponse {
+            positions: vec![Position {
+                account_id: 8002,
+                instrument_code: "BTC_USD".into(),
+                instrument_type: 0,
+                long_short_type: LongShortType::LsLong as i32,
+                total_qty: 0.02,
+                avail_qty: 0.02,
+                ..Default::default()
+            }],
+        };
+
+        let update =
+            position_response_to_balance_update_for_oms(&confdata, "gw_okx_demo1", &response);
+        assert_eq!(
+            update.balances[0].instrument_type,
+            InstrumentType::InstTypeCfd as i32
+        );
+        assert_eq!(update.balances[0].instrument_code, "BTC_USD");
     }
 }

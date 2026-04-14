@@ -9,9 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use prost::Message;
-use zk_proto_rs::zk::discovery::v1::{
-    ServiceRegistration as SvcRegProto, TransportEndpoint,
-};
+use zk_proto_rs::zk::discovery::v1::{ServiceRegistration as SvcRegProto, TransportEndpoint};
 
 /// Build a gRPC transport endpoint.
 pub fn grpc_endpoint(address: impl Into<String>, authority: Option<String>) -> TransportEndpoint {
@@ -56,11 +54,7 @@ pub fn engine_registration(
 }
 
 /// Build an OMS service registration.
-pub fn oms_registration(
-    oms_id: &str,
-    grpc_address: &str,
-    account_ids: &[i64],
-) -> SvcRegProto {
+pub fn oms_registration(oms_id: &str, grpc_address: &str, account_ids: &[i64]) -> SvcRegProto {
     SvcRegProto {
         service_type: "oms".to_string(),
         service_id: oms_id.to_string(),

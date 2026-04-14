@@ -22,6 +22,13 @@ pub trait RtmdVenueAdapter: Send + Sync {
     /// Block until the next market data event is available.
     async fn next_event(&self) -> Result<RtmdEvent>;
 
+    /// Gracefully shut down the adapter: cancel background tasks, close
+    /// connections, and release resources. Called by the RTMD host before
+    /// process exit. The default implementation is a no-op.
+    async fn shutdown(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Map an internal `instrument_code` to the venue-native `instrument_exch` used in
     /// NATS subject names. Returns `None` if the mapping is unknown (caller should fall
     /// back to using `instrument_code` directly).

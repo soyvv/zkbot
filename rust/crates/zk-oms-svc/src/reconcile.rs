@@ -21,7 +21,7 @@ use tracing::info;
 
 use zk_proto_rs::zk::common::v1::{Rejection, RejectionReason, RejectionSource};
 use zk_proto_rs::zk::exch_gw::v1::{
-    order_report_entry, ExchangeOrderStatus, ExecReport, ExchExecType, OrderReport,
+    order_report_entry, ExchExecType, ExchangeOrderStatus, ExecReport, OrderReport,
     OrderReportEntry, OrderReportType, OrderSourceType, OrderStateReport,
 };
 use zk_proto_rs::zk::gateway::v1::ExchOrder;
@@ -59,11 +59,15 @@ pub fn extract_open_order_snapshots(core: &OmsCoreV2) -> Vec<OmsOrderSnapshot> {
             .exch_order_ref_id
             .and_then(|id| core.orders.dyn_strings.try_resolve(id))
             .map(|s| s.to_owned());
-        let instrument = if let Some(inst) = core.metadata.instruments.get(live.instrument_id as usize) {
-            core.metadata.strings.resolve(inst.instrument_code_sym).to_owned()
-        } else {
-            continue;
-        };
+        let instrument =
+            if let Some(inst) = core.metadata.instruments.get(live.instrument_id as usize) {
+                core.metadata
+                    .strings
+                    .resolve(inst.instrument_code_sym)
+                    .to_owned()
+            } else {
+                continue;
+            };
         snapshots.push(OmsOrderSnapshot {
             order_id: *oid,
             account_id: live.account_id,
@@ -158,8 +162,7 @@ pub fn reconcile_orders_against_gateway(
                     // query to determine actual terminal state.
                     info!(
                         order_id = snap.order_id,
-                        exch_ref,
-                        "reconcile: order absent from open orders, querying details"
+                        exch_ref, "reconcile: order absent from open orders, querying details"
                     );
                     needs_detail.push(snap.clone());
                     result.orders_need_detail += 1;
@@ -231,8 +234,7 @@ pub fn resolve_missing_order(
     // last known fill state. This is the least-information path.
     info!(
         order_id = snap.order_id,
-        exch_ref,
-        "reconcile: no detail found, falling back to synthetic cancel"
+        exch_ref, "reconcile: no detail found, falling back to synthetic cancel"
     );
     make_synthetic_state_report(
         snap.order_id,
@@ -254,7 +256,12 @@ fn extract_gw_order_state(order: &ExchOrder) -> Option<(f64, f64, f64, i32)> {
     for entry in &report.order_report_entries {
         if entry.report_type == OrderReportType::OrderRepTypeState as i32 {
             if let Some(order_report_entry::Report::OrderStateReport(s)) = &entry.report {
-                return Some((s.filled_qty, s.unfilled_qty, s.avg_price, s.exch_order_status));
+                return Some((
+                    s.filled_qty,
+                    s.unfilled_qty,
+                    s.avg_price,
+                    s.exch_order_status,
+                ));
             }
         }
     }
@@ -565,7 +572,10 @@ mod tests {
                 ExchangeOrderStatus::ExchOrderStatusFilled as i32,
                 "should use actual Filled status, not Cancelled"
             );
-            assert!((s.filled_qty - 1.0).abs() < 1e-12, "should use actual fill qty");
+            assert!(
+                (s.filled_qty - 1.0).abs() < 1e-12,
+                "should use actual fill qty"
+            );
         } else {
             panic!("expected OrderStateReport");
         }
@@ -631,7 +641,10 @@ mod tests {
         // for SingleOrderQuery.symbol in the service layer.
         let snap = make_snapshot(1, "gw1", Some("exch-1"), 0.0);
         assert_eq!(snap.instrument, "BTC/USDT@SIM");
-        assert!(!snap.instrument.is_empty(), "instrument must be non-empty for venue queries");
+        assert!(
+            !snap.instrument.is_empty(),
+            "instrument must be non-empty for venue queries"
+        );
     }
 
     #[test]

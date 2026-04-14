@@ -16,6 +16,8 @@ fn infer_instrument_type(instrument: &str) -> i32 {
         || instrument.contains('-') && instrument.matches('-').count() >= 2
     {
         InstrumentType::InstTypeFuture as i32
+    } else if instrument.contains('_') {
+        InstrumentType::InstTypeCfd as i32
     } else {
         InstrumentType::InstTypeSpot as i32
     }
@@ -146,9 +148,14 @@ impl SemanticPipeline {
                 self.published_position_keys.insert(key);
             }
 
+            let inst_type = if fact.instrument_type != 0 {
+                fact.instrument_type
+            } else {
+                infer_instrument_type(&fact.instrument)
+            };
             position_reports.push(PositionReport {
                 instrument_code: fact.instrument.clone(),
-                instrument_type: infer_instrument_type(&fact.instrument),
+                instrument_type: inst_type,
                 long_short_type: fact.long_short_type,
                 qty: fact.qty,
                 avail_qty: fact.avail_qty,
@@ -222,6 +229,20 @@ mod tests {
         assert_eq!(
             infer_instrument_type("BTC-USDT"),
             InstrumentType::InstTypeSpot as i32
+        );
+    }
+
+    #[test]
+    fn oanda_cfd_uses_heuristic_fallback_as_cfd() {
+        // Without explicit instrument_type, OANDA-style symbols should still
+        // classify as CFD so they do not leak into balance state.
+        assert_eq!(
+            infer_instrument_type("BTC_USD"),
+            InstrumentType::InstTypeCfd as i32
+        );
+        assert_eq!(
+            infer_instrument_type("EUR_USD"),
+            InstrumentType::InstTypeCfd as i32
         );
     }
 }

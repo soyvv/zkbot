@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,6 +16,8 @@ use zk_gw_types::*;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// Timeout for next_event — long-lived blocking coroutine.
 const EVENT_TIMEOUT: Duration = Duration::from_secs(300);
+/// Timeout for adapter shutdown (Python side + event loop thread join).
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Python-backed venue gateway adapter.
 ///
@@ -23,6 +26,8 @@ const EVENT_TIMEOUT: Duration = Duration::from_secs(300);
 pub struct PyVenueAdapter {
     obj: Py<PyAny>,
     event_loop: Arc<PyEventLoop>,
+    event_timeout: Duration,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl PyVenueAdapter {
@@ -30,7 +35,14 @@ impl PyVenueAdapter {
         Self {
             obj: handle.inner,
             event_loop: handle.event_loop,
+            event_timeout: EVENT_TIMEOUT,
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Override the event timeout (for testing).
+    pub fn set_event_timeout(&mut self, timeout: Duration) {
+        self.event_timeout = timeout;
     }
 }
 
@@ -231,37 +243,110 @@ impl VenueAdapter for PyVenueAdapter {
         )
     }
 
+    async fn shutdown(&self) -> anyhow::Result<()> {
+        // 1. Set shutdown flag so next_event() stops retrying.
+        self.shutting_down.store(true, Ordering::Release);
+
+        // 2. Cancel all pending asyncio tasks — this unblocks any
+        //    spawn_blocking threads waiting on Future.result().
+        self.event_loop.cancel_all_tasks();
+
+        // 3. Brief yield to let cancellations propagate through the event loop
+        //    and unblock spawn_blocking threads.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // 4. Call Python adapter's shutdown() if it exists (clean up streams, clients).
+        let has_shutdown = Python::with_gil(|py| self.obj.getattr(py, "shutdown").is_ok());
+        if has_shutdown {
+            tracing::info!("calling Python adapter shutdown()");
+            if let Err(e) =
+                call_void(&self.obj, &self.event_loop, "shutdown", SHUTDOWN_TIMEOUT).await
+            {
+                tracing::warn!(error = %e, "Python adapter shutdown() failed");
+            }
+        }
+
+        // 5. Stop the asyncio event loop and join its thread.
+        self.event_loop.stop_and_join(SHUTDOWN_TIMEOUT);
+        Ok(())
+    }
+
     async fn next_event(&self) -> anyhow::Result<VenueEvent> {
-        let obj = Python::with_gil(|py| self.obj.clone_ref(py));
-        let loop_ref = self.event_loop.loop_ref();
-        let timeout_secs = EVENT_TIMEOUT.as_secs_f64();
+        // Retry loop: next_event() has indefinite-wait semantics.
+        // The bridge timeout is an internal watchdog, not a caller-visible error.
+        loop {
+            if self.shutting_down.load(Ordering::Acquire) {
+                anyhow::bail!("adapter shutting down");
+            }
+            let obj = Python::with_gil(|py| self.obj.clone_ref(py));
+            let loop_ref = self.event_loop.loop_ref();
+            let timeout_secs = self.event_timeout.as_secs_f64();
 
-        let event = tokio::time::timeout(
-            EVENT_TIMEOUT + Duration::from_secs(5),
-            tokio::task::spawn_blocking(move || {
-                Python::with_gil(|py| {
-                    let coro = obj
-                        .call_method0(py, "next_event")
-                        .map_err(|e| PyBridgeError::PythonCall(e.to_string()))?;
-                    let asyncio = py.import_bound("asyncio")
-                        .map_err(|e| PyBridgeError::PythonCall(format!("import asyncio: {e}")))?;
-                    let future = asyncio
-                        .call_method1(
-                            "run_coroutine_threadsafe",
-                            (coro.into_bound(py), loop_ref.bind(py)),
-                        )
-                        .map_err(|e| PyBridgeError::PythonCall(format!("next_event: {e}")))?;
-                    let result = future
-                        .call_method1("result", (timeout_secs,))
-                        .map_err(|e| PyBridgeError::PythonCall(format!("next_event: {e}")))?;
-                    py_types::decode_venue_event(py, &result)
-                })
-            }),
-        )
-        .await
-        .map_err(|_| PyBridgeError::TransientError("next_event timed out".into()))?
-        .map_err(|e| PyBridgeError::PythonCall(format!("spawn_blocking join: {e}")))?;
+            let result = tokio::time::timeout(
+                self.event_timeout + Duration::from_secs(5),
+                tokio::task::spawn_blocking(move || {
+                    Python::with_gil(|py| {
+                        let coro = obj
+                            .call_method0(py, "next_event")
+                            .map_err(|e| PyBridgeError::PythonCall(e.to_string()))?;
+                        let asyncio = py.import_bound("asyncio")
+                            .map_err(|e| {
+                                PyBridgeError::PythonCall(format!("import asyncio: {e}"))
+                            })?;
+                        let future = asyncio
+                            .call_method1(
+                                "run_coroutine_threadsafe",
+                                (coro.into_bound(py), loop_ref.bind(py)),
+                            )
+                            .map_err(|e| {
+                                PyBridgeError::PythonCall(format!("next_event: {e}"))
+                            })?;
+                        let result = future
+                            .call_method1("result", (timeout_secs,));
+                        match result {
+                            Ok(val) => py_types::decode_venue_event(py, &val),
+                            Err(e) => {
+                                // Cancel the Python coroutine before propagating.
+                                // run_coroutine_threadsafe returns a concurrent.futures.Future
+                                // whose .cancel() also cancels the underlying asyncio task,
+                                // preventing orphaned coroutines on retry.
+                                let _ = future.call_method0("cancel");
+                                Err(PyBridgeError::PythonCall(format!("next_event: {e}")))
+                            }
+                        }
+                    })
+                }),
+            )
+            .await;
 
-        event.map_err(|e| e.into())
+            match result {
+                // Happy path: got an event.
+                Ok(Ok(Ok(event))) => return Ok(event),
+                // Python error — check if it's the specific idle timeout from
+                // Future.result(timeout) raising concurrent.futures.TimeoutError.
+                Ok(Ok(Err(e))) => {
+                    if let PyBridgeError::PythonCall(ref msg) = e {
+                        if msg.starts_with("next_event: TimeoutError") {
+                            tracing::debug!("next_event: idle timeout, re-polling");
+                            continue;
+                        }
+                    }
+                    return Err(e.into());
+                }
+                // spawn_blocking JoinError — fatal.
+                Ok(Err(join_err)) => {
+                    return Err(PyBridgeError::PythonCall(format!(
+                        "spawn_blocking join: {join_err}"
+                    ))
+                    .into());
+                }
+                // Tokio outer timeout — Python-side should have fired first,
+                // but if not, also treat as idle retry.
+                Err(_elapsed) => {
+                    tracing::debug!("next_event: tokio timeout elapsed, re-polling");
+                    continue;
+                }
+            }
+        }
     }
 }

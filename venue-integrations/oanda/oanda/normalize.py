@@ -301,11 +301,15 @@ def normalize_trades(trades_resp: dict) -> list[dict]:
     return [normalize_trade(t) for t in trades]
 
 
+_INST_TYPE_CFD = 4  # proto InstrumentType.INST_TYPE_CFD
+
+
 def normalize_positions(positions_resp: dict, account_id: int) -> list[dict]:
     """Normalize OANDA positions → list of VenuePositionFact dicts.
 
     OANDA positions have long/short sub-positions on the same instrument.
     Emit one fact per side with non-zero units.
+    All OANDA positions are CFDs (instrument_type=4).
     """
     results: list[dict] = []
     for pos in positions_resp.get("positions", []):
@@ -321,6 +325,7 @@ def normalize_positions(positions_resp: dict, account_id: int) -> list[dict]:
                 "avail_qty": abs(long_units),
                 "frozen_qty": 0.0,
                 "account_id": account_id,
+                "instrument_type": _INST_TYPE_CFD,
             })
         if short_units != 0:
             results.append({
@@ -330,6 +335,7 @@ def normalize_positions(positions_resp: dict, account_id: int) -> list[dict]:
                 "avail_qty": abs(short_units),
                 "frozen_qty": 0.0,
                 "account_id": account_id,
+                "instrument_type": _INST_TYPE_CFD,
             })
     return results
 
