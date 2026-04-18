@@ -18,7 +18,7 @@ import asyncio
 
 from loguru import logger
 
-from .client import OandaRestClient
+from .client import OandaApiError, OandaRestClient
 from .pricing_stream import OandaPricingStream
 from . import normalize as norm
 
@@ -275,6 +275,7 @@ class OandaRtmdAdaptor:
         """Periodically poll REST candles and emit new completed klines."""
         poll_interval = _KLINE_POLL_INTERVAL.get(granularity, 30.0)
         wm_key = (instrument_exch, granularity)
+        poll_count = 0
 
         while True:
             await asyncio.sleep(poll_interval)
@@ -283,7 +284,10 @@ class OandaRtmdAdaptor:
                 resp = await self._client.get_candles(
                     instrument_exch, granularity=granularity, count=2
                 )
-                for candle in resp.get("candles", []):
+                candles = resp.get("candles", [])
+                poll_count += 1
+                complete_count = sum(1 for c in candles if c.get("complete", False))
+                for candle in candles:
                     if not candle.get("complete", False):
                         continue
                     ts = norm.parse_oanda_time(candle["time"])
@@ -293,12 +297,33 @@ class OandaRtmdAdaptor:
                         kline_bytes = norm.build_kline(
                             candle, instrument_exch, granularity
                         )
+                        logger.info(
+                            "kline emitted | {} {} ts={} qsize={}",
+                            instrument_exch, granularity, ts,
+                            self._event_queue.qsize(),
+                        )
                         await self._event_queue.put({
                             "event_type": "kline",
                             "payload_bytes": kline_bytes,
                         })
+                    elif poll_count <= 3 or poll_count % 30 == 0:
+                        logger.debug(
+                            "kline skipped (watermark) | {} {} ts={} wm={}",
+                            instrument_exch, granularity, ts, watermark,
+                        )
             except asyncio.CancelledError:
                 raise
+            except OandaApiError as e:
+                if e.is_transient:
+                    logger.warning(
+                        "kline poll transient error for {} {} — {}",
+                        instrument_exch, granularity, e,
+                    )
+                else:
+                    logger.error(
+                        "kline poll error for {} {} — {}",
+                        instrument_exch, granularity, e,
+                    )
             except Exception:
                 logger.exception(
                     f"kline poll error for {instrument_exch} {granularity}"

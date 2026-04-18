@@ -17,11 +17,12 @@ use zk_proto_rs::zk::oms::v1::{
 };
 use zk_proto_rs::zk::rtmd::v1::{
     FundingRate as ProtoFundingRate, Kline as ProtoKline, OrderBook as ProtoOrderBook,
+    QueryFundingRequest, QueryKlinesRequest, QueryOrderBookRequest, QueryTickRequest,
     TickData as ProtoTickData,
 };
 
 use crate::config::TradingClientConfig;
-use crate::discovery::{OmsDiscovery, OmsEndpoint};
+use crate::discovery::{MdgwEndpoint, OmsDiscovery, OmsEndpoint};
 use crate::error::SdkError;
 use crate::id_gen::SnowflakeIdGen;
 use crate::model::{CommandAck, OrderType, Side, TradingCancel, TradingOrder};
@@ -236,6 +237,80 @@ impl TradingClient {
         Ok(response.balances)
     }
 
+    pub async fn query_current_tick(
+        &self,
+        instrument_id: &str,
+    ) -> Result<Option<ProtoTickData>, SdkError> {
+        let instrument = self.refdata.query_instrument(instrument_id).await?;
+        let endpoint = self.resolve_mdgw_endpoint(&instrument.venue).await?;
+        let mut client = self.rtmd_query_client(&endpoint).await?;
+        let response = client
+            .query_current_tick(QueryTickRequest {
+                instrument_code: instrument.instrument_exch,
+            })
+            .await?
+            .into_inner();
+        Ok(response.tick)
+    }
+
+    pub async fn query_current_orderbook(
+        &self,
+        instrument_id: &str,
+        depth: Option<u32>,
+    ) -> Result<Option<ProtoOrderBook>, SdkError> {
+        let instrument = self.refdata.query_instrument(instrument_id).await?;
+        let endpoint = self.resolve_mdgw_endpoint(&instrument.venue).await?;
+        let mut client = self.rtmd_query_client(&endpoint).await?;
+        let response = client
+            .query_current_order_book(QueryOrderBookRequest {
+                instrument_code: instrument.instrument_exch,
+                depth,
+            })
+            .await?
+            .into_inner();
+        Ok(response.orderbook)
+    }
+
+    pub async fn query_current_funding(
+        &self,
+        instrument_id: &str,
+    ) -> Result<Option<ProtoFundingRate>, SdkError> {
+        let instrument = self.refdata.query_instrument(instrument_id).await?;
+        let endpoint = self.resolve_mdgw_endpoint(&instrument.venue).await?;
+        let mut client = self.rtmd_query_client(&endpoint).await?;
+        let response = client
+            .query_current_funding(QueryFundingRequest {
+                instrument_code: instrument.instrument_exch,
+            })
+            .await?
+            .into_inner();
+        Ok(response.funding)
+    }
+
+    pub async fn query_klines(
+        &self,
+        instrument_id: &str,
+        interval: &str,
+        limit: u32,
+        from_ms: Option<i64>,
+        to_ms: Option<i64>,
+    ) -> Result<Vec<ProtoKline>, SdkError> {
+        let instrument = self.refdata.query_instrument(instrument_id).await?;
+        let endpoint = self.resolve_mdgw_endpoint(&instrument.venue).await?;
+        let mut client = self.rtmd_query_client(&endpoint).await?;
+        let response = client
+            .query_klines(QueryKlinesRequest {
+                instrument_code: instrument.instrument_exch,
+                interval: interval.to_string(),
+                limit,
+                from_ms,
+                to_ms,
+            })
+            .await?
+            .into_inner();
+        Ok(response.klines)
+    }
+
     pub async fn subscribe_order_updates<F>(&self, handler: F) -> tokio::task::JoinHandle<()>
     where
         F: Fn(ProtoOrderUpdateEvent) + Send + Sync + 'static,
@@ -409,6 +484,30 @@ impl TradingClient {
         self.oms_pool.get_or_connect(&endpoint).await
     }
 
+    async fn rtmd_query_client(
+        &self,
+        endpoint: &MdgwEndpoint,
+    ) -> Result<
+        crate::proto::rtmd_query_svc::rtmd_query_service_client::RtmdQueryServiceClient<
+            tonic::transport::Channel,
+        >,
+        SdkError,
+    > {
+        let target = if endpoint.grpc_address.starts_with("http://")
+            || endpoint.grpc_address.starts_with("https://")
+        {
+            endpoint.grpc_address.clone()
+        } else {
+            format!("http://{}", endpoint.grpc_address)
+        };
+        Ok(
+            crate::proto::rtmd_query_svc::rtmd_query_service_client::RtmdQueryServiceClient::connect(
+                target,
+            )
+            .await?,
+        )
+    }
+
     async fn resolve_account_endpoint(&self, account_id: i64) -> Result<OmsEndpoint, SdkError> {
         self.discovery
             .refresh_account_cache(self.config.oms_id.as_deref())
@@ -417,6 +516,23 @@ impl TradingClient {
             .resolve_oms(account_id)
             .await
             .ok_or(SdkError::OmsNotFound(account_id))
+    }
+
+    async fn resolve_mdgw_endpoint(&self, venue: &str) -> Result<MdgwEndpoint, SdkError> {
+        let deadline =
+            tokio::time::Instant::now() + Duration::from_millis(self.config.discovery_timeout_ms);
+
+        loop {
+            if let Some(endpoint) = self.discovery.resolve_mdgw(venue).await {
+                return Ok(endpoint);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(SdkError::Config(format!(
+                    "discovery: no mdgw service found for venue {venue}"
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 
     fn audit_meta(&self, source_id: &str) -> AuditMeta {
@@ -504,6 +620,14 @@ impl TradingClient {
                 return Err(SdkError::Config("kline interval is required".into()));
             }
         };
+        tracing::info!(
+            %subject,
+            instrument_id,
+            venue = %instrument.venue,
+            instrument_exch = %instrument.instrument_exch,
+            %channel_type,
+            "resolved RTMD subscription"
+        );
         let interest = RtmdInterestSpec {
             subscriber_id,
             scope: "logical".to_string(),
@@ -543,19 +667,28 @@ impl TradingClient {
             };
 
             let mut subscription_handle =
-                spawn_protobuf_subscription(nc, subject, map, Arc::clone(&handler));
+                spawn_protobuf_subscription(nc, subject.clone(), map, Arc::clone(&handler));
             let mut refresh = tokio::time::interval(Duration::from_secs(RTMD_INTEREST_REFRESH_SECS));
             refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             refresh.tick().await;
 
+            let mut refresh_count: u64 = 0;
             loop {
                 tokio::select! {
                     _ = refresh.tick() => {
+                        refresh_count += 1;
                         if let Err(error) = manager.refresh_interest(&lease).await {
                             tracing::warn!(key = %lease.key, error = %error, "failed to refresh RTMD interest");
                         }
+                        if refresh_count <= 3 || refresh_count % 30 == 0 {
+                            tracing::debug!(subject, refresh_count, "RTMD subscription task alive");
+                        }
                     }
-                    _ = &mut subscription_handle => {
+                    result = &mut subscription_handle => {
+                        match result {
+                            Ok(()) => tracing::warn!(subject, "inner subscription task exited normally"),
+                            Err(ref e) => tracing::error!(subject, error = %e, "inner subscription task panicked"),
+                        }
                         break;
                     }
                 }

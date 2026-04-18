@@ -37,6 +37,8 @@ pub struct PyStrategyAdapter {
     cached_adapter: Option<Py<ZkQuantAdapter>>,
     /// The `balance_generation` value last synced into `cached_adapter`.
     cached_balance_gen: u64,
+    /// The `position_generation` value last synced into `cached_adapter`.
+    cached_position_gen: u64,
     /// Cached `zk_datamodel.rtmd.Kline` class — resolved once in `on_bar`.
     kline_cls: Option<PyObject>,
 }
@@ -49,6 +51,7 @@ impl PyStrategyAdapter {
             next_order_id: 1_000,
             cached_adapter: None,
             cached_balance_gen: 0,
+            cached_position_gen: 0,
             kline_cls: None,
         }
     }
@@ -66,6 +69,7 @@ impl PyStrategyAdapter {
         if self.cached_adapter.is_none() {
             let adapter = ZkQuantAdapter::from_ctx(py, ctx, self.next_order_id);
             self.cached_balance_gen = ctx.balance_generation;
+            self.cached_position_gen = ctx.position_generation;
             self.cached_adapter = match Py::new(py, adapter) {
                 Ok(a) => Some(a),
                 Err(e) => {
@@ -82,8 +86,13 @@ impl PyStrategyAdapter {
         // Refresh ts + balances (if gen changed). Block ends before f() borrows &mut self.
         {
             let mut borrow = adapter_py.borrow_mut(py);
-            self.cached_balance_gen =
-                borrow.refresh(py, ctx, self.next_order_id, self.cached_balance_gen);
+            (self.cached_balance_gen, self.cached_position_gen) = borrow.refresh(
+                py,
+                ctx,
+                self.next_order_id,
+                self.cached_balance_gen,
+                self.cached_position_gen,
+            );
         }
 
         // Pass a Bound reference into the closure — the Py<> refcount is already held above.

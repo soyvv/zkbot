@@ -49,15 +49,31 @@ where
     F: Fn(U) + Send + Sync + 'static,
 {
     tokio::spawn(async move {
-        let Ok(mut sub) = nc.subscribe(subject).await else {
+        let Ok(mut sub) = nc.subscribe(subject.clone()).await else {
+            tracing::warn!(subject, "NATS subscribe failed");
             return;
         };
+        tracing::debug!(subject, "NATS subscription active");
+        let mut msg_count: u64 = 0;
         while let Some(msg) = sub.next().await {
+            msg_count += 1;
+            tracing::debug!(
+                subject = msg.subject.as_str(),
+                bytes = msg.payload.len(),
+                msg_count,
+                "received NATS message"
+            );
             let Ok(value) = T::decode(msg.payload.as_ref()) else {
+                tracing::warn!(
+                    subject = msg.subject.as_str(),
+                    bytes = msg.payload.len(),
+                    "proto decode failed"
+                );
                 continue;
             };
             handler(map(value));
         }
+        tracing::warn!(subject, msg_count, "NATS subscription stream ended");
     })
 }
 

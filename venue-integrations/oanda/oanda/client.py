@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 from loguru import logger
+
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 1.0  # seconds; doubles each retry
 
 
 class OandaApiError(Exception):
@@ -12,7 +17,17 @@ class OandaApiError(Exception):
     def __init__(self, status_code: int, body: dict | str):
         self.status_code = status_code
         self.body = body
-        super().__init__(f"OANDA API error {status_code}: {body}")
+        # Truncate HTML bodies (e.g. Cloudflare 502 pages) to keep logs readable.
+        if isinstance(body, str) and "<html" in body.lower():
+            summary = f"[HTML response truncated, {len(body)} chars]"
+        else:
+            summary = body
+        super().__init__(f"OANDA API error {status_code}: {summary}")
+
+    @property
+    def is_transient(self) -> bool:
+        """True for errors that are likely to resolve on retry (502/503/504)."""
+        return self.status_code in (502, 503, 504)
 
 
 class OandaRestClient:
@@ -43,14 +58,27 @@ class OandaRestClient:
         return f"/v3/accounts/{self._account_id}"
 
     async def _request(self, method: str, path: str, **kwargs) -> dict:
-        resp = await self._client.request(method, path, **kwargs)
-        if resp.status_code >= 400:
+        last_err: OandaApiError | None = None
+        for attempt in range(_MAX_RETRIES + 1):
+            resp = await self._client.request(method, path, **kwargs)
+            if resp.status_code < 400:
+                return resp.json()
             try:
                 body = resp.json()
             except Exception:
                 body = resp.text
-            raise OandaApiError(resp.status_code, body)
-        return resp.json()
+            err = OandaApiError(resp.status_code, body)
+            if err.is_transient and attempt < _MAX_RETRIES:
+                delay = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    "transient {} on {} {} — retry {}/{} in {:.1f}s",
+                    resp.status_code, method, path, attempt + 1, _MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
+                last_err = err
+                continue
+            raise err
+        raise last_err  # unreachable, but satisfies type checker
 
     # ── order commands ───────────────────────────────────────────────────────
 

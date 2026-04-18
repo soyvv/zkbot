@@ -24,6 +24,14 @@ pub struct OmsEndpoint {
     pub grpc_authority: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct MdgwEndpoint {
+    pub service_id: String,
+    pub venue: String,
+    pub grpc_address: String,
+    pub grpc_authority: Option<String>,
+}
+
 /// Snapshot-backed discovery helper for OMS and refdata resolution.
 pub struct OmsDiscovery {
     inner: KvDiscoveryClient,
@@ -71,6 +79,11 @@ impl OmsDiscovery {
     pub async fn resolve_refdata(&self) -> Option<String> {
         let snapshot = self.inner.snapshot().await;
         resolve_refdata_endpoint(&snapshot)
+    }
+
+    pub async fn resolve_mdgw(&self, venue: &str) -> Option<MdgwEndpoint> {
+        let snapshot = self.inner.snapshot().await;
+        resolve_mdgw_endpoint(&snapshot, venue)
     }
 
     pub async fn refresh_account_cache(&self, oms_id: Option<&str>) -> Result<(), SdkError> {
@@ -202,6 +215,44 @@ pub fn resolve_refdata_endpoint(snapshot: &HashMap<String, ServiceRegistration>)
             if !ep.address.is_empty() {
                 return Some(ep.address.clone());
             }
+        }
+    }
+
+    None
+}
+
+pub fn resolve_mdgw_endpoint(
+    snapshot: &HashMap<String, ServiceRegistration>,
+    venue: &str,
+) -> Option<MdgwEndpoint> {
+    let now_ms = now_ms();
+
+    for (key, reg) in snapshot {
+        if !key.starts_with("svc.mdgw.") || !is_service_type(reg, "mdgw") {
+            continue;
+        }
+        if reg.lease_expiry_ms > 0 && reg.lease_expiry_ms < now_ms {
+            continue;
+        }
+        if !reg.venue.eq_ignore_ascii_case(venue) {
+            continue;
+        }
+
+        if let Some(endpoint) = &reg.endpoint {
+            if endpoint.address.is_empty() {
+                continue;
+            }
+            let grpc_authority = if endpoint.authority.is_empty() {
+                None
+            } else {
+                Some(endpoint.authority.clone())
+            };
+            return Some(MdgwEndpoint {
+                service_id: extract_service_id(key, reg),
+                venue: reg.venue.clone(),
+                grpc_address: endpoint.address.clone(),
+                grpc_authority,
+            });
         }
     }
 

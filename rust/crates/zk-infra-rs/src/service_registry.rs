@@ -16,10 +16,14 @@
 //! The instance then writes KV directly and heartbeats with CAS semantics.
 //! See `docs/system-redesign-plan/plan/05-registry-and-pilot-bootstrap.md`.
 //!
-//! ## CAS fencing
-//! If another writer modifies `kv_key` (CAS conflict), the heartbeat task fires
-//! the `fenced` channel and terminates. The owning service must call
-//! [`ServiceRegistration::wait_fenced`] and shut down when fencing is detected.
+//! ## Heartbeat termination
+//! The heartbeat task classifies update errors:
+//! - **CAS conflict** (another writer modified `kv_key`): signals `Fenced` immediately.
+//! - **Transport error** (timeout, disconnect): retries up to 5 times, then signals
+//!   `RegistryUnavailable` (mapped to `ShutdownReason::HeartbeatLost`).
+//!
+//! Use [`ServiceRegistration::wait_shutdown`] to await signals or OS termination.
+//! It returns a [`ShutdownReason`] that distinguishes fencing from heartbeat loss.
 //!
 //! # Usage (direct mode)
 //! ```no_run
@@ -55,7 +59,7 @@ use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use crate::bootstrap::{PilotPayload, PilotRegistration};
-use crate::nats_kv::{KvRegistryClient, REGISTRY_BUCKET};
+use crate::nats_kv::{HeartbeatTermination, KvRegistryClient, REGISTRY_BUCKET};
 use zk_proto_rs::zk::pilot::v1::{
     BootstrapDeregisterRequest, BootstrapRegisterRequest, BootstrapRegisterResponse,
 };
@@ -131,16 +135,17 @@ pub struct RegistrationGrant {
 /// Drop order: call [`deregister`] before dropping to remove the KV entry
 /// cleanly. If dropped without deregistering the entry expires on its TTL.
 ///
-/// Services must also monitor fencing via [`wait_fenced`] and terminate if
-/// the CAS heartbeat detects a conflicting writer.
+/// Use [`wait_shutdown`](Self::wait_shutdown) to await either OS signals or
+/// heartbeat termination. The returned [`ShutdownReason`] distinguishes true
+/// fencing (CAS conflict) from heartbeat loss (transport errors).
 pub struct ServiceRegistration {
     kv: Arc<KvRegistryClient>,
     grant: RegistrationGrant,
     _hb: JoinHandle<()>,
     /// NATS client kept for deregister notification in Pilot mode.
     nats: Option<async_nats::Client>,
-    /// Receives `true` when the CAS heartbeat detects a conflicting writer.
-    fenced: watch::Receiver<bool>,
+    /// Receives termination reason when the heartbeat loop stops abnormally.
+    fenced: watch::Receiver<Option<HeartbeatTermination>>,
 }
 
 impl ServiceRegistration {
@@ -182,7 +187,7 @@ impl ServiceRegistration {
             kv_key: kv_key.clone(),
         };
 
-        let (fenced_tx, fenced_rx) = watch::channel(false);
+        let (fenced_tx, fenced_rx) = watch::channel(None);
         let hb =
             Arc::clone(&kv).heartbeat_loop(kv_key, value, heartbeat_interval, revision, fenced_tx);
 
@@ -313,7 +318,7 @@ impl ServiceRegistration {
             },
         };
 
-        let (fenced_tx, fenced_rx) = watch::channel(false);
+        let (fenced_tx, fenced_rx) = watch::channel(None);
         let hb = Arc::clone(&kv).heartbeat_loop(
             grant.kv_key.clone(),
             value,
@@ -375,16 +380,36 @@ impl ServiceRegistration {
 
     // ── Fencing ──────────────────────────────────────────────────────────────
 
-    /// Waits until the CAS heartbeat detects a conflicting writer (fencing event).
+    /// Waits until the heartbeat loop terminates abnormally (CAS fencing or
+    /// exhausted retries on transport errors).
     ///
-    /// Returns immediately if already fenced. The caller should log the event
-    /// and terminate the process — continuing to serve traffic after fencing
-    /// means another instance may have taken ownership of this logical identity.
+    /// Returns immediately if already terminated. The caller should inspect
+    /// [`ShutdownReason`] to distinguish true fencing from registry
+    /// unavailability.
     pub async fn wait_fenced(&mut self) {
-        while !*self.fenced.borrow() {
+        while self.fenced.borrow().is_none() {
             if self.fenced.changed().await.is_err() {
                 // Sender dropped (heartbeat task exited for any reason).
                 break;
+            }
+        }
+    }
+
+    /// Map the heartbeat termination variant to the appropriate [`ShutdownReason`].
+    fn heartbeat_termination_reason(&self) -> ShutdownReason {
+        match *self.fenced.borrow() {
+            Some(HeartbeatTermination::Fenced) => {
+                warn!("KV fencing detected — another instance owns this identity");
+                ShutdownReason::Fenced
+            }
+            Some(HeartbeatTermination::RegistryUnavailable) => {
+                warn!("KV heartbeat lost — registry unavailable after repeated failures");
+                ShutdownReason::HeartbeatLost
+            }
+            None => {
+                // Sender dropped without sending a termination reason.
+                warn!("heartbeat task exited unexpectedly without termination signal");
+                ShutdownReason::HeartbeatLost
             }
         }
     }
@@ -426,8 +451,7 @@ impl ServiceRegistration {
                     ShutdownReason::Signal(ShutdownSignal::SigHup)
                 }
                 _ = self.wait_fenced() => {
-                    warn!("KV fencing detected — another instance owns this identity");
-                    ShutdownReason::Fenced
+                    self.heartbeat_termination_reason()
                 }
             }
         }
@@ -440,8 +464,7 @@ impl ServiceRegistration {
                     ShutdownReason::Signal(ShutdownSignal::SigInt)
                 }
                 _ = self.wait_fenced() => {
-                    warn!("KV fencing detected — another instance owns this identity");
-                    ShutdownReason::Fenced
+                    self.heartbeat_termination_reason()
                 }
             }
         }
@@ -491,6 +514,9 @@ pub enum ShutdownReason {
     Signal(ShutdownSignal),
     /// CAS heartbeat detected a conflicting writer (fenced by another instance).
     Fenced,
+    /// Heartbeat loop exhausted retries on transport errors (timeout, disconnect)
+    /// without ever seeing a CAS conflict. No competing writer was detected.
+    HeartbeatLost,
 }
 
 impl ShutdownReason {
@@ -507,6 +533,7 @@ impl fmt::Display for ShutdownReason {
             Self::Signal(ShutdownSignal::SigTerm) => write!(f, "SIGTERM"),
             Self::Signal(ShutdownSignal::SigHup) => write!(f, "SIGHUP"),
             Self::Fenced => write!(f, "fenced"),
+            Self::HeartbeatLost => write!(f, "heartbeat lost"),
         }
     }
 }
@@ -514,6 +541,7 @@ impl fmt::Display for ShutdownReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nats_kv::HeartbeatTermination;
     use tokio::sync::watch;
 
     #[test]
@@ -541,24 +569,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_fenced_returns_when_signal_is_sent() {
-        let (tx, mut rx) = watch::channel(false);
+    async fn wait_fenced_returns_on_fencing_signal() {
+        let (tx, mut rx) = watch::channel(None);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-            let _ = tx.send(true);
+            let _ = tx.send(Some(HeartbeatTermination::Fenced));
         });
         // Replicate wait_fenced logic
-        while !*rx.borrow() {
+        while rx.borrow().is_none() {
             if rx.changed().await.is_err() {
                 break;
             }
         }
-        assert!(*rx.borrow(), "receiver should see true after sender fires");
+        assert_eq!(
+            *rx.borrow(),
+            Some(HeartbeatTermination::Fenced),
+            "receiver should see Fenced after sender fires"
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_fenced_returns_on_registry_unavailable_signal() {
+        let (tx, mut rx) = watch::channel(None);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            let _ = tx.send(Some(HeartbeatTermination::RegistryUnavailable));
+        });
+        while rx.borrow().is_none() {
+            if rx.changed().await.is_err() {
+                break;
+            }
+        }
+        assert_eq!(
+            *rx.borrow(),
+            Some(HeartbeatTermination::RegistryUnavailable),
+            "receiver should see RegistryUnavailable after sender fires"
+        );
     }
 
     #[test]
     fn shutdown_reason_is_fenced() {
         assert!(ShutdownReason::Fenced.is_fenced());
+        assert!(!ShutdownReason::HeartbeatLost.is_fenced());
         assert!(!ShutdownReason::Signal(ShutdownSignal::SigInt).is_fenced());
         assert!(!ShutdownReason::Signal(ShutdownSignal::SigTerm).is_fenced());
         assert!(!ShutdownReason::Signal(ShutdownSignal::SigHup).is_fenced());
@@ -579,6 +631,10 @@ mod tests {
             "SIGHUP"
         );
         assert_eq!(ShutdownReason::Fenced.to_string(), "fenced");
+        assert_eq!(
+            ShutdownReason::HeartbeatLost.to_string(),
+            "heartbeat lost"
+        );
     }
 
     #[test]
@@ -591,6 +647,7 @@ mod tests {
             ShutdownReason::Signal(ShutdownSignal::SigInt),
             ShutdownReason::Fenced
         );
+        assert_ne!(ShutdownReason::Fenced, ShutdownReason::HeartbeatLost);
     }
 }
 

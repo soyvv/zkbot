@@ -2,6 +2,7 @@
 ///
 /// - OMS service client: reuses message types from `zk-proto-rs` via `extern_path`
 /// - Refdata service client: compiled locally (no `zk-proto-rs` module for refdata yet)
+/// - RTMD query client: reuses message types from `zk-proto-rs`
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../protos")
@@ -29,7 +30,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[proto_dir_str],
         )?;
 
+    tonic_build::configure()
+        .extern_path(".zk.rtmd.v1", "::zk_proto_rs::zk::rtmd::v1")
+        .build_server(false)
+        .build_client(true)
+        .compile_protos(
+            &[&format!("{proto_dir_str}/zk/rtmd/v1/rtmd_query_service.proto")],
+            &[proto_dir_str],
+        )?;
+
     println!("cargo:rerun-if-changed={proto_dir_str}/zk/oms");
     println!("cargo:rerun-if-changed={proto_dir_str}/zk/refdata");
+    println!("cargo:rerun-if-changed={proto_dir_str}/zk/rtmd");
     Ok(())
 }

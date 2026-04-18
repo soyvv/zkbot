@@ -91,6 +91,15 @@ The Oanda market model is FX/CFD:
 - kline-driven logic is appropriate
 - positions are CFD positions
 
+### Rust wrapping Python strategy code
+
+For the longer-term Rust engine path, Python strategy loading should explicitly support two packaging modes:
+
+- local development source trees
+- packaged artifacts from a private PyPI repository
+
+This matters because the Rust wrapper path should not assume Python strategies only live inside the main repo checkout.
+
 ## Design Goal
 
 The ETS config should accept one canonical symbol only, then resolve the rest from refdata.
@@ -241,6 +250,96 @@ Compatibility recommendation:
 - keep a short transition window where the runtime accepts both names
 - log a deprecation warning when `__tq_init__` is used
 
+### 4. Support both Python packaging modes in the Rust wrapper path
+
+When the Rust engine eventually wraps Python strategy code, it should support both:
+
+- local dev loading from folders/packages in a workspace checkout
+- installed package loading from a private package index
+
+These are different operational modes and should be modeled directly rather than forced through one fragile path.
+
+#### Mode A: Local development source tree
+
+Primary use case:
+
+- local iteration in a workspace such as `zkstrategy_research/`
+- editable code without building and publishing a package for every change
+
+Recommended contract:
+
+- strategy config identifies `python_module` and `python_class`
+- runtime accepts one or more local search roots such as `python_search_path`
+- the launcher or engine inserts those roots into `sys.path` before import
+
+Recommended examples:
+
+- `python_module = "zk_strategylib.entry_target_stop.ETS_on_kline"`
+- `python_class = "ETS"`
+- `python_search_path = "/workspace/zkstrategy_research/zk-strategylib"`
+
+Rules:
+
+- local dev should prefer package imports, not raw file execution
+- `python_search_path` should point at the package root, not the individual file
+- the wrapper should fail clearly if the module imports but the requested class or `__zk_init__` hook is missing
+
+#### Mode B: Private PyPI package
+
+Primary use case:
+
+- controlled deployment of versioned strategy artifacts
+- reproducible production or shared test environments
+
+Recommended contract:
+
+- the strategy is published as a versioned Python package to a private package index
+- the runtime image or host environment installs that package ahead of startup
+- runtime config still refers to `python_module` and `python_class`, not to wheel filenames
+
+Recommended examples:
+
+- package name: `zk-strategylib`
+- installed version: `0.3.7`
+- module path: `zk_strategylib.entry_target_stop.ETS_on_kline`
+- class: `ETS`
+
+Rules:
+
+- the Rust wrapper should not contain ad hoc pip-install logic on the hot startup path
+- package installation should be handled by image build, virtualenv preparation, or deployment automation
+- private index credentials should stay in deployment/bootstrap secret handling, not in strategy config
+
+#### Recommendation
+
+Treat import resolution and package installation as separate responsibilities.
+
+- the Rust wrapper should own Python import resolution
+- deployment tooling should own package installation
+
+That split gives a clean model:
+
+- local dev: mount repo, set `python_search_path`, import package module
+- deployed env: install package from private PyPI, import package module without special path overrides
+
+#### Config shape for future Python-wrapper support
+
+The future Python-wrapper strategy config should be able to express both modes cleanly.
+
+Suggested fields:
+
+- `python_module`
+- `python_class`
+- `python_strategy_config`
+- optional `python_search_path`
+
+Non-goals for the strategy config:
+
+- direct wheel file paths
+- pip command lines
+- private index credentials
+- arbitrary shell snippets
+
 ### 3. Keep ETS bar-driven on Oanda
 
 ETS should be treated as a kline-driven strategy for Oanda.
@@ -329,18 +428,27 @@ Suggested output:
 - fetch Oanda historical klines using RTMD query
 - warm up `RSISimplePricer`
 
-### Phase 3: Launcher
+### Phase 3: Python wrapper packaging contract
+
+- define the Python-wrapper import contract for both local-dev and installed-package modes
+- keep `python_search_path` as a local-dev override only
+- keep package installation outside the runtime import path
+
+### Phase 4: Launcher
 
 - create a Pilot-assisted local launch script
 - include refdata resolution and effective config generation
 - make Oanda account/environment selection explicit
 
-### Phase 4: Validation
+### Phase 5: Validation
 
 - verify warmup fetch count is sufficient for minute RSI and derived hourly RSI
 - verify live Oanda kline subscription matches the init interval
 - verify position detection works without `position_symbol` in public config
 - verify first entry signal does not occur before warmup is complete
+- verify both Python packaging modes:
+  - local workspace import with `python_search_path`
+  - installed-package import without path overrides
 
 ## Risks And Gaps
 
@@ -365,15 +473,30 @@ Affected areas include:
 - any research strategies still exporting `__tq_init__`
 - parity notes and Rust comments that still mirror the legacy Python lifecycle naming
 
-### 3. Kline subscription bug in legacy client
+### 3. Python packaging ambiguity in the future Rust wrapper path
+
+Without an explicit contract, the Python-wrapper path can drift into an unclear mix of:
+
+- local file loading
+- package import loading
+- runtime pip installation
+
+That should be avoided. The wrapper path should support:
+
+- local package-root search path overrides for development
+- normal package imports for deployed environments
+
+and should avoid runtime-managed package installation.
+
+### 4. Kline subscription bug in legacy client
 
 The legacy Python `tqclient.subscribe_rtmd_kline()` path appears fragile and should be verified or fixed before relying on it for ETS live operation.
 
-### 4. Position API shape
+### 5. Position API shape
 
 If the strategy currently reads holdings from a balance/position API keyed by a non-canonical symbol, there may be a temporary translation step needed until the runtime consistently exposes canonical instrument identity to strategies.
 
-### 5. Oanda market session handling
+### 6. Oanda market session handling
 
 For production-quality gating, ETS should eventually consult market session state from refdata for Oanda `FX` / `CFD` markets instead of assuming the venue is always tradable.
 
@@ -387,6 +510,9 @@ This plan is considered complete when the following are true:
 - Python strategy startup uses `__zk_init__` as the primary init hook name
 - startup init fetches historical klines from Oanda RTMD query
 - the pricer is warmed before live signal generation
+- the future Rust Python-wrapper path has a documented contract for:
+  - local package-root imports during development
+  - installed package imports from private PyPI in deployed environments
 - a Pilot-assisted launcher can start the strategy with the simplified config
 
 ## Recommended Next Step
@@ -395,7 +521,8 @@ Implement the plan in this order:
 
 1. simplify ETS config around canonical `symbol`
 2. rename the Python init hook to `__zk_init__` and add the kline warmup hook
-3. add the Pilot-assisted launcher
-4. fix any legacy kline subscription/runtime issues discovered during validation
+3. define the Python-wrapper packaging/import contract for local-dev and private-package modes
+4. add the Pilot-assisted launcher
+5. fix any legacy kline subscription/runtime issues discovered during validation
 
 This keeps the onboarding scoped, testable, and aligned with the existing refdata model without waiting for the full Python-wrapper engine path to be completed.

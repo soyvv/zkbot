@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
+use serde_json::Value;
 use tokio::sync::mpsc;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
@@ -184,19 +185,48 @@ pub async fn run(
     // ── 4. Rehydrate initial state (stubbed) ────────────────────────────
     let _rehydrated = crate::rehydration::rehydrate(&trading_client, &cfg.account_ids).await;
 
+    let mut effective_refdata = refdata;
+    if effective_refdata.is_empty() {
+        effective_refdata = load_refdata(&trading_client, &cfg.instruments).await;
+    }
+
     // ── 5. Build LiveEngine ─────────────────────────────────────────────
     let dispatcher = TradingDispatcher::new(Arc::clone(&trading_client), cfg.execution_id.clone());
 
     let id_allocator = Arc::new(RuntimeSnowflakeAllocator::new(cfg.instance_id)?);
     let mut engine = LiveEngine::new_with_id_allocator(
         cfg.account_ids.clone(),
-        refdata,
+        effective_refdata,
         strategy,
         dispatcher,
         cfg.execution_id.clone(),
         cfg.strategy_key.clone(),
         Some(id_allocator),
     );
+
+    if let Some(prefetch) = extract_kline_prefetch_request(&cfg.strategy_type_key, &cfg.strategy_config_json) {
+        if prefetch.limit > 0 {
+            info!(
+                instrument_id = %prefetch.instrument_id,
+                interval = %prefetch.interval,
+                limit = prefetch.limit,
+                "prefetching init klines for strategy warmup"
+            );
+            match trading_client
+                .query_klines(
+                    &prefetch.instrument_id,
+                    &prefetch.interval,
+                    prefetch.limit,
+                    None,
+                    None,
+                )
+                .await
+            {
+                Ok(klines) => engine.set_init_data(Box::new(klines)),
+                Err(error) => warn!(%error, "failed to prefetch strategy init klines"),
+            }
+        }
+    }
 
     // Grab the read replica before moving into the event loop task.
     let replica: EngineReadReplica = engine.read_replica();
@@ -342,4 +372,99 @@ pub async fn run(
 
     info!("zk-engine-svc stopped");
     Ok(())
+}
+
+#[derive(Debug)]
+struct KlinePrefetchRequest {
+    instrument_id: String,
+    interval: String,
+    limit: u32,
+}
+
+async fn load_refdata(
+    trading_client: &TradingClient,
+    instruments: &[String],
+) -> Vec<InstrumentRefData> {
+    let mut resolved = Vec::with_capacity(instruments.len());
+    for instrument_id in instruments {
+        match trading_client.refdata().query_instrument(instrument_id).await {
+            Ok(entry) => resolved.push(InstrumentRefData {
+                instrument_id: entry.instrument_id,
+                instrument_id_exchange: entry.instrument_exch,
+                update_ts: entry.updated_at_ms,
+                exchange_name: entry.venue,
+                instrument_type: parse_instrument_type(&entry.instrument_type),
+                base_asset: entry.base_asset,
+                quote_asset: entry.quote_asset,
+                settlement_asset: entry.settlement_asset,
+                contract_size: entry.contract_size,
+                price_precision: i64::from(entry.price_precision),
+                qty_precision: i64::from(entry.qty_precision),
+                price_tick_size: entry.price_tick_size,
+                qty_lot_size: entry.qty_lot_size,
+                min_notional: entry.min_notional,
+                max_notional: entry.max_notional,
+                min_order_qty: entry.min_order_qty,
+                max_order_qty: entry.max_order_qty,
+                extra_properties: entry.extra_properties,
+                disabled: entry.disabled,
+                max_mkt_order_qty: entry.max_mkt_order_qty,
+                ..Default::default()
+            }),
+            Err(error) => warn!(instrument_id = %instrument_id, %error, "failed to resolve instrument refdata"),
+        }
+    }
+    resolved
+}
+
+fn extract_kline_prefetch_request(
+    strategy_type_key: &str,
+    strategy_config_json: &str,
+) -> Option<KlinePrefetchRequest> {
+    let parsed = if strategy_config_json.trim().is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_str(strategy_config_json).ok()?
+    };
+    let strategy_cfg = strategy_config_root(strategy_type_key, &parsed)?;
+    let obj = strategy_cfg.as_object()?;
+    let instrument_id = obj.get("symbol")?.as_str()?.to_string();
+    let interval = obj
+        .get("init_kline_interval")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .or_else(|| obj.get("kline_interval").and_then(Value::as_str))
+        .unwrap_or("1m")
+        .to_string();
+    let limit = obj
+        .get("init_lookback_bars")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+
+    Some(KlinePrefetchRequest {
+        instrument_id,
+        interval,
+        limit,
+    })
+}
+
+fn strategy_config_root<'a>(strategy_type_key: &str, parsed: &'a Value) -> Option<&'a Value> {
+    if strategy_type_key == "python-wrapper" {
+        parsed.get("python_strategy_config")
+    } else {
+        Some(parsed)
+    }
+}
+
+fn parse_instrument_type(value: &str) -> i32 {
+    use zk_proto_rs::zk::common::v1::InstrumentType;
+
+    match value.to_ascii_lowercase().as_str() {
+        "spot" => InstrumentType::InstTypeSpot as i32,
+        "perp" | "perpetual" => InstrumentType::InstTypePerp as i32,
+        "future" => InstrumentType::InstTypeFuture as i32,
+        "option" => InstrumentType::InstTypeOption as i32,
+        "cfd" => InstrumentType::InstTypeCfd as i32,
+        _ => InstrumentType::InstTypeUnspecified as i32,
+    }
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use prost::Message as _;
-use tracing::warn;
+use tracing::{debug, warn};
 use zk_infra_rs::nats::subject;
 use zk_proto_rs::zk::rtmd::v1::{FundingRate, Kline, OrderBook, TickData};
 use zk_rtmd_rs::{types::RtmdEvent, venue_adapter::RtmdVenueAdapter};
@@ -47,6 +47,12 @@ impl RtmdNatsPublisher {
             .instrument_exch_for(&kline.symbol)
             .unwrap_or_else(|| kline.symbol.clone());
         let subj = subject::rtmd_kline(&self.venue, &instrument_exch, interval);
+        debug!(
+            subject = %subj,
+            symbol = %kline.symbol,
+            timestamp = kline.timestamp,
+            "publishing kline to NATS"
+        );
         self.publish_bytes(&subj, kline.encode_to_vec()).await;
     }
 

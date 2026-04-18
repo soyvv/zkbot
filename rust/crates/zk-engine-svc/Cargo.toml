@@ -48,7 +48,7 @@ zk-proto-rs        = { path = "../zk-proto-rs" }
 zk-engine-rs       = { path = "../zk-engine-rs" }
 zk-strategy-sdk-rs = { path = "../zk-strategy-sdk-rs" }
 zk-trading-sdk-rs  = { path = "../zk-trading-sdk-rs" }
-zk-strategy-host-rs = { path = "../zk-strategy-host-rs" }
+zk-strategy-host-rs = { path = "../zk-strategy-host-rs", features = ["python"] }
 
 [build-dependencies]
 tonic-build = "0.12"

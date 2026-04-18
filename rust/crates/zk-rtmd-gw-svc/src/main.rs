@@ -261,9 +261,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let adapter_events = Arc::clone(&adapter);
     let publisher_events = Arc::clone(&publisher);
     let event_loop_handle = tokio::spawn(async move {
+        const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+        const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+        const MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+        let mut consecutive_errors: u32 = 0;
+        let mut backoff = INITIAL_BACKOFF;
+        let mut event_count: u64 = 0;
+
         loop {
             match adapter_events.next_event().await {
                 Ok(event) => {
+                    // Reset error state on successful event.
+                    if consecutive_errors > 0 {
+                        tracing::info!(
+                            prev_errors = consecutive_errors,
+                            "event loop recovered after transient errors"
+                        );
+                    }
+                    consecutive_errors = 0;
+                    backoff = INITIAL_BACKOFF;
+                    event_count += 1;
+                    let event_type = match &event {
+                        zk_rtmd_rs::types::RtmdEvent::Tick(_) => "tick",
+                        zk_rtmd_rs::types::RtmdEvent::Kline(_) => "kline",
+                        zk_rtmd_rs::types::RtmdEvent::OrderBook(_) => "orderbook",
+                        zk_rtmd_rs::types::RtmdEvent::Funding(_) => "funding",
+                    };
+                    if event_type != "tick" || event_count <= 3 || event_count % 100 == 0 {
+                        tracing::debug!(event_type, event_count, "event loop: publishing");
+                    }
                     publisher_events.publish(event).await;
                 }
                 Err(zk_rtmd_rs::types::RtmdError::ChannelClosed) => {
@@ -271,8 +298,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     break;
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, "event loop error");
-                    break;
+                    consecutive_errors += 1;
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                        tracing::error!(
+                            error = %e,
+                            consecutive_errors,
+                            "event loop exiting after too many consecutive errors"
+                        );
+                        break;
+                    }
+                    tracing::warn!(
+                        error = %e,
+                        consecutive_errors,
+                        retry_in_secs = backoff.as_secs(),
+                        "event loop transient error, retrying"
+                    );
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
                 }
             }
         }

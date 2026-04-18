@@ -10,6 +10,9 @@ use std::collections::HashMap;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyTuple};
 use zk_proto_rs::zk::common::v1::BuySellType;
+use zk_proto_rs::zk::common::v1::InstrumentRefData;
+use zk_proto_rs::zk::oms::v1::Position;
+use zk_proto_rs::zk::rtmd::v1::Kline;
 use zk_strategy_sdk_rs::{
     context::StrategyContext,
     models::{SAction, StrategyLog, StrategyOrder, TimerSchedule, TimerSubscription},
@@ -50,6 +53,10 @@ pub struct ZkQuantAdapter {
     pub current_ts_ms: i64,
     /// account_id → symbol → balance snapshot
     balances: HashMap<i64, HashMap<String, ZkBalance>>,
+    /// account_id → instrument_code → position snapshot
+    positions: HashMap<i64, HashMap<String, Position>>,
+    /// canonical instrument_id → refdata snapshot
+    symbol_refs: HashMap<String, InstrumentRefData>,
     /// Python object returned by `init_data_fetcher` (or `None`).
     /// Retrieved via `ctx.get_init_data::<PyObject>()`.
     init_data: Option<PyObject>,
@@ -64,6 +71,7 @@ impl ZkQuantAdapter {
     /// Snapshot the parts of `StrategyContext` that Python queries need.
     pub fn from_ctx(py: Python<'_>, ctx: &StrategyContext, next_order_id: i64) -> Self {
         let mut balances: HashMap<i64, HashMap<String, ZkBalance>> = HashMap::new();
+        let mut positions: HashMap<i64, HashMap<String, Position>> = HashMap::new();
         for acc_id in ctx.account_ids() {
             if let Some(map) = ctx.get_balances_map(acc_id) {
                 let acc_map = map
@@ -81,14 +89,18 @@ impl ZkQuantAdapter {
                     .collect();
                 balances.insert(acc_id, acc_map);
             }
+            if let Some(map) = ctx.get_positions_map(acc_id) {
+                positions.insert(acc_id, map.clone());
+            }
         }
 
-        // Init data is stored as `Py<PyAny>` in ctx (typed as `PyObject`).
-        let init_data = ctx.get_init_data::<PyObject>().map(|obj| obj.clone_ref(py));
+        let init_data = init_data_from_ctx(py, ctx);
 
         Self {
             current_ts_ms: ctx.current_ts_ms,
             balances,
+            positions,
+            symbol_refs: ctx.symbol_refs.clone(),
             init_data,
             actions: Vec::new(),
             next_order_id,
@@ -103,16 +115,17 @@ impl ZkQuantAdapter {
     /// `init_data` is set once before `on_init` and never changes — no refresh needed.
     pub fn refresh(
         &mut self,
-        _py: Python<'_>,
+        py: Python<'_>,
         ctx: &StrategyContext,
         next_order_id: i64,
-        cached_gen: u64,
-    ) -> u64 {
+        cached_balance_gen: u64,
+        cached_position_gen: u64,
+    ) -> (u64, u64) {
         self.current_ts_ms = ctx.current_ts_ms;
         self.next_order_id = next_order_id;
         // actions must be empty at entry (drained by caller after previous callback)
 
-        if ctx.balance_generation != cached_gen {
+        if ctx.balance_generation != cached_balance_gen {
             self.balances.clear();
             for acc_id in ctx.account_ids() {
                 if let Some(map) = ctx.get_balances_map(acc_id) {
@@ -128,13 +141,27 @@ impl ZkQuantAdapter {
                                 },
                             )
                         })
-                        .collect();
+                    .collect();
                     self.balances.insert(acc_id, acc_map);
                 }
             }
         }
 
-        ctx.balance_generation
+        if ctx.position_generation != cached_position_gen {
+            self.positions.clear();
+            for acc_id in ctx.account_ids() {
+                if let Some(map) = ctx.get_positions_map(acc_id) {
+                    self.positions.insert(acc_id, map.clone());
+                }
+            }
+        }
+
+        self.symbol_refs = ctx.symbol_refs.clone();
+        if self.init_data.is_none() {
+            self.init_data = init_data_from_ctx(py, ctx);
+        }
+
+        (ctx.balance_generation, ctx.position_generation)
     }
 
     /// Take all accumulated actions out of the adapter.
@@ -189,6 +216,31 @@ impl ZkQuantAdapter {
             }
         }
         Ok(dict)
+    }
+
+    /// Return the current position snapshot for `account_id + instrument_code`.
+    fn get_position<'py>(
+        &self,
+        py: Python<'py>,
+        account_id: i64,
+        instrument_code: &str,
+    ) -> PyResult<PyObject> {
+        let Some(position) = self
+            .positions
+            .get(&account_id)
+            .and_then(|positions| positions.get(instrument_code))
+        else {
+            return Ok(py.None());
+        };
+        rust_proto_to_py(py, position, "zk_datamodel.oms", "Position")
+    }
+
+    /// Return canonical instrument refdata for `symbol`.
+    fn get_symbol_info<'py>(&self, py: Python<'py>, symbol: &str) -> PyResult<PyObject> {
+        let Some(refdata) = self.symbol_refs.get(symbol) else {
+            return Ok(py.None());
+        };
+        rust_proto_to_py(py, refdata, "zk_datamodel.common", "InstrumentRefData")
     }
 
     /// Return the init data injected by `init_data_fetcher` (any Python object),
@@ -302,4 +354,20 @@ pub fn rust_proto_to_py<M: prost::Message>(
     let cls = m.getattr(cls_name)?;
     let obj = cls.call_method1("FromString", (PyBytes::new_bound(py, &bytes),))?;
     Ok(obj.into())
+}
+
+fn init_data_from_ctx(py: Python<'_>, ctx: &StrategyContext) -> Option<PyObject> {
+    if let Some(obj) = ctx.get_init_data::<PyObject>() {
+        return Some(obj.clone_ref(py));
+    }
+
+    let klines = ctx.get_init_data::<Vec<Kline>>()?;
+    let list = pyo3::types::PyList::empty_bound(py);
+    for kline in klines {
+        let py_kline = rust_proto_to_py(py, kline, "zk_datamodel.rtmd", "Kline").ok()?;
+        if list.append(py_kline).is_err() {
+            return None;
+        }
+    }
+    Some(list.into())
 }

@@ -32,4 +32,7 @@ pub mod proto {
     pub mod refdata_svc {
         include!(concat!(env!("OUT_DIR"), "/zk.refdata.v1.rs"));
     }
+    pub mod rtmd_query_svc {
+        include!(concat!(env!("OUT_DIR"), "/zk.rtmd.v1.rs"));
+    }
 }
