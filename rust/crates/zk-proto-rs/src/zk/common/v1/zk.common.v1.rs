@@ -246,6 +246,43 @@ pub struct PostTradeEvent {
     #[prost(map="string, string", tag="6")]
     pub meta: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
+/// Correlation metadata attached to orders by the engine for end-to-end
+/// latency observability across engine → OMS → gateway.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TriggerContext {
+    #[prost(string, tag="1")]
+    pub execution_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub strategy_key: ::prost::alloc::string::String,
+    /// "tick", "bar", "signal", "timer", etc.
+    #[prost(string, tag="3")]
+    pub trigger_event_type: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub instrument_code: ::prost::alloc::string::String,
+    /// RTMD/source timestamp if available
+    #[prost(int64, tag="5")]
+    pub source_ts_ns: i64,
+    /// engine receive timestamp
+    #[prost(int64, tag="6")]
+    pub recv_ts_ns: i64,
+    /// engine queue admission timestamp
+    #[prost(int64, tag="7")]
+    pub enqueue_ts_ns: i64,
+    /// strategy dispatch start timestamp
+    #[prost(int64, tag="8")]
+    pub dispatch_ts_ns: i64,
+    /// strategy callback return timestamp
+    #[prost(int64, tag="9")]
+    pub decision_ts_ns: i64,
+    /// monotonic per-engine decision counter
+    #[prost(uint64, tag="10")]
+    pub decision_seq: u64,
+    /// stamped by dispatcher before OMS send
+    #[prost(int64, tag="11")]
+    pub oms_submit_ts_ns: i64,
+    #[prost(string, tag="12")]
+    pub client_order_id: ::prost::alloc::string::String,
+}
 // ===== Enums (migrated from common.proto, values preserved) =====
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

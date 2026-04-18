@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zk-tools"
+version = "0.1.0"
+description = "zkbot command-line tools (trade_doctor, loc_count, test_rtmd)"
+requires-python = ">=3.13"
+dependencies = [
+  "zk-proto-pb",
+  "grpcio>=1.60",
+  "nats-py>=2.6",
+  "loguru>=0.7",
+]
+
+[project.scripts]
+trade-doctor = "zk_tools.trade_doctor:main"
+loc-count = "zk_tools.loc_count:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zk_tools"]

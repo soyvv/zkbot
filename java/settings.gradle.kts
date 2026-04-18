@@ -1,1 +1,3 @@
-rootProject.name = "zk-pilot"
+rootProject.name = "zkbot-java"
+
+include("zk-proto-java", "pilot-service")

@@ -1,6 +1,5 @@
 """Tests for OANDA RTMD normalization functions."""
 
-import oanda.proto  # noqa: F401
 from zk.rtmd.v1 import rtmd_pb2 as rtmd_pb
 
 from oanda import normalize as norm

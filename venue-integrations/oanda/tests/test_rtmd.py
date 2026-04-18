@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import oanda.proto  # noqa: F401
 from zk.rtmd.v1 import rtmd_pb2 as rtmd_pb
 
 from oanda.rtmd import OandaRtmdAdaptor

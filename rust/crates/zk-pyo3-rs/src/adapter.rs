@@ -232,7 +232,7 @@ impl ZkQuantAdapter {
         else {
             return Ok(py.None());
         };
-        rust_proto_to_py(py, position, "zk_datamodel.oms", "Position")
+        rust_proto_to_py(py, position, "zk_proto_betterproto.oms", "Position")
     }
 
     /// Return canonical instrument refdata for `symbol`.
@@ -240,7 +240,7 @@ impl ZkQuantAdapter {
         let Some(refdata) = self.symbol_refs.get(symbol) else {
             return Ok(py.None());
         };
-        rust_proto_to_py(py, refdata, "zk_datamodel.common", "InstrumentRefData")
+        rust_proto_to_py(py, refdata, "zk_proto_betterproto.common", "InstrumentRefData")
     }
 
     /// Return the init data injected by `init_data_fetcher` (any Python object),
@@ -364,7 +364,7 @@ fn init_data_from_ctx(py: Python<'_>, ctx: &StrategyContext) -> Option<PyObject>
     let klines = ctx.get_init_data::<Vec<Kline>>()?;
     let list = pyo3::types::PyList::empty_bound(py);
     for kline in klines {
-        let py_kline = rust_proto_to_py(py, kline, "zk_datamodel.rtmd", "Kline").ok()?;
+        let py_kline = rust_proto_to_py(py, kline, "zk_proto_betterproto.rtmd", "Kline").ok()?;
         if list.append(py_kline).is_err() {
             return None;
         }

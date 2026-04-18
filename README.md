@@ -1,22 +1,30 @@
 ## zkbot Monorepo
 
-This repository contains the polyglot trading stack for **zkbot**. The codebase is organised as a multi-language monorepo:
+Polyglot trading stack organised by language root with cross-cutting top-level concerns.
 
-- `libs/` – shared Python libraries such as `zk-core`, `zk-client`, `zk-datamodel`, `zk-gw-utils`, and `zk-rpc`.
-- `services/` – deployable services (gateways, refdata loaders, core APIs).
-- `protos/` – protobuf contracts managed with [Buf](https://buf.build/).
-- `rust/` – Rust crates that mirror the Python core/datamodel implementations.
-- `polyglot/` – language-specific client stubs (Java, C++).
-- `scripts/` – developer tooling (codegen, automation).
+- `protos/` – protobuf schema, source-of-truth (`zk/**/v1/*.proto`). Managed with [Buf](https://buf.build/).
+- `python/`
+  - `proto-pb/` – shared pb2/grpc library, installs as `zk-proto-pb` (exposes top-level `zk` namespace).
+  - `proto-betterproto/` – shared BetterProto library, installs as `zk-proto-betterproto`.
+  - `libs/{zk-client,zk-core,zk-data,zk-gw-utils,zk-rpc}/` – active Python libraries.
+  - `services/zk-refdata-svc/` – active Python services.
+  - `tools/` – zkbot CLI tools (`trade-doctor`, `loc-count`, `test_rtmd`).
+  - `legacy/` – reference-only snapshots, excluded from the uv workspace.
+- `java/` – multi-module Gradle build (`zk-proto-java`, `pilot-service`). Java protobuf code
+  is generated at build time, not committed.
+- `rust/` – Cargo workspace (core, OMS, gateway, backtester, services).
+- `venue-integrations/{oanda,ibkr,okx,simulator}/` – venue adaptors, cross-cutting.
+- `devops/` – local docker-compose dev stack and service Dockerfiles.
+- `scripts/gen_proto.py` – single codegen driver for Rust, cpp, and Python.
 
 ### Quickstart
 
 1. Install [uv](https://github.com/astral-sh/uv) and [Buf](https://buf.build/).
 2. Bootstrap dependencies:
    ```bash
-   uv sync --all-groups
+   uv sync --python 3.13 --all-groups --all-packages
    ```
-3. Regenerate protocol buffers whenever `.proto` files change:
+3. Regenerate protobuf artifacts whenever `.proto` files change:
    ```bash
    make gen
    ```
@@ -28,8 +36,9 @@ This repository contains the polyglot trading stack for **zkbot**. The codebase 
 
 ### Project Conventions
 
-- All Python packages follow the `src/` layout and are built with Hatch.
-- Namespaces have migrated from the old `tq_*` prefixes to `zk_*`.
-- Generated code (protos) is produced via Buf; only configurations live in source control.
+- Python: src-layout packages, Python 3.13, `uv` workspace, declared deps only (no PYTHONPATH hacks).
+- Rust: Cargo workspace rooted at `rust/`.
+- Java: Gradle multi-module (`cd java && ./gradlew :pilot-service:build`).
+- Generated-code policy: see [docs/system-arch/dependency-matrix.md](docs/system-arch/dependency-matrix.md).
 
-See individual package READMEs for package-specific documentation.
+See individual package READMEs and `docs/system-arch/` for more detail.

@@ -211,4 +211,62 @@ impl TickUpdateType {
         }
     }
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryTickRequest {
+    #[prost(string, tag="1")]
+    pub instrument_code: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct QueryTickResponse {
+    #[prost(message, optional, tag="1")]
+    pub tick: ::core::option::Option<TickData>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryOrderBookRequest {
+    #[prost(string, tag="1")]
+    pub instrument_code: ::prost::alloc::string::String,
+    #[prost(uint32, optional, tag="2")]
+    pub depth: ::core::option::Option<u32>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct QueryOrderBookResponse {
+    #[prost(message, optional, tag="1")]
+    pub orderbook: ::core::option::Option<OrderBook>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryFundingRequest {
+    #[prost(string, tag="1")]
+    pub instrument_code: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct QueryFundingResponse {
+    #[prost(message, optional, tag="1")]
+    pub funding: ::core::option::Option<FundingRate>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryKlinesRequest {
+    #[prost(string, tag="1")]
+    pub instrument_code: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub interval: ::prost::alloc::string::String,
+    #[prost(uint32, tag="3")]
+    pub limit: u32,
+    #[prost(int64, optional, tag="4")]
+    pub from_ms: ::core::option::Option<i64>,
+    #[prost(int64, optional, tag="5")]
+    pub to_ms: ::core::option::Option<i64>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct QueryKlinesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub klines: ::prost::alloc::vec::Vec<Kline>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HealthCheckRequest {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HealthCheckResponse {
+    #[prost(string, tag="1")]
+    pub status: ::prost::alloc::string::String,
+}
 // @@protoc_insertion_point(module)

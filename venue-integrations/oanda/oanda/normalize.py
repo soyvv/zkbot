@@ -10,9 +10,6 @@ from __future__ import annotations
 
 import time
 
-# Proto stubs — the proto/ __init__.py adds itself to sys.path so that
-# ``from zk.exch_gw.v1 import exch_gw_pb2`` works.
-import oanda.proto  # noqa: F401  — side-effect import for sys.path
 from zk.exch_gw.v1 import exch_gw_pb2 as gw_pb
 from zk.common.v1 import common_pb2 as common_pb  # noqa: F401
 

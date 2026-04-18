@@ -3,7 +3,6 @@
 from oanda import normalize as norm
 
 # Proto stubs for deserializing payload_bytes
-import oanda.proto  # noqa: F401
 from zk.exch_gw.v1 import exch_gw_pb2 as gw_pb
 
 

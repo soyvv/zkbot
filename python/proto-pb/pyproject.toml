@@ -1,0 +1,18 @@
+[project]
+name = "zk-proto-pb"
+version = "0.1.0"
+description = "Shared pb2/grpc generated Python protobuf modules for zkbot (exposes top-level 'zk' namespace)"
+requires-python = ">=3.13"
+dependencies = [
+  "grpcio>=1.60",
+  "protobuf>=4.25",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["zk*"]
+namespaces = true

@@ -20,7 +20,7 @@ from ibkr.ibkr_contracts import ContractTranslator
 from ibkr.rate_limiter import TokenBucketRateLimiter
 from ibkr.types import LIVE, now_ms
 
-from ibkr.proto.zk.rtmd.v1.rtmd_pb2 import (
+from zk.rtmd.v1.rtmd_pb2 import (
     FundingRate,
     Kline,
     OrderBook,

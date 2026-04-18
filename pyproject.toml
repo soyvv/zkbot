@@ -1,9 +1,9 @@
 [project]
 name = "zkbot"
 version = "0.1.0"
-description = "Add your description here"
+description = "zkbot workspace root (see python/, rust/, java/)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = []
 
 
@@ -18,15 +18,26 @@ dependencies = []
 
 [tool.uv.workspace]
 members = [
-  "libs/*",
-  "services/*",
+  "python/libs/*",
+  "python/services/*",
+  "python/proto-pb",
+  "python/proto-betterproto",
+  "python/tools",
+  "venue-integrations/oanda",
+  "venue-integrations/ibkr",
+]
+exclude = [
+  "venue-integrations/legacy",
+  "python/legacy",
 ]
 
 # Local workspace sources for development
 # Allows packages to depend on each other and resolve locally
 [tool.uv.sources]
-zk-datamodel = { workspace = true }
 zk-core = { workspace = true }
 zk-client = { workspace = true }
 zk-rpc = { workspace = true }
 gw-utils = { workspace = true }
+zk-proto-pb = { workspace = true }
+zk-proto-betterproto = { workspace = true }
+zk-tools = { workspace = true }

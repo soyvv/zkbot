@@ -1,0 +1,17 @@
+[project]
+name = "zk-proto-betterproto"
+version = "0.1.0"
+description = "Shared BetterProto generated Python datamodel for zkbot (replaces libs/zk-datamodel)"
+requires-python = ">=3.13"
+dependencies = [
+  "betterproto>=2.0.0b6",
+  "grpclib>=0.4",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["zk_proto_betterproto*"]

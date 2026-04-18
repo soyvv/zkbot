@@ -39,7 +39,7 @@ pub struct PyStrategyAdapter {
     cached_balance_gen: u64,
     /// The `position_generation` value last synced into `cached_adapter`.
     cached_position_gen: u64,
-    /// Cached `zk_datamodel.rtmd.Kline` class — resolved once in `on_bar`.
+    /// Cached `zk_proto_betterproto.rtmd.Kline` class — resolved once in `on_bar`.
     kline_cls: Option<PyObject>,
 }
 
@@ -150,7 +150,7 @@ impl Strategy for PyStrategyAdapter {
             // import + attribute lookup on every bar (was ~2 Python ops per call).
             if self.kline_cls.is_none() {
                 match py
-                    .import_bound("zk_datamodel.rtmd")
+                    .import_bound("zk_proto_betterproto.rtmd")
                     .and_then(|m| m.getattr("Kline"))
                 {
                     Ok(cls) => {
@@ -179,7 +179,7 @@ impl Strategy for PyStrategyAdapter {
     fn on_order_update(&mut self, oue: &OrderUpdateEvent, ctx: &StrategyContext) -> Vec<SAction> {
         Python::with_gil(|py| {
             // Serialize Rust proto → bytes → betterproto parse
-            let py_oue = match rust_proto_to_py(py, oue, "zk_datamodel.oms", "OrderUpdateEvent") {
+            let py_oue = match rust_proto_to_py(py, oue, "zk_proto_betterproto.oms", "OrderUpdateEvent") {
                 Ok(o) => o,
                 Err(e) => {
                     e.print(py);
@@ -207,7 +207,7 @@ impl Strategy for PyStrategyAdapter {
         ctx: &StrategyContext,
     ) -> Vec<SAction> {
         Python::with_gil(|py| {
-            let py_bue = match rust_proto_to_py(py, bue, "zk_datamodel.oms", "BalanceUpdateEvent") {
+            let py_bue = match rust_proto_to_py(py, bue, "zk_proto_betterproto.oms", "BalanceUpdateEvent") {
                 Ok(o) => o,
                 Err(e) => {
                     e.print(py);
@@ -226,7 +226,7 @@ impl Strategy for PyStrategyAdapter {
         ctx: &StrategyContext,
     ) -> Vec<SAction> {
         Python::with_gil(|py| {
-            let py_pue = match rust_proto_to_py(py, pue, "zk_datamodel.oms", "PositionUpdateEvent")
+            let py_pue = match rust_proto_to_py(py, pue, "zk_proto_betterproto.oms", "PositionUpdateEvent")
             {
                 Ok(o) => o,
                 Err(e) => {

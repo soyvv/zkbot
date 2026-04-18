@@ -4,14 +4,14 @@
         "services/*/src"
     ],
     "extraPaths": [
-        "libs/zk-client/src",
-        "libs/zk-core/src",
-        "libs/zk-datamodel/src",
-        "libs/zk-gw-utils/src",
-        "libs/zk-rpc/src",
+        "python/libs/zk-client/src",
+        "python/libs/zk-core/src",
+        "",
+        "python/libs/zk-gw-utils/src",
+        "python/libs/zk-rpc/src",
         "services/zk-gw-okx/src",
-        "services/zk-refdata-loader/src",
-        "services/zk-service/src"
+        "python/legacy/services/zk-refdata-loader/src",
+        "python/legacy/services/zk-service/src"
     ],
     "pythonVersion": "3.11",
     "typeCheckingMode": "basic",

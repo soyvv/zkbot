@@ -425,3 +425,61 @@ Added `gw_exec_dequeue_ns` to `TimestampRecord` and `LatencyEvent::OrderSent`. N
   (comes via NATS reports). Safe.
 - Synthetic rejections bypass `SemanticPipeline`. Correct because rejections have no trades.
 - Dynamic GW registration acquires write lock — startup-only, not hot path.
+
+## Language-rooted layout + unified proto codegen (zb-00028, 2026-04-18)
+
+The zkbot repository is reorganized into top-level language roots (`python/`, `java/`, `rust/`) plus
+cross-cutting top-level concerns (`protos/`, `venue-integrations/`, `devops/`, `scripts/`).
+Protobuf codegen is unified behind a single entrypoint.
+
+### Layout
+
+```
+zkbot/
+  protos/                              schema source-of-truth (versioned tree zk/**/v1/ only)
+  python/
+    proto-pb/                          installs as `zk-proto-pb`; exposes top-level `zk` namespace
+    proto-betterproto/                 installs as `zk-proto-betterproto`
+    libs/{zk-client,zk-core,zk-data,zk-gw-utils,zk-rpc}/
+    services/zk-refdata-svc/
+    tools/                             installs as `zk-tools` (trade-doctor, loc-count, test_rtmd)
+    legacy/                            reference-only; excluded from uv workspace
+  java/                                multi-module Gradle build (`settings.gradle.kts`)
+    zk-proto-java/                     shared generated Java protos — generated at build time, NOT committed
+    pilot-service/                     Spring Boot Pilot service
+  rust/                                Cargo workspace (unchanged)
+  venue-integrations/                  cross-cutting: {oanda,ibkr,okx,simulator}
+    legacy/                            reference-only snapshots (pre-refactor vendored pb2 trees)
+  scripts/gen_proto.py                 single codegen driver
+```
+
+### Codegen contract
+
+- Python pb2/grpc: `grpc_tools.protoc` generates from the versioned tree
+  (`protos/zk/**/v1/*.proto`) into `python/proto-pb/src/zk/`. **Committed.**
+  Consumers import `from zk.<pkg>.v1 import <pkg>_pb2` from the installed `zk-proto-pb` package.
+- Python BetterProto: `grpc_tools.protoc` + BetterProto plugin generates from flat root
+  `.proto` files into `python/proto-betterproto/src/zk_proto_betterproto/`.
+  `scripts/gen_proto_legacy_compat.py` runs as a post-pass to add legacy enum aliases.
+  **Committed.** Consumers import `from zk_proto_betterproto.<pkg> import <Message>`.
+- Rust: `build.rs` + prost via `buf generate`, outputs `rust/crates/zk-proto-rs/src/`. **Committed.**
+- Java: **NOT** committed. Gradle `com.google.protobuf` plugin in `java/zk-proto-java/`
+  regenerates at every build from `../../protos/`. `java/pilot-service/` declares
+  `implementation(project(":zk-proto-java"))` to consume the generated classes.
+
+`make gen` → `uv run --python 3.13 python scripts/gen_proto.py` drives Python + Rust.
+Gradle owns Java generation. C++ codegen is not required and has been retired.
+
+### Forbidden patterns
+
+- No `sys.path` injection, no `PYTHONPATH=` hacks for local code — dependencies are declared in
+  `pyproject.toml`/`Cargo.toml`/Gradle, and `uv sync` / `cargo build` / Gradle resolves them.
+- No vendored generated code under service or venue packages (the pre-refactor
+  `venue-integrations/{oanda,ibkr}/*/proto/` trees are archived under
+  `venue-integrations/legacy/vendored-proto/` and not imported).
+- No on-demand codegen at import time (the old `trade_doctor.py` stamp cache at
+  `tools/.trade_doctor_generated/` is deleted).
+- Legacy trees (`python/legacy/`, `venue-integrations/legacy/`) are **not** uv workspace members
+  and must not be referenced from active code.
+
+See `docs/system-arch/dependency-matrix.md` for the full per-consumer mechanism table.

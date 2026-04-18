@@ -12,17 +12,17 @@
         engine-smoke-run-pilot engine-ets-oanda-run-pilot
 
 gen:
-	buf generate protos
+	uv run --python 3.13 python scripts/gen_proto.py
 
 lint:
 	ruff check .
-	mypy libs services
+	mypy python/libs python/services
 
 test:
 	pytest -q
 
 build:
-	find libs -maxdepth 2 -name pyproject.toml -execdir uv build \;
+	find python/libs -maxdepth 2 -name pyproject.toml -execdir uv build \;
 
 publish:
 	@echo "TODO: implement publish script to Nexus"
@@ -264,7 +264,7 @@ PYO3_PYTHON_HOME := $(shell $(PYO3_PYTHON_BIN) -c 'import sys; print(sys.base_pr
 STRATEGY_VENV_PYTHON_BIN := $(abspath ../zkstrategy_research/.venv/bin/python)
 STRATEGY_VENV_PYTHON_HOME := $(shell $(STRATEGY_VENV_PYTHON_BIN) -c 'import sys; print(sys.base_prefix)')
 STRATEGY_VENV_SITE_PACKAGES := $(shell $(STRATEGY_VENV_PYTHON_BIN) -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
-ENGINE_PYTHONPATH := $(STRATEGY_VENV_SITE_PACKAGES):$(abspath ../zkstrategy_research/zk-strategylib):$(CURDIR)/libs/zk-core/src:$(CURDIR)/libs/zk-datamodel/src
+ENGINE_PYTHONPATH := $(STRATEGY_VENV_SITE_PACKAGES):$(abspath ../zkstrategy_research/zk-strategylib):$(CURDIR)/python/libs/zk-core/src:$(CURDIR)/
 oanda-venv: ## Create/update OANDA Python venv
 	cd venue-integrations/oanda && uv venv .venv --python $(UV_PYTHON_SPEC) && \
 	uv pip install -e ".[dev]" --python .venv/bin/python \
@@ -355,7 +355,7 @@ refdata-run: ## Run refdata-svc locally (requires NATS+PG: make dev-up)
 
 # ── Pilot service ─────────────────────────────────────────────────────────────
 pilot-run: ## Run pilot locally (requires NATS+PG: make dev-up)
-	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh pilot zsh -lc 'cd services/zk-pilot && \
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh pilot zsh -lc 'cd python/legacy/services/zk-pilot && \
 	ZK_NATS_URL=nats://localhost:4222 \
 	ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
 	ZK_ENV=dev \
@@ -365,10 +365,10 @@ pilot-run: ## Run pilot locally (requires NATS+PG: make dev-up)
 
 # ── Pilot Java service ───────────────────────────────────────────────────────
 pilot-java-build: ## Build Java Pilot (Gradle)
-	cd java && ./gradlew build -x test
+	cd java && ./gradlew :pilot-service:build -x test
 
 pilot-java-test: ## Run Java Pilot tests
-	cd java && ./gradlew test
+	cd java && ./gradlew :pilot-service:test
 
 pilot-java-run: ## Run Java Pilot locally (requires NATS+PG+Redis: make dev-up)
 	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh pilot-java zsh -lc 'cd java && ZK_NATS_URL=nats://localhost:4222 \
@@ -383,7 +383,7 @@ pilot-java-run: ## Run Java Pilot locally (requires NATS+PG+Redis: make dev-up)
 	           ZK_SERVICE_MANIFESTS_ROOT=$(CURDIR)/service-manifests \
 	           ZK_VENUE_INTEGRATIONS_ROOT=$(CURDIR)/venue-integrations \
 	           SPRING_PROFILES_ACTIVE=dev \
-	           ./gradlew bootRun'
+	           ./gradlew :pilot-service:bootRun'
 
 # ── Engine service ────────────────────────────────────────────────────────────
 engine-run: ## Run engine-svc locally (requires NATS+PG: make dev-up)

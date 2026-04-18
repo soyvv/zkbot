@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ibkr.rtmd import IbkrRtmdAdaptor, IbkrRtmdConfig, _compute_duration_str
-from ibkr.proto.zk.rtmd.v1.rtmd_pb2 import Kline, TickData
+from zk.rtmd.v1.rtmd_pb2 import Kline, TickData
 from tests.conftest import MockBarData, MockContract, MockIB, MockTicker
 
 

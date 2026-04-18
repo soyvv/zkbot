@@ -28,7 +28,7 @@ pub struct BootstrapRegisterRequest {
     #[prost(map="string, string", tag="5")]
     pub runtime_info: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BootstrapRegisterResponse {
     /// UUID; embedded in KV heartbeat CAS writes
     #[prost(string, tag="1")]
@@ -58,6 +58,12 @@ pub struct BootstrapRegisterResponse {
     /// server timestamp for clock-skew detection
     #[prost(int64, tag="10")]
     pub server_time_ms: i64,
+    /// config version, hash, loaded_at, source
+    #[prost(message, optional, tag="11")]
+    pub config_metadata: ::core::option::Option<super::super::config::v1::ConfigMetadata>,
+    /// logical secret refs for this service (no raw values)
+    #[prost(message, repeated, tag="12")]
+    pub secret_refs: ::prost::alloc::vec::Vec<super::super::config::v1::SecretRef>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct BootstrapDeregisterRequest {

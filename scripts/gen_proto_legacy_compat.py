@@ -189,7 +189,7 @@ def write_alias_block(module_path: Path, alias_lines: list[str]) -> None:
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     proto_dir = repo_root / "protos"
-    out_root = repo_root / "libs/zk-datamodel/src/zk_datamodel"
+    out_root = repo_root / "python/proto-betterproto/src/zk_proto_betterproto"
 
     updated = 0
     for proto_path in sorted(proto_dir.glob("*.proto")):

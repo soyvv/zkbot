@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 from oanda.gw import OandaGatewayAdaptor
 
-import oanda.proto  # noqa: F401
 from zk.exch_gw.v1 import exch_gw_pb2 as gw_pb
 
 

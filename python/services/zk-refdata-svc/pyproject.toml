@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zk-refdata-svc"
+version = "0.1.0"
+description = "Refdata gRPC query service — serves instrument reference data from PostgreSQL"
+requires-python = ">=3.11"
+dependencies = [
+    "zk-proto-pb",
+    "grpcio>=1.62",
+    "asyncpg>=0.29",
+    "nats-py>=2.6",
+    "loguru>=0.7",
+    "protobuf>=6.32.0",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
+    "hvac>=2.4.0",
+    "betterproto>=2.0.0b7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+zk-refdata-svc = "zk_refdata_svc.main:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zk_refdata_svc"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]

@@ -43,6 +43,8 @@ pub struct OrderRequest {
     pub time_inforce_type: i32,
     #[prost(enumeration="super::super::common::v1::ExtraOrderTagType", repeated, tag="14")]
     pub extra_order_tags: ::prost::alloc::vec::Vec<i32>,
+    #[prost(message, optional, tag="15")]
+    pub trigger_context: ::core::option::Option<super::super::common::v1::TriggerContext>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OrderCancelRequest {
@@ -56,6 +58,8 @@ pub struct OrderCancelRequest {
     pub source_id: ::prost::alloc::string::String,
     #[prost(int64, tag="8")]
     pub timestamp: i64,
+    #[prost(message, optional, tag="9")]
+    pub trigger_context: ::core::option::Option<super::super::common::v1::TriggerContext>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Order {
@@ -183,6 +187,37 @@ pub struct Position {
     pub margin_pos_info: ::core::option::Option<super::super::common::v1::MarginPositionInfo>,
     #[prost(bool, tag="14")]
     pub contract_size_adjusted: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Balance {
+    #[prost(int64, tag="1")]
+    pub account_id: i64,
+    /// e.g. "USDT", "BTC"
+    #[prost(string, tag="2")]
+    pub asset: ::prost::alloc::string::String,
+    #[prost(double, tag="3")]
+    pub total_qty: f64,
+    #[prost(double, tag="4")]
+    pub frozen_qty: f64,
+    #[prost(double, tag="5")]
+    pub avail_qty: f64,
+    #[prost(int64, tag="6")]
+    pub sync_timestamp: i64,
+    #[prost(int64, tag="7")]
+    pub update_timestamp: i64,
+    #[prost(bool, tag="8")]
+    pub is_from_exch: bool,
+    #[prost(string, tag="9")]
+    pub exch_data_raw: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BalanceUpdateEvent {
+    #[prost(int64, tag="1")]
+    pub account_id: i64,
+    #[prost(message, repeated, tag="2")]
+    pub balance_snapshots: ::prost::alloc::vec::Vec<Balance>,
+    #[prost(int64, tag="3")]
+    pub timestamp: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OrderUpdateEvent {
@@ -324,24 +359,6 @@ pub struct CancelAlgoOrderRequest {
     #[prost(int64, tag="1")]
     pub algo_order_id: i64,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct QueryAccountRequest {
-    #[prost(int64, tag="1")]
-    pub account_id: i64,
-    #[prost(bool, tag="2")]
-    pub query_gw: bool,
-    #[prost(message, optional, tag="3")]
-    pub pagination: ::core::option::Option<super::super::common::v1::PaginationRequest>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AccountResponse {
-    #[prost(int64, tag="1")]
-    pub account_id: i64,
-    #[prost(message, repeated, tag="2")]
-    pub account_balance_entries: ::prost::alloc::vec::Vec<Position>,
-    #[prost(int64, tag="3")]
-    pub timestamp: i64,
-}
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct QueryPositionRequest {
     #[prost(int64, tag="1")]
@@ -353,6 +370,22 @@ pub struct QueryPositionRequest {
 pub struct PositionResponse {
     #[prost(message, repeated, tag="1")]
     pub positions: ::prost::alloc::vec::Vec<Position>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryBalancesRequest {
+    #[prost(int64, tag="1")]
+    pub account_id: i64,
+    #[prost(bool, tag="2")]
+    pub query_gw: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct QueryBalancesResponse {
+    #[prost(int64, tag="1")]
+    pub account_id: i64,
+    #[prost(message, repeated, tag="2")]
+    pub balances: ::prost::alloc::vec::Vec<Balance>,
+    #[prost(int64, tag="3")]
+    pub timestamp: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct QueryOpenOrderRequest {

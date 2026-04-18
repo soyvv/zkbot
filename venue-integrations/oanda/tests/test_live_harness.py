@@ -17,7 +17,6 @@ import pytest
 
 from oanda.gw import OandaGatewayAdaptor
 
-import oanda.proto  # noqa: F401
 from zk.exch_gw.v1 import exch_gw_pb2 as gw_pb
 
 OANDA_TOKEN = os.environ.get("ZK_OANDA_TOKEN", "")

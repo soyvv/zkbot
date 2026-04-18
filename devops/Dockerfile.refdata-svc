@@ -4,7 +4,7 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
-COPY services/zk-refdata-svc/pyproject.toml ./
+COPY python/services/zk-refdata-svc/pyproject.toml ./
 RUN uv pip install --system --no-cache \
     "grpcio>=1.62" \
     "protobuf>=4.25" \
@@ -13,7 +13,7 @@ RUN uv pip install --system --no-cache \
     "loguru>=0.7"
 
 # Source includes pre-generated gRPC stubs (refdata_pb2.py / refdata_pb2_grpc.py)
-COPY services/zk-refdata-svc/src ./src
+COPY python/services/zk-refdata-svc/src ./src
 
 ENV PYTHONPATH=/app/src
 
