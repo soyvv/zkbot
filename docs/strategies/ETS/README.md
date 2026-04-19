@@ -269,20 +269,23 @@ Primary use case:
 Recommended contract:
 
 - strategy config identifies `python_module` and `python_class`
-- runtime accepts one or more local search roots such as `python_search_path`
-- the launcher or engine inserts those roots into `sys.path` before import
+- the package is installed into the workspace venv via `[tool.uv.sources]`
+  (editable path install from `zkstrategy_research/zk-strategylib`)
+- the engine embeds that same venv via `VIRTUAL_ENV` / `PYO3_PYTHON` and
+  resolves the module with `importlib.import_module`
 
 Recommended examples:
 
 - `python_module = "zk_strategylib.entry_target_stop.ETS_on_kline"`
 - `python_class = "ETS"`
-- `python_search_path = "/workspace/zkstrategy_research/zk-strategylib"`
+- ensure `uv sync` has pulled `zk-strategylib` into `.venv/…/site-packages/`
 
 Rules:
 
-- local dev should prefer package imports, not raw file execution
-- `python_search_path` should point at the package root, not the individual file
-- the wrapper should fail clearly if the module imports but the requested class or `__zk_init__` hook is missing
+- local dev and prod both use installed-package imports; no `sys.path` overrides
+- the wrapper must fail clearly if the module or requested class is missing
+- see [../../system-arch/dependency-contract.md](../../system-arch/dependency-contract.md)
+  for the full Rust-Python resolution contract
 
 #### Mode B: Private PyPI package
 
@@ -319,8 +322,10 @@ Treat import resolution and package installation as separate responsibilities.
 
 That split gives a clean model:
 
-- local dev: mount repo, set `python_search_path`, import package module
-- deployed env: install package from private PyPI, import package module without special path overrides
+- local dev: workspace venv has `zk-strategylib` path-installed via uv sources;
+  engine embeds that venv and imports by module name
+- deployed env: install package from private PyPI into the deploy venv, import
+  package module without special path overrides
 
 #### Config shape for future Python-wrapper support
 
@@ -331,7 +336,6 @@ Suggested fields:
 - `python_module`
 - `python_class`
 - `python_strategy_config`
-- optional `python_search_path`
 
 Non-goals for the strategy config:
 
@@ -430,8 +434,8 @@ Suggested output:
 
 ### Phase 3: Python wrapper packaging contract
 
-- define the Python-wrapper import contract for both local-dev and installed-package modes
-- keep `python_search_path` as a local-dev override only
+- define the Python-wrapper import contract (installed-module imports only,
+  per [../../system-arch/dependency-contract.md](../../system-arch/dependency-contract.md))
 - keep package installation outside the runtime import path
 
 ### Phase 4: Launcher
@@ -446,9 +450,8 @@ Suggested output:
 - verify live Oanda kline subscription matches the init interval
 - verify position detection works without `position_symbol` in public config
 - verify first entry signal does not occur before warmup is complete
-- verify both Python packaging modes:
-  - local workspace import with `python_search_path`
-  - installed-package import without path overrides
+- verify Python packaging: installed-package import resolves `zk_strategylib`
+  from the workspace venv (uv-path-install) and from a private-index install
 
 ## Risks And Gaps
 

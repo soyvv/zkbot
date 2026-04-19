@@ -277,13 +277,17 @@ Recommended wrapper shape:
 {
   "python_module": "my_pkg.my_strategy",
   "python_class": "MyStrategy",
-  "python_search_path": "/opt/zkbot/strategies",
   "python_strategy_config": {
     "lookback": 20,
     "threshold_bps": 5
   }
 }
 ```
+
+The strategy module must be resolvable via `importlib.import_module` — i.e.,
+installed into the embedded Python interpreter's `site-packages` (workspace
+member or external distribution). `sys.path` injection is not supported; see
+[../dependency-contract.md](../dependency-contract.md).
 
 Design rule:
 

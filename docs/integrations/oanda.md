@@ -379,7 +379,9 @@ Operational note:
 Bridge-specific config note:
 
 - the Python bridge is enabled in the Rust hosts with the `python-venue` cargo feature
-- `ZK_VENUE_ROOT` must point at `venue-integrations/`
+- `ZK_VENUE_MANIFEST_ROOT` must point at `venue-integrations/` (manifest/schema
+  reads only — Python module resolution goes through installed-package imports;
+  see [../system-arch/dependency-contract.md](../system-arch/dependency-contract.md))
 - `ZK_VENUE_CONFIG` must be valid against `schemas/gw_config.schema.json`,
   `schemas/rtmd_config.schema.json`, or `schemas/refdata_config.schema.json` as appropriate
 

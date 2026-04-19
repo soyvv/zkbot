@@ -368,7 +368,7 @@ Preferred initial rule:
 This keeps the architecture flexible without forcing the first implementation into a fragile plugin
 system.
 
-For the current Python `zk-refdata-svc`, the recommended first implementation is:
+For the current Python `zk-refdata-svc`, the implementation rule is:
 
 - manifest-driven Python import inside the refdata host
 - no dependency on the Rust bridge just to load Python refdata adaptors
@@ -378,7 +378,10 @@ For the current Python `zk-refdata-svc`, the recommended first implementation is
 For Python venue loading specifically:
 
 - the refdata host should import `python:<venue>.<module>:<Class>`
-- it should add the venue directory itself to `sys.path`, not a parallel flat-module directory
+- the venue-integrations root for manifests and schemas is configured explicitly, for example via
+  `ZK_VENUE_INTEGRATIONS_DIR`
+- Python modules themselves are resolved through installed-package imports, not `sys.path`
+  injection
 - the bridge should not rewrite package entrypoints into unrelated flat module names
 
 ## Capability Interfaces

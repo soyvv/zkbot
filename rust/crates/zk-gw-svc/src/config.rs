@@ -192,7 +192,7 @@ impl ServiceBootstrap for GwBootstrap {
         let venue_config: serde_json::Value =
             serde_json::from_str(&venue_config_str).unwrap_or_else(|_| default_venue_config());
 
-        let venue_root = std::env::var("ZK_VENUE_ROOT").ok();
+        let venue_root = std::env::var("ZK_VENUE_MANIFEST_ROOT").ok();
 
         let exec_shard_count: usize = std::env::var("ZK_EXEC_SHARD_COUNT")
             .ok()
@@ -288,7 +288,7 @@ impl ServiceBootstrap for GwBootstrap {
             venue_root: provided
                 .venue_root
                 .filter(|s| !s.is_empty())
-                .or_else(|| std::env::var("ZK_VENUE_ROOT").ok()),
+                .or_else(|| std::env::var("ZK_VENUE_MANIFEST_ROOT").ok()),
             exec_shard_count: provided.exec_shard_count,
             exec_queue_capacity: provided.exec_queue_capacity,
             simulator,

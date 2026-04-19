@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::from_str;
+#[cfg(feature = "python")]
 use serde_json::Value;
 use strategy_smoke_test::SmokeMMConfig;
 use strategy_smoke_test::SmokeTestStrategy;
@@ -21,7 +22,6 @@ pub enum StrategySpec {
 pub struct PythonStrategySpec {
     pub module: String,
     pub class_name: String,
-    pub search_path: Option<String>,
     pub config_json: Option<String>,
 }
 
@@ -37,7 +37,6 @@ pub fn parse_strategy_spec(strategy_type_key: &str) -> Result<StrategySpec> {
         "python-wrapper" => Ok(StrategySpec::Python(PythonStrategySpec {
             module: String::new(),
             class_name: String::new(),
-            search_path: None,
             config_json: None,
         })),
         "noop" | "" => Ok(StrategySpec::Noop),
@@ -71,12 +70,6 @@ fn build_python_strategy(spec: &PythonStrategySpec, config_json: Option<&str>) -
 
     Python::with_gil(|py| -> Result<Box<dyn Strategy>> {
         let resolved = resolve_python_strategy_spec(spec, config_json)?;
-
-        if let Some(path) = &resolved.search_path {
-            let sys = py.import_bound("sys")?;
-            let sys_path = sys.getattr("path")?;
-            sys_path.call_method1("insert", (0, path.as_str()))?;
-        }
 
         let module = py.import_bound(resolved.module.as_str())?;
         let cls = module.getattr(resolved.class_name.as_str())?;
@@ -116,19 +109,19 @@ fn parse_python_entrypoint(strategy_type_key: &str) -> Result<StrategySpec> {
     Ok(StrategySpec::Python(PythonStrategySpec {
         module: module.to_string(),
         class_name: class_name.to_string(),
-        search_path: None,
         config_json: None,
     }))
 }
 
+#[cfg(feature = "python")]
 #[derive(Debug)]
 struct ResolvedPythonStrategySpec {
     module: String,
     class_name: String,
-    search_path: Option<String>,
     strategy_config: Value,
 }
 
+#[cfg(feature = "python")]
 fn resolve_python_strategy_spec(
     spec: &PythonStrategySpec,
     config_json: Option<&str>,
@@ -155,11 +148,6 @@ fn resolve_python_strategy_spec(
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| anyhow!("python-wrapper config is missing python_class"))?;
-        let search_path = obj
-            .get("python_search_path")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string);
         let strategy_config = obj
             .get("python_strategy_config")
             .cloned()
@@ -168,7 +156,6 @@ fn resolve_python_strategy_spec(
         return Ok(ResolvedPythonStrategySpec {
             module: module.to_string(),
             class_name: class_name.to_string(),
-            search_path,
             strategy_config,
         });
     }
@@ -176,7 +163,6 @@ fn resolve_python_strategy_spec(
     Ok(ResolvedPythonStrategySpec {
         module: spec.module.clone(),
         class_name: spec.class_name.clone(),
-        search_path: spec.search_path.clone(),
         strategy_config: parsed,
     })
 }

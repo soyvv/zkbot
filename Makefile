@@ -1,4 +1,4 @@
-.PHONY: gen lint test build publish \
+.PHONY: gen lint test build publish pyo3-wheel ci-lint \
         dev-up dev-up-full dev-down dev-reset dev-logs dev-logs-save dev-ps dev-health dev-reset-redis dev-reset-pg \
         test-unit test-integration test-parity \
         oms-check oms-build oms-test oms-test-integration oms-bench oms-e2e-bench oms-run oms-run-release oms-redis-clear \
@@ -26,6 +26,12 @@ build:
 
 publish:
 	@echo "TODO: implement publish script to Nexus"
+
+pyo3-wheel: ## Build zk-backtest wheel (PyO3 extension) into rust/crates/zk-pyo3-rs/dist
+	cd rust/crates/zk-pyo3-rs && maturin build --release --out dist
+
+ci-lint: ## Dependency-contract audit (grep-based, zero hits required)
+	bash scripts/audit_dependency_contract.sh
 
 # ── Local dev stack ───────────────────────────────────────────────────────────
 # Typical local workflow:
@@ -255,20 +261,21 @@ rtmd-okx-demo-pilot: ## Run OKX RTMD gateway with Pilot bootstrap (requires: mak
 	           RUST_LOG=zk_rtmd_gw_svc=debug,zk_rtmd_rs=debug,zk_venue_okx=debug,zk_infra_rs=debug,info \
 	           cargo run --release -p zk-rtmd-gw-svc'
 
-# ── OANDA venue venv ─────────────────────────────────────────────────────────
-# Resolve Python through uv so the dev stack does not depend on pyenv-managed paths.
-# The venv and embedded PyO3 runtime must use the same interpreter.
-UV_PYTHON_SPEC   ?= 3.13
-PYO3_PYTHON_BIN  := $(shell uv python find --python-preference only-managed $(UV_PYTHON_SPEC))
-PYO3_PYTHON_HOME := $(shell $(PYO3_PYTHON_BIN) -c 'import sys; print(sys.base_prefix)')
-STRATEGY_VENV_PYTHON_BIN := $(abspath ../zkstrategy_research/.venv/bin/python)
-STRATEGY_VENV_PYTHON_HOME := $(shell $(STRATEGY_VENV_PYTHON_BIN) -c 'import sys; print(sys.base_prefix)')
-STRATEGY_VENV_SITE_PACKAGES := $(shell $(STRATEGY_VENV_PYTHON_BIN) -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
-ENGINE_PYTHONPATH := $(STRATEGY_VENV_SITE_PACKAGES):$(abspath ../zkstrategy_research/zk-strategylib):$(CURDIR)/python/libs/zk-core/src:$(CURDIR)/
-oanda-venv: ## Create/update OANDA Python venv
-	cd venue-integrations/oanda && uv venv .venv --python $(UV_PYTHON_SPEC) && \
-	uv pip install -e ".[dev]" --python .venv/bin/python \
-	$(if $(ZK_PYPI_EXTRA_INDEX),--extra-index-url $(ZK_PYPI_EXTRA_INDEX),)
+# ── Python interpreter for embedded PyO3 runtimes ───────────────────────────
+# Single source of truth: the uv-managed workspace venv at `$(CURDIR)/.venv`.
+# Embedded hosts (`zk-pyo3-bridge`, `zk-strategy-host-rs`) import venue and
+# strategy modules through this venv's site-packages — no sys.path mutation,
+# no per-venue hand-rolled venvs, no extra PYTHONPATH overrides. Run `uv sync` to
+# populate the venv with venue adaptors and `zk-strategylib`.
+UV_PYTHON_SPEC     ?= 3.13
+WORKSPACE_VENV     := $(CURDIR)/.venv
+WORKSPACE_PYTHON   := $(WORKSPACE_VENV)/bin/python
+PYO3_PYTHON_BIN    := $(WORKSPACE_PYTHON)
+PYO3_PYTHON_HOME   := $(shell $(PYO3_PYTHON_BIN) -c 'import sys; print(sys.base_prefix)' 2>/dev/null)
+
+oanda-venv: ## No-op alias: workspace venv provides oanda adaptor via uv workspace membership. Run `uv sync`.
+	@test -x "$(WORKSPACE_PYTHON)" || (echo "Missing $(WORKSPACE_PYTHON). Run 'uv sync' first." && exit 1)
+	@$(WORKSPACE_PYTHON) -c 'import oanda' >/dev/null 2>&1 || (echo "oanda package not importable; run 'uv sync'." && exit 1)
 
 # ── OANDA gateway service ───────────────────────────────────────────────────
 gw-oanda-demo: oanda-venv ## Run OANDA gateway (practice, direct mode)
@@ -284,7 +291,7 @@ gw-oanda-demo: oanda-venv ## Run OANDA gateway (practice, direct mode)
 	  ZK_ACCOUNT_ID=8003 \
 	  ZK_EXCH_ACCOUNT_ID=101-003-26138765-001 \
 	  ZK_GRPC_PORT=51055 \
-	  ZK_VENUE_ROOT=$(CURDIR)/venue-integrations \
+	  ZK_VENUE_MANIFEST_ROOT=$(CURDIR)/venue-integrations \
 	  ZK_VENUE_CONFIG='"'"'{"environment":"practice","account_id":"101-003-26138765-001","secret_ref":"kv/trading/gw/8003"}'"'"' \
 	  RUST_LOG=zk_gw_svc=debug,zk_pyo3_bridge=info,warn \
 	  cargo run --release -p zk-gw-svc --features python-venue'
@@ -299,7 +306,7 @@ gw-oanda-demo-pilot: oanda-venv ## Run OANDA gateway with Pilot bootstrap
 	  ZK_VENUE=oanda \
 	  ZK_NATS_URL=nats://localhost:4222 \
 	  ZK_GRPC_PORT=51055 \
-	  ZK_VENUE_ROOT=$(CURDIR)/venue-integrations \
+	  ZK_VENUE_MANIFEST_ROOT=$(CURDIR)/venue-integrations \
 	  VAULT_ADDR=http://localhost:8200 \
 	  VAULT_TOKEN=dev-root-token \
 	  ZK_BOOTSTRAP_TOKEN=$(ZK_OANDA_GW_BOOTSTRAP_TOKEN) \
@@ -320,7 +327,7 @@ rtmd-oanda-demo: oanda-venv ## Run OANDA RTMD gateway (practice, direct mode)
 	  ZK_VENUE=oanda \
 	  ZK_NATS_URL=nats://localhost:4222 \
 	  ZK_GRPC_PORT=52055 \
-	  ZK_VENUE_ROOT=$(CURDIR)/venue-integrations \
+	  ZK_VENUE_MANIFEST_ROOT=$(CURDIR)/venue-integrations \
 	  ZK_VENUE_CONFIG='"'"'{"environment":"practice","account_id":"101-003-26138765-001","secret_ref":"kv/trading/gw/8003"}'"'"' \
 	  RUST_LOG=zk_rtmd_gw_svc=debug,zk_pyo3_bridge=info,warn \
 	  cargo run --release -p zk-rtmd-gw-svc --features python-venue'
@@ -335,7 +342,7 @@ rtmd-oanda-demo-pilot: oanda-venv ## Run OANDA RTMD gateway with Pilot bootstrap
 	  ZK_VENUE=oanda \
 	  ZK_NATS_URL=nats://localhost:4222 \
 	  ZK_GRPC_PORT=52055 \
-	  ZK_VENUE_ROOT=$(CURDIR)/venue-integrations \
+	  ZK_VENUE_MANIFEST_ROOT=$(CURDIR)/venue-integrations \
 	  VAULT_ADDR=http://localhost:8200 \
 	  VAULT_TOKEN=dev-root-token \
 	  ZK_BOOTSTRAP_TOKEN=$(ZK_OANDA_MDGW_BOOTSTRAP_TOKEN) \
@@ -379,7 +386,7 @@ pilot-java-run: ## Run Java Pilot locally (requires NATS+PG+Redis: make dev-up)
 	           ZK_ENV=dev \
 	           ZK_PILOT_ID=pilot_dev_1 \
 	           ZK_HTTP_PORT=8090 \
-	           ZK_ENGINE_BINARY_PATH=$(CURDIR)/rust/target/debug/zk-engine-svc \
+	           PILOT_ENGINE_BINARY_PATH=$(CURDIR)/rust/target/debug/zk-engine-svc \
 	           ZK_SERVICE_MANIFESTS_ROOT=$(CURDIR)/service-manifests \
 	           ZK_VENUE_INTEGRATIONS_ROOT=$(CURDIR)/venue-integrations \
 	           SPRING_PROFILES_ACTIVE=dev \
@@ -412,13 +419,16 @@ engine-smoke-run-pilot: ## Run smoke bot engine outside orchestrator but with Pi
 
 engine-ets-oanda-run-pilot: ## Run the Pilot-managed ETS Oanda engine; requires ZK_BOOTSTRAP_TOKEN from Pilot bot onboarding
 	@test -n "$(ZK_BOOTSTRAP_TOKEN)" || (echo "ZK_BOOTSTRAP_TOKEN is required, e.g. make engine-ets-oanda-run-pilot ZK_BOOTSTRAP_TOKEN=<token>" && exit 1)
-	@test -x "$(STRATEGY_VENV_PYTHON_BIN)" || (echo "Missing strategy venv python at $(STRATEGY_VENV_PYTHON_BIN). Create/update zkstrategy_research/.venv first." && exit 1)
+	@test -x "$(WORKSPACE_PYTHON)" || (echo "Missing $(WORKSPACE_PYTHON). Run 'uv sync' first." && exit 1)
+	@$(WORKSPACE_PYTHON) -c 'import zk_strategylib' >/dev/null 2>&1 || (echo "zk_strategylib not importable from $(WORKSPACE_PYTHON); run 'uv sync'." && exit 1)
 	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh engine-ets-oanda-pilot zsh -lc 'cd rust && \
-	           unset VIRTUAL_ENV CONDA_PREFIX PYTHONHOME PYTHONEXECUTABLE __PYVENV_LAUNCHER__ && \
-	           PYO3_PYTHON=$(STRATEGY_VENV_PYTHON_BIN) cargo build -p zk-engine-svc && \
-	           DYLD_LIBRARY_PATH=$(STRATEGY_VENV_PYTHON_HOME)/lib \
-	           PYTHONHOME=$(STRATEGY_VENV_PYTHON_HOME) \
-	           PYTHONPATH=$(ENGINE_PYTHONPATH) \
+	           unset CONDA_PREFIX PYTHONPATH PYTHONEXECUTABLE __PYVENV_LAUNCHER__ && \
+	           VIRTUAL_ENV=$(WORKSPACE_VENV) \
+	           PYO3_PYTHON=$(WORKSPACE_PYTHON) cargo build -p zk-engine-svc && \
+	           DYLD_LIBRARY_PATH=$(PYO3_PYTHON_HOME)/lib \
+	           VIRTUAL_ENV=$(WORKSPACE_VENV) \
+	           PYO3_PYTHON=$(WORKSPACE_PYTHON) \
+	           PYTHONHOME=$(PYO3_PYTHON_HOME) \
 	           ZK_ENGINE_ID=engine_ets_oanda_pilot_01 \
 	           ZK_INSTANCE_TYPE=ENGINE \
 	           ZK_NATS_URL=nats://localhost:4222 \

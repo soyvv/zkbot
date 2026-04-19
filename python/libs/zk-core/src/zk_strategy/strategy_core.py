@@ -1,17 +1,9 @@
 #import asyncio
 import functools
+import importlib
 import numpy as np
 from dataclasses import dataclass
-# import betterproto
-# import tqrpc_lib.rtmd as rtmd
-# import tqrpc_lib.oms as oms
-#
-# import asyncio
-# import math
-# from enum import Enum
-import importlib.util
 from typing import Type, Union, Callable
-from pathlib import Path
 import traceback as tb
 #from zk_client.tqclient import TQClient
 import zk_utils.zk_utils as tqutils
@@ -43,7 +35,8 @@ from loguru import logger
 @dataclass
 class StrategyConfig:
     strategy_name: str = None
-    strategy_file: str = None
+    strategy_entrypoint: str = None  # production: "<installed.module.path>:<ClassName>"
+    strategy_file: str = None  # dev/test only: path to a .py source file
     account_ids: list[int] = None # accounts to subscribe from OMS
     symbols: list[str] = None  # symbols to subscribe from RTMD
     symbols_kline: list[str] = None  # symbols to subscribe from RTMD-klines
@@ -57,60 +50,60 @@ class StrategyConfig:
     symbol_info: list[common.InstrumentRefData] = None
 
 
+def load_strategy(entrypoint: str) -> Type[StrategyBase]:
+    """Load a ``StrategyBase`` subclass from an installed module.
 
-
-def load_strategy(file_path: str) -> Union[Type[StrategyBase], None]:
+    ``entrypoint`` has the form ``"<module.path>:<ClassName>"`` and must refer
+    to an importable, installed module. File-path loading lives in
+    :mod:`zk_strategy.dev` and is dev/test only.
     """
-    Load a strategy class from a Python script at the given file_path.
+    if not isinstance(entrypoint, str) or ":" not in entrypoint:
+        raise ValueError(
+            f"strategy entrypoint must be '<module>:<ClassName>', got: {entrypoint!r}"
+        )
+    module_path, class_name = entrypoint.split(":", 1)
+    module_path = module_path.strip()
+    class_name = class_name.strip()
+    if not module_path or not class_name:
+        raise ValueError(
+            f"strategy entrypoint must be '<module>:<ClassName>', got: {entrypoint!r}"
+        )
 
-    :param file_path: Path to the Python script file.
-    :return: A subclass of StrategyBase if found, otherwise None.
+    module = importlib.import_module(module_path)
+    try:
+        strategy_cls = getattr(module, class_name)
+    except AttributeError as exc:
+        raise ImportError(
+            f"class '{class_name}' not found in module '{module_path}'"
+        ) from exc
+
+    if not (isinstance(strategy_cls, type) and issubclass(strategy_cls, StrategyBase)):
+        raise TypeError(
+            f"{entrypoint} must resolve to a StrategyBase subclass"
+        )
+
+    init_func = getattr(module, "__tq_init__", None)
+    if callable(init_func):
+        strategy_cls.__tq_init__ = init_func
+    return strategy_cls
+
+
+def _resolve_strategy_cls(cfg: StrategyConfig) -> Type[StrategyBase]:
+    """Choose the right loader based on which config field is populated.
+
+    ``strategy_entrypoint`` (production: installed ``module:class``) takes
+    precedence. ``strategy_file`` routes through :mod:`zk_strategy.dev`, the
+    only sanctioned place for file-based loading.
     """
-    import sys, os
-    if not Path(file_path).exists():
-        raise FileNotFoundError(f"File '{file_path}' not found")
-
-    # module_name = os.path.basename(file_path)
-    # module_name = os.path.splitext(module_name)[0]
-    #
-
-
-
-    module_name = os.path.splitext(os.path.basename(file_path))[0]
-    module_dir = os.path.dirname(file_path)
-
-    print(module_name)
-    print(module_dir)
-
-    # Add the module's directory to sys.path
-    if module_dir not in sys.path:
-        sys.path.insert(0, module_dir)
-
-
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    strategy_cls = None
-    for name, obj in module.__dict__.items():
-        if isinstance(obj, type) and issubclass(obj, StrategyBase) and obj != StrategyBase:
-            # this will exclude other classes that are imported in the strategy file
-            if hasattr(obj, "__module__") and obj.__module__ == module.__name__:
-                strategy_cls = obj
-                break
-
-    init_func = None
-    for name, obj in module.__dict__.items():
-        if callable(obj) and name == "__tq_init__":
-            init_func = obj
-            break
-
-    if strategy_cls:
-        if init_func:
-            strategy_cls.__tq_init__ = init_func
-        return strategy_cls
-    else:
-        raise Exception(f"Strategy class not found in file '{file_path}'")
+    if cfg.strategy_entrypoint:
+        return load_strategy(cfg.strategy_entrypoint)
+    if cfg.strategy_file:
+        from . import dev  # imported lazily to keep dev-only code out of hot paths
+        return dev.load_from_file(cfg.strategy_file)
+    raise ValueError(
+        "StrategyConfig must set either strategy_entrypoint (production)"
+        " or strategy_file (dev/tests)"
+    )
 
 
 def handle_event(handler):
@@ -138,7 +131,7 @@ class StrategyTemplate:
                  instance_id:int=None):
         self.strategy_config = strategy_config
         self.logger_enabled = not self.strategy_config.diable_logging
-        self.user_strategy_cls = load_strategy(file_path=strategy_config.strategy_file)
+        self.user_strategy_cls = _resolve_strategy_cls(strategy_config)
         self.user_strategy = self.user_strategy_cls() # user strategy init should take no args
         if init_func:
             self.user_strategy.__tq_init__ = init_func

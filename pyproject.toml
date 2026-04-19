@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "zkbot workspace root (see python/, rust/, java/)"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+# Root deps pull packages into `.venv` that embedded-Python runtimes need but
+# aren't otherwise reachable from a single workspace member's deps. See
+# docs/system-arch/dependency-contract.md.
+dependencies = [
+  "zk-strategylib",
+]
 
 
 [dependency-groups]
@@ -25,6 +30,7 @@ members = [
   "python/tools",
   "venue-integrations/oanda",
   "venue-integrations/ibkr",
+  "venue-integrations/okx",
 ]
 exclude = [
   "venue-integrations/legacy",
@@ -41,3 +47,13 @@ gw-utils = { workspace = true }
 zk-proto-pb = { workspace = true }
 zk-proto-betterproto = { workspace = true }
 zk-tools = { workspace = true }
+zk-gw-oanda = { workspace = true }
+zk-venue-ibkr = { workspace = true }
+zk-venue-okx = { workspace = true }
+# PyO3 native extension: built via maturin PEP 517 backend on `uv sync`,
+# installed as a versioned wheel into the active venv. Python-visible module is `zk_backtest`.
+zk-backtest = { path = "rust/crates/zk-pyo3-rs" }
+# Research strategy package lives outside this repo; added as an editable source so
+# embedded-Python hosts can `importlib.import_module("zk_strategylib.…")` without
+# PYTHONPATH tricks. See docs/system-arch/dependency-contract.md.
+zk-strategylib = { path = "../zkstrategy_research/zk-strategylib", editable = true }

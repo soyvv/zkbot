@@ -7,11 +7,10 @@
 /// import zk_backtest.sim_core as sim_core
 /// ```
 ///
-/// Build with maturin (from the zk-pyo3-rs directory):
-/// ```bash
-/// maturin develop          # editable install into current venv
-/// maturin build --release  # produce wheel
-/// ```
+/// Build via `make pyo3-wheel` (wraps `maturin build --release`). The wheel
+/// is published to `dist/` and consumed through `[tool.uv.sources]` in the
+/// workspace `pyproject.toml`. Editable/in-place builds are intentionally not
+/// supported — see `docs/system-arch/dependency-contract.md`.
 use pyo3::prelude::*;
 
 mod adapter;

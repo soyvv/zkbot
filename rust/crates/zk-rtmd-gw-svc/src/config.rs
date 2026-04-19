@@ -164,7 +164,7 @@ impl ServiceBootstrap for MdgwService {
         Ok(MdgwProvidedConfig {
             venue,
             venue_config,
-            venue_root: std::env::var("ZK_VENUE_ROOT").ok(),
+            venue_root: std::env::var("ZK_VENUE_MANIFEST_ROOT").ok(),
             gateway_kv_prefix: std::env::var("ZK_GATEWAY_KV_PREFIX")
                 .unwrap_or_else(|_| "svc.mdgw".into()),
             rtmd_sub_bucket: std::env::var("ZK_RTMD_SUB_BUCKET")
@@ -195,7 +195,7 @@ impl ServiceBootstrap for MdgwService {
             venue_root: provided
                 .venue_root
                 .filter(|s| !s.is_empty())
-                .or_else(|| std::env::var("ZK_VENUE_ROOT").ok()),
+                .or_else(|| std::env::var("ZK_VENUE_MANIFEST_ROOT").ok()),
             gateway_kv_prefix: provided.gateway_kv_prefix,
             rtmd_sub_bucket: provided.rtmd_sub_bucket,
             sub_lease_ttl_s: provided.sub_lease_ttl_s,

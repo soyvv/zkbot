@@ -106,22 +106,6 @@ pub fn parse_python_entrypoint(raw: &str) -> Result<PythonEntrypoint, PyBridgeEr
     })
 }
 
-/// Resolve the actual importable module path from the manifest entrypoint.
-///
-/// Manifest entrypoints use `<venue>.<module>` as a namespace convention
-/// (e.g. `oanda.gw`), but the actual file layout is `<venue>/python/gw.py`.
-/// Since `<venue>/python/` is on `sys.path`, the import should be just `gw`.
-///
-/// This function strips the venue-name prefix if present.
-pub fn resolve_module_path(entrypoint: &PythonEntrypoint, venue: &str) -> String {
-    let prefix = format!("{venue}.");
-    if entrypoint.module_path.starts_with(&prefix) {
-        entrypoint.module_path[prefix.len()..].to_string()
-    } else {
-        entrypoint.module_path.clone()
-    }
-}
-
 /// Validate a config value against the JSON schema declared in the manifest.
 ///
 /// If `config_schema` is `None`, validation is skipped. If the schema file
@@ -203,18 +187,6 @@ mod tests {
             metadata: None,
         };
         assert!(resolve_capability(&manifest, "gw").is_err());
-    }
-
-    #[test]
-    fn test_resolve_module_path_strips_venue_prefix() {
-        let ep = parse_python_entrypoint("python:oanda.gw:OandaGatewayAdaptor").unwrap();
-        assert_eq!(resolve_module_path(&ep, "oanda"), "gw");
-    }
-
-    #[test]
-    fn test_resolve_module_path_no_prefix() {
-        let ep = parse_python_entrypoint("python:fake_gw:FakeGatewayAdaptor").unwrap();
-        assert_eq!(resolve_module_path(&ep, "test_venue"), "fake_gw");
     }
 
     #[test]

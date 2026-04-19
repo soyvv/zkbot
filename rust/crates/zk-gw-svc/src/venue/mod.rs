@@ -24,13 +24,14 @@ pub struct SimulatorHandles {
 /// Factory: build the venue adapter for the configured venue.
 pub async fn build_adapter(cfg: &GwRuntimeConfig) -> anyhow::Result<BuiltVenue> {
     // ── Manifest-driven Python venue loading ────────────────────────────
+    // `venue_root` is used ONLY to read manifest.yaml / schema files off disk;
+    // Python module resolution happens through the active interpreter's
+    // site-packages (no sys.path mutation). See docs/system-arch/dependency-contract.md.
     #[cfg(feature = "python-venue")]
     if let Some(ref venue_root) = cfg.venue_root {
         use std::path::PathBuf;
         let root = PathBuf::from(venue_root);
-        // Fail-fast: if venue_root is set, manifest must load successfully.
         let manifest = zk_pyo3_bridge::manifest::load_manifest(&root, &cfg.venue)?;
-        // Capability miss is OK — venue may only declare refdata/rtmd, not gw.
         if let Ok(cap) = zk_pyo3_bridge::manifest::resolve_capability(
             &manifest,
             zk_pyo3_bridge::manifest::CAP_GW,
@@ -43,8 +44,8 @@ pub async fn build_adapter(cfg: &GwRuntimeConfig) -> anyhow::Result<BuiltVenue> 
                     &cfg.venue_config,
                 )?;
                 let ep = zk_pyo3_bridge::manifest::parse_python_entrypoint(&cap.entrypoint)?;
-                let rt = zk_pyo3_bridge::py_runtime::PyRuntime::initialize(&root)?;
-                let handle = rt.load_class(&ep, cfg.venue_config.clone(), Some(&cfg.venue))?;
+                let rt = zk_pyo3_bridge::py_runtime::PyRuntime::initialize()?;
+                let handle = rt.load_class(&ep, cfg.venue_config.clone())?;
                 let adapter: Arc<dyn VenueAdapter> =
                     Arc::new(zk_pyo3_bridge::gw_adapter::PyVenueAdapter::new(handle));
                 return Ok(BuiltVenue {
@@ -104,10 +105,10 @@ pub async fn build_adapter(cfg: &GwRuntimeConfig) -> anyhow::Result<BuiltVenue> 
             })
         }
         "ibkr" => Err(anyhow::anyhow!(
-            "ibkr venue requires manifest-driven loading: set ZK_VENUE_ROOT to the venue-integrations directory"
+            "ibkr venue requires manifest-driven loading: set venue_root in GwRuntimeConfig to the venue-integrations directory"
         )),
         "oanda" => Err(anyhow::anyhow!(
-            "oanda requires manifest-driven Python loading: set ZK_VENUE_ROOT and build with --features python-venue"
+            "oanda requires manifest-driven Python loading: set venue_root in GwRuntimeConfig and build with --features python-venue"
         )),
         other => Err(anyhow::anyhow!("unsupported venue: {other}")),
     }

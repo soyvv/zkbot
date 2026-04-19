@@ -203,9 +203,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     )?;
                     let ep =
                         zk_pyo3_bridge::manifest::parse_python_entrypoint(&cap.entrypoint)?;
-                    let rt = zk_pyo3_bridge::py_runtime::PyRuntime::initialize(&root)?;
-                    let handle =
-                        rt.load_class(&ep, cfg.venue_config.clone(), Some(&cfg.venue))?;
+                    let rt = zk_pyo3_bridge::py_runtime::PyRuntime::initialize()?;
+                    let handle = rt.load_class(&ep, cfg.venue_config.clone())?;
                     Arc::new(zk_pyo3_bridge::rtmd_adapter::PyRtmdVenueAdapter::new(handle))
                         as Arc<dyn zk_rtmd_rs::venue_adapter::RtmdVenueAdapter>
                 } else {

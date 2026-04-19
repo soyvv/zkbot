@@ -9,6 +9,7 @@ description = "Trading engine core (Python impl, Rust-ready)"
 requires-python = ">=3.10"
 dependencies = [
     "zk-proto-betterproto>=0.1.0",
+    "zk-backtest>=0.1.0",
     "loguru>=0.7",
     "pandas>=2.0",
     "numpy>=1.24",

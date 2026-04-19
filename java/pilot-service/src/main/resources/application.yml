@@ -26,7 +26,9 @@ pilot:
   lease-ttl-minutes: 60
   venue-integrations-root: ${ZK_VENUE_INTEGRATIONS_ROOT:}
   service-manifests-root: ${ZK_SERVICE_MANIFESTS_ROOT:}
-  engine-binary-path: ${ZK_ENGINE_BINARY_PATH:zk-engine-svc}
+  # engine-binary-path: no base default — the active profile (dev/prod) must
+  # supply an absolute, executable path, or the PILOT_ENGINE_BINARY_PATH env
+  # var must be set (Spring relaxed binding). Startup fails fast otherwise.
   engine-log-dir: ${ZK_DEV_LOG_DIR:logs}
 
 management:

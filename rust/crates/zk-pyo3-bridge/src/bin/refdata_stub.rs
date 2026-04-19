@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Loading refdata for venue '{}' from {:?}", venue, venue_root);
 
-    let rt = PyRuntime::initialize(&venue_root)?;
+    let rt = PyRuntime::initialize()?;
     let mf = manifest::load_manifest(&venue_root, &venue)?;
     let cap = manifest::resolve_capability(&mf, manifest::CAP_REFDATA)?;
     let ep = manifest::parse_python_entrypoint(&cap.entrypoint)?;
@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     // Validate config against schema (empty config for stub).
     manifest::validate_config(&venue_root, &venue, cap, &serde_json::json!({}))?;
 
-    let handle = rt.load_class(&ep, serde_json::json!({}), Some(&venue))?;
+    let handle = rt.load_class(&ep, serde_json::json!({}))?;
     let loader = PyRefdataLoader::new(handle);
     let instruments = loader.load_instruments().await?;
 

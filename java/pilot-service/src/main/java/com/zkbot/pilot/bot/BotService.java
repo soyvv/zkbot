@@ -827,38 +827,11 @@ public class BotService {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "pilot.engine-binary-path is not configured");
         }
-
-        for (Path candidate : engineBinaryCandidates(configured)) {
-            if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-                String resolved = candidate.toAbsolutePath().normalize().toString();
-                if (!configured.equals(resolved)) {
-                    log.info("Resolved engine binary path '{}' -> '{}'", configured, resolved);
-                }
-                return resolved;
-            }
+        Path bin = Path.of(configured);
+        if (!bin.isAbsolute() || !Files.isRegularFile(bin) || !Files.isExecutable(bin)) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "pilot.engine-binary-path must be absolute and executable: " + configured);
         }
-
-        if (!configured.contains("/") && !configured.contains("\\")) {
-            return configured;
-        }
-
-        throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                "engine binary is not executable: configured='" + configured + "'");
-    }
-
-    private List<Path> engineBinaryCandidates(String configured) {
-        var candidates = new ArrayList<Path>();
-        candidates.add(Path.of(configured).normalize());
-        candidates.add(Path.of(System.getProperty("user.dir")).resolve(configured).normalize());
-        candidates.add(Path.of(System.getProperty("user.dir"))
-                .resolve("zkbot/java")
-                .resolve(configured)
-                .normalize());
-
-        candidates.add(Path.of("../rust/target/debug/zk-engine-svc").normalize());
-        candidates.add(Path.of("rust/target/debug/zk-engine-svc").normalize());
-        candidates.add(Path.of("zkbot/rust/target/debug/zk-engine-svc").normalize());
-
-        return candidates;
+        return bin.toAbsolutePath().normalize().toString();
     }
 }

@@ -10,8 +10,6 @@ field_descriptors:
     reloadable: false
   - path: /python_class
     reloadable: false
-  - path: /python_search_path
-    reloadable: false
   - path: /python_strategy_config
     reloadable: false
 metadata:

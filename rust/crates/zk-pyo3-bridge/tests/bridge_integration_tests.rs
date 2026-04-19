@@ -1,5 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Once;
 
+use pyo3::prelude::*;
+use pyo3::types::PyList;
 use zk_pyo3_bridge::manifest;
 use zk_pyo3_bridge::py_runtime::PyRuntime;
 use zk_pyo3_bridge::refdata_adapter::{PyRefdataLoader, RefdataLoader};
@@ -8,8 +11,25 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
+/// Test-only: prepend the fixtures dir to sys.path so flat fixture modules
+/// (e.g. `fake_refdata`) are importable by the embedded interpreter.
+///
+/// Production code never mutates sys.path — see dependency-contract.md.
+/// This helper exists solely so integration tests can ship local fixture
+/// packages without having to install them as wheels.
 fn init_runtime() -> PyRuntime {
-    PyRuntime::initialize(&fixtures_dir()).expect("failed to initialize Python runtime")
+    static PATH_SET: Once = Once::new();
+    let rt = PyRuntime::initialize().expect("failed to initialize Python runtime");
+    PATH_SET.call_once(|| {
+        Python::with_gil(|py| {
+            let sys = py.import_bound("sys").unwrap();
+            let sys_path = sys.getattr("path").unwrap();
+            let path: &Bound<'_, PyList> = sys_path.downcast::<PyList>().unwrap();
+            path.insert(0, fixtures_dir().to_string_lossy().to_string())
+                .unwrap();
+        });
+    });
+    rt
 }
 
 // ─── Manifest tests ─────────────────────────────────────────────────────────
@@ -51,7 +71,7 @@ fn test_entrypoint_parse() {
 fn test_py_runtime_loads_fixture_class() {
     let rt = init_runtime();
     let ep = manifest::parse_python_entrypoint("python:fake_refdata:FakeRefdataLoader").unwrap();
-    let handle = rt.load_class(&ep, serde_json::json!({}), None);
+    let handle = rt.load_class(&ep, serde_json::json!({}));
     assert!(handle.is_ok(), "failed to load class: {:?}", handle.err());
 }
 
@@ -59,7 +79,7 @@ fn test_py_runtime_loads_fixture_class() {
 fn test_py_runtime_bad_module_returns_error() {
     let rt = init_runtime();
     let ep = manifest::parse_python_entrypoint("python:nonexistent_module:SomeClass").unwrap();
-    let result = rt.load_class(&ep, serde_json::json!({}), None);
+    let result = rt.load_class(&ep, serde_json::json!({}));
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
     assert!(
@@ -74,7 +94,7 @@ fn test_py_runtime_bad_module_returns_error() {
 async fn test_refdata_loader_end_to_end() {
     let rt = init_runtime();
     let ep = manifest::parse_python_entrypoint("python:fake_refdata:FakeRefdataLoader").unwrap();
-    let handle = rt.load_class(&ep, serde_json::json!({}), None).unwrap();
+    let handle = rt.load_class(&ep, serde_json::json!({})).unwrap();
     let loader = PyRefdataLoader::new(handle);
 
     let instruments = loader.load_instruments().await.unwrap();
@@ -88,7 +108,7 @@ async fn test_refdata_loader_end_to_end() {
 async fn test_refdata_loader_market_sessions() {
     let rt = init_runtime();
     let ep = manifest::parse_python_entrypoint("python:fake_refdata:FakeRefdataLoader").unwrap();
-    let handle = rt.load_class(&ep, serde_json::json!({}), None).unwrap();
+    let handle = rt.load_class(&ep, serde_json::json!({})).unwrap();
     let loader = PyRefdataLoader::new(handle);
 
     let sessions = loader.load_market_sessions().await.unwrap();
@@ -104,7 +124,7 @@ async fn test_gw_adapter_place_order_smoke() {
 
     let rt = init_runtime();
     let ep = manifest::parse_python_entrypoint("python:fake_gw:FakeGatewayAdaptor").unwrap();
-    let handle = rt.load_class(&ep, serde_json::json!({}), None).unwrap();
+    let handle = rt.load_class(&ep, serde_json::json!({})).unwrap();
     let adapter = PyVenueAdapter::new(handle);
 
     adapter.connect().await.unwrap();
@@ -136,7 +156,7 @@ async fn test_gw_adapter_query_balance() {
 
     let rt = init_runtime();
     let ep = manifest::parse_python_entrypoint("python:fake_gw:FakeGatewayAdaptor").unwrap();
-    let handle = rt.load_class(&ep, serde_json::json!({}), None).unwrap();
+    let handle = rt.load_class(&ep, serde_json::json!({})).unwrap();
     let adapter = PyVenueAdapter::new(handle);
 
     let balances = adapter
@@ -158,7 +178,7 @@ async fn test_gw_adapter_python_exception_maps_to_error() {
 
     let rt = init_runtime();
     let ep = manifest::parse_python_entrypoint("python:fake_gw:ErrorGatewayAdaptor").unwrap();
-    let handle = rt.load_class(&ep, serde_json::json!({}), None).unwrap();
+    let handle = rt.load_class(&ep, serde_json::json!({})).unwrap();
     let adapter = PyVenueAdapter::new(handle);
 
     let result = adapter
@@ -200,7 +220,7 @@ async fn test_gw_next_event_survives_idle_timeout() {
     // timed-out coroutines complete and don't steal events from later retries.
     let ep =
         manifest::parse_python_entrypoint("python:fake_gw:IdleTimeoutGatewayAdaptor").unwrap();
-    let handle = rt.load_class(&ep, serde_json::json!({}), None).unwrap();
+    let handle = rt.load_class(&ep, serde_json::json!({})).unwrap();
 
     // Clone references before the adapter takes ownership.
     let obj_ref = Python::with_gil(|py| handle.inner.clone_ref(py));
@@ -268,7 +288,7 @@ async fn test_rtmd_adapter_subscribe_smoke() {
 
     let rt = init_runtime();
     let ep = manifest::parse_python_entrypoint("python:fake_rtmd:FakeRtmdAdaptor").unwrap();
-    let handle = rt.load_class(&ep, serde_json::json!({}), None).unwrap();
+    let handle = rt.load_class(&ep, serde_json::json!({})).unwrap();
     let adapter = PyRtmdVenueAdapter::new(handle);
 
     adapter.connect().await.unwrap();
@@ -295,7 +315,7 @@ fn test_rtmd_adapter_instrument_exch_for() {
 
     let rt = init_runtime();
     let ep = manifest::parse_python_entrypoint("python:fake_rtmd:FakeRtmdAdaptor").unwrap();
-    let handle = rt.load_class(&ep, serde_json::json!({}), None).unwrap();
+    let handle = rt.load_class(&ep, serde_json::json!({})).unwrap();
     let adapter = PyRtmdVenueAdapter::new(handle);
 
     let result = adapter.instrument_exch_for("BTC-USDT");

@@ -14,11 +14,6 @@
       "minLength": 1,
       "description": "Strategy class name inside the configured module."
     },
-    "python_search_path": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Optional search path prepended to sys.path before importing the module."
-    },
     "python_strategy_config": {
       "type": "object",
       "default": {},

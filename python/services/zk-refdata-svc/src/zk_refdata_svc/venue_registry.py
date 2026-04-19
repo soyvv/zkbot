@@ -10,7 +10,6 @@ from __future__ import annotations
 import importlib
 import json
 import pathlib
-import sys
 from typing import Any
 
 import yaml
@@ -24,7 +23,19 @@ class VenueCapabilityNotFound(Exception):
 
 
 def _integrations_dir() -> pathlib.Path:
-    """Return the venue-integrations root directory."""
+    """Return the venue-integrations root directory.
+
+    Resolution (no ``__file__``-relative probing, no fallbacks — per
+    ``docs/system-arch/dependency-contract.md``):
+
+    1. ``set_integrations_dir(...)`` was called (tests, in-process hosts).
+    2. ``ZK_VENUE_INTEGRATIONS_DIR`` environment variable is set to an
+       absolute path.
+
+    Raises ``RuntimeError`` otherwise. The venue manifests/schemas live
+    on disk and must be pointed at explicitly — Python module imports
+    themselves still go through installed-package resolution.
+    """
     global _DEFAULT_INTEGRATIONS_DIR
     if _DEFAULT_INTEGRATIONS_DIR is not None:
         return _DEFAULT_INTEGRATIONS_DIR
@@ -32,14 +43,18 @@ def _integrations_dir() -> pathlib.Path:
     import os
 
     env = os.environ.get("ZK_VENUE_INTEGRATIONS_DIR")
-    if env:
-        _DEFAULT_INTEGRATIONS_DIR = pathlib.Path(env)
-    else:
-        # Auto-detect: service is at zkbot/python/services/zk-refdata-svc/src/zk_refdata_svc/...
-        # venue-integrations is at zkbot/venue-integrations/ (top-level)
-        here = pathlib.Path(__file__).resolve()
-        # here.parents: 0=zk_refdata_svc, 1=src, 2=zk-refdata-svc, 3=services, 4=python, 5=zkbot
-        _DEFAULT_INTEGRATIONS_DIR = here.parents[5] / "venue-integrations"
+    if not env:
+        raise RuntimeError(
+            "venue-integrations root not configured: set ZK_VENUE_INTEGRATIONS_DIR"
+            " to the absolute path of the manifest root, or call"
+            " set_integrations_dir(...) before resolving a venue."
+        )
+    path = pathlib.Path(env)
+    if not path.is_absolute():
+        raise RuntimeError(
+            f"ZK_VENUE_INTEGRATIONS_DIR must be absolute, got: {env!r}"
+        )
+    _DEFAULT_INTEGRATIONS_DIR = path
     return _DEFAULT_INTEGRATIONS_DIR
 
 
@@ -118,16 +133,13 @@ def resolve_refdata_loader(venue: str, config: dict | None = None) -> Any:
                 schema = json.load(f)
             jsonschema.validate(instance=config or {}, schema=schema)
 
-    # Add venue package dir to sys.path so importlib can find the module
-    venue_str = str(venue_dir)
-    if venue_str not in sys.path:
-        sys.path.insert(0, venue_str)
-
     try:
         mod = importlib.import_module(module_path)
     except ModuleNotFoundError as e:
         raise ValueError(
-            f"could not import module {module_path!r} for venue {venue!r}: {e}"
+            f"could not import module {module_path!r} for venue {venue!r}: {e}. "
+            "Ensure the venue package is installed in the active environment "
+            "(run 'uv sync' to install workspace members)."
         ) from e
 
     cls = getattr(mod, class_name, None)
@@ -181,7 +193,6 @@ def instantiate_refdata_loader(venue: str, config: dict | None = None):
         ValueError: invalid entrypoint or module not found
     """
     manifest = load_manifest(venue)
-    venue_dir = _integrations_dir() / venue
 
     capabilities = manifest.get("capabilities", {})
     refdata_cap = capabilities.get("refdata")
@@ -208,15 +219,13 @@ def instantiate_refdata_loader(venue: str, config: dict | None = None):
 
     module_path, class_name = parts
 
-    venue_str = str(venue_dir)
-    if venue_str not in sys.path:
-        sys.path.insert(0, venue_str)
-
     try:
         mod = importlib.import_module(module_path)
     except ModuleNotFoundError as e:
         raise ValueError(
-            f"could not import module {module_path!r} for venue {venue!r}: {e}"
+            f"could not import module {module_path!r} for venue {venue!r}: {e}. "
+            "Ensure the venue package is installed in the active environment "
+            "(run 'uv sync' to install workspace members)."
         ) from e
 
     cls = getattr(mod, class_name, None)

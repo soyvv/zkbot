@@ -1,0 +1,5 @@
+pilot:
+  env: prod
+  # Required: supplied by the deployment environment (systemd unit / container).
+  # Must be an absolute, executable path. No default — startup fails fast if unset.
+  engine-binary-path: ${PILOT_ENGINE_BINARY_PATH}

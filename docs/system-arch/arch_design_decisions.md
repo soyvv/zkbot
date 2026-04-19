@@ -483,3 +483,35 @@ Gradle owns Java generation. C++ codegen is not required and has been retired.
   and must not be referenced from active code.
 
 See `docs/system-arch/dependency-matrix.md` for the full per-consumer mechanism table.
+
+## Cross-language dependency contract (zb-00029, 2026-04-18)
+
+Extends the zb-00028 layout to cover every cross-language boundary — embedded Python in
+Rust hosts, the PyO3 native extension, and the `pilot-service → zk-engine-svc`
+subprocess. Every edge resolves through one of three explicit modes:
+installed-package import, artifact-path subprocess, or versioned wheel extension.
+
+Key decisions:
+
+- **No fallbacks.** CI, prod, and local dev all supply the same configured paths. No
+  `ZK_DEV_MODE`, no auto-detection, no candidate lists.
+- `zk-pyo3-rs` ships as a `maturin build --release` wheel (distribution `zk-backtest`,
+  Python module `zk_backtest`). Consumed via `[tool.uv.sources]`. No `maturin develop`.
+- `zk-strategylib` is installed as a uv workspace source
+  (`../zkstrategy_research/zk-strategylib`, editable). `ENGINE_PYTHONPATH` is retired.
+- Embedded Python hosts (`zk-pyo3-bridge`, `zk-strategy-host-rs`) resolve modules
+  purely via `VIRTUAL_ENV` / `PYO3_PYTHON` + `py.import_bound`. No `sys.path`
+  mutation, no venv probing. `ZK_VENUE_VENV` and `ZK_VENUE_ROOT` are removed.
+- `pilot-service` reads a single absolute property `pilot.engine-binary-path`
+  (env-bound `PILOT_ENGINE_BINARY_PATH`) and fail-fast validates it at startup.
+  `ZK_ENGINE_BINARY_PATH` and the six-candidate probe list are removed.
+- Strategy loading in production uses `importlib.import_module` against a
+  manifest-supplied `module:class`. File-based loading via
+  `spec_from_file_location` moves to `zk_strategy.dev.load_from_file(...)` with a
+  context-manager that cleans `sys.path` on exit — used only by tests and dev CLI.
+
+Enforcement: `scripts/audit_dependency_contract.sh` greps for forbidden patterns and
+is wired into `make ci-lint`.
+
+See `docs/system-arch/dependency-contract.md` for the full per-edge rules, env-var
+contract, and acceptance checklist.

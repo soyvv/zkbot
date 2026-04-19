@@ -19,6 +19,13 @@ dependencies = [
     "jsonschema>=4.20",
     "hvac>=2.4.0",
     "betterproto>=2.0.0b7",
+    # Venue adaptors are imported dynamically by module name from manifests;
+    # listing them as deps ensures uv sync installs them into the workspace venv
+    # so embedded hosts can resolve `importlib.import_module("<venue>.refdata")`.
+    # See docs/system-arch/dependency-contract.md.
+    "zk-gw-oanda",
+    "zk-venue-ibkr",
+    "zk-venue-okx",
 ]
 
 [project.optional-dependencies]

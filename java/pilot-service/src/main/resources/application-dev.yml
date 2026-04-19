@@ -13,5 +13,7 @@ pilot:
   pilot-id: pilot_dev_1
   venue-integrations-root: ../venue-integrations
   service-manifests-root: ../service-manifests
-  engine-binary-path: ../rust/target/debug/zk-engine-svc
+  # Must be an absolute, executable path. Makefile-driven dev sets
+  # PILOT_ENGINE_BINARY_PATH to $(CURDIR)/rust/target/debug/zk-engine-svc.
+  engine-binary-path: ${PILOT_ENGINE_BINARY_PATH}
   engine-log-dir: ../devops/logs
