@@ -1,44 +1,104 @@
-## zkbot Monorepo
+# zkbot
 
-Polyglot trading stack organised by language root with cross-cutting top-level concerns.
+zkbot is a polyglot trading platform for building, running, and operating automated trading systems.
+The project is organized around a control plane for configuration and lifecycle management, and a
+data plane for strategy execution, order management, venue connectivity, market data, recording, and
+reconciliation.
 
-- `protos/` – protobuf schema, source-of-truth (`zk/**/v1/*.proto`). Managed with [Buf](https://buf.build/).
-- `python/`
-  - `proto-pb/` – shared pb2/grpc library, installs as `zk-proto-pb` (exposes top-level `zk` namespace).
-  - `proto-betterproto/` – shared BetterProto library, installs as `zk-proto-betterproto`.
-  - `libs/{zk-client,zk-core,zk-data,zk-gw-utils,zk-rpc}/` – active Python libraries.
-  - `services/zk-refdata-svc/` – active Python services.
-  - `tools/` – zkbot CLI tools (`trade-doctor`, `loc-count`, `test_rtmd`).
-  - `legacy/` – reference-only snapshots, excluded from the uv workspace.
-- `java/` – multi-module Gradle build (`zk-proto-java`, `pilot-service`). Java protobuf code
-  is generated at build time, not committed.
-- `rust/` – Cargo workspace (core, OMS, gateway, backtester, services).
-- `venue-integrations/{oanda,ibkr,okx,simulator}/` – venue adaptors, cross-cutting.
-- `devops/` – local docker-compose dev stack and service Dockerfiles.
-- `scripts/gen_proto.py` – single codegen driver for Rust, cpp, and Python.
+The long-term goal is to provide a stable foundation where strategies can move between simulation,
+backtesting, paper trading, and live deployment without changing the core business semantics. The
+system is designed to support both isolated service deployments and lower-latency collocated
+deployments while keeping the same contracts between components.
 
-### Quickstart
+## Code Structure
 
-1. Install [uv](https://github.com/astral-sh/uv) and [Buf](https://buf.build/).
-2. Bootstrap dependencies:
-   ```bash
-   uv sync --python 3.13 --all-groups --all-packages
-   ```
-3. Regenerate protobuf artifacts whenever `.proto` files change:
-   ```bash
-   make gen
-   ```
-4. Run quality checks:
-   ```bash
-   make lint
-   make test
-   ```
+- `protos/`  
+  Contract-first protobuf schemas. Versioned `zk/*/v1` packages are the primary API surface, with
+  generated bindings consumed by Rust, Python, and Java code.
 
-### Project Conventions
+- `rust/`  
+  Runtime and hot-path components. This includes OMS domain logic and service hosts, gateway and
+  RTMD hosts, strategy runtime crates, backtesting, recorder components, infrastructure helpers, and
+  generated protobuf bindings.
 
-- Python: src-layout packages, Python 3.13, `uv` workspace, declared deps only (no PYTHONPATH hacks).
-- Rust: Cargo workspace rooted at `rust/`.
-- Java: Gradle multi-module (`cd java && ./gradlew :pilot-service:build`).
-- Generated-code policy: see [docs/system-arch/dependency-matrix.md](docs/system-arch/dependency-matrix.md).
+- `python/`  
+  Python libraries, tools, generated protobuf packages, and active Python services. Current active
+  service code includes the refdata service; legacy Python snapshots remain under `python/legacy/`
+  for reference.
 
-See individual package READMEs and `docs/system-arch/` for more detail.
+- `java/`  
+  Pilot service and Java protobuf module. Pilot is the main control-plane implementation for
+  topology, bootstrap, configuration, schema registry, and operator-facing APIs.
+
+- `venue-integrations/`  
+  Venue modules such as OANDA, OKX, IBKR, and simulator support. Each venue is described by a
+  manifest and may provide trading gateway, RTMD, and refdata capabilities.
+
+- `service-manifests/`  
+  Service-kind manifest and schema metadata used by Pilot for config validation and operator UI
+  workflows.
+
+- `scripts/`  
+  Repository-level automation, including protobuf generation and dependency-contract checks.
+
+## Architecture Choices
+
+- **Contract-first APIs**  
+  Protobuf is the shared contract layer. gRPC is used for command/query flows, while NATS is used
+  for event fanout, async workflows, and runtime discovery.
+
+- **Control plane vs data plane**  
+  Pilot owns desired configuration, topology, bootstrap authorization, and operator workflows. OMS,
+  gateways, RTMD, engines, refdata, recorder, and monitor services own runtime behavior.
+
+- **Rust for hot paths**  
+  Latency-sensitive and stateful runtime components are Rust-first. Core domain logic is kept
+  deterministic and transport-agnostic where possible.
+
+- **Python for integration and tooling**  
+  Python is used for venue adaptors where it is pragmatic, refdata ingestion, tooling, analytics,
+  and optional embedded strategy workflows.
+
+- **Java for Pilot**  
+  The current Pilot backend is Java/Spring, with Gradle-managed protobuf bindings and relational
+  control-plane storage.
+
+- **Manifest-driven configuration**  
+  Service and venue config shapes are defined by bundled manifests and schemas. Pilot treats these
+  as the authoritative contract for validation, UI rendering, and change impact.
+
+- **Lease-based service discovery**  
+  Runtime services register live endpoints in NATS KV. Consumers discover services dynamically and
+  react to lease expiry or topology changes.
+
+- **Explicit data ownership**  
+  PostgreSQL stores authoritative relational state and config. Redis is used for fast operational
+  state and read replicas. NATS carries live events and leases. Event/document storage is reserved
+  for append-oriented audit and replay use cases.
+
+- **Flexible deployment shapes**  
+  The architecture supports three-layer service deployment, two-layer collocation, and all-in-one
+  runtime composition. The deployment shape changes process boundaries, not the domain contracts.
+
+## Project Dev Progress
+
+Done:
+
+- [x] Polyglot monorepo structure with shared protobuf contracts across Rust, Python, and Java.
+- [x] Rust OMS domain library and OMS service host.
+- [x] Rust gateway, RTMD, strategy runtime, backtest, recorder, and SDK crate foundations.
+- [x] Java Pilot control plane for topology, bootstrap, config management, schema registry, and operator APIs.
+- [x] Python refdata service with lifecycle-aware instrument refresh and gRPC query surface.
+- [x] Manifest-based venue integration model with OANDA, OKX, IBKR, and simulator coverage.
+- [x] Generated protobuf bindings for active runtime languages.
+- [x] Service and venue manifest model for config validation and capability discovery.
+
+In progress / todo:
+
+- [ ] Continue migrating remaining hot-path runtime behavior to Rust-first services.
+- [ ] Complete production orchestration for engine and strategy lifecycle management.
+- [ ] Broaden runtime config introspection and drift handling across all managed services.
+- [ ] Finish service-side migration to the versioned `zk.*.v1` protobuf contracts where legacy aliases remain.
+- [ ] Expand recorder, reconciliation, and monitoring workflows around durable event capture.
+- [ ] Harden multi-venue refdata, market-data, and gateway flows for larger instrument universes.
+- [ ] Keep strategy SDK ergonomics aligned across backtest, simulation, paper, and live modes.
