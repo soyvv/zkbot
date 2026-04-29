@@ -5,7 +5,8 @@
         gw-check gw-build gw-test gw-run gw-okx-demo gw-okx-demo-pilot \
         rtmd-sim-run rtmd-okx-demo rtmd-okx-demo-pilot \
         oanda-venv gw-oanda-demo gw-oanda-demo-pilot rtmd-oanda-demo rtmd-oanda-demo-pilot \
-        refdata-run pilot-run engine-run \
+        ibkr-venv gw-ibkr-paper gw-ibkr-demo-pilot rtmd-ibkr-paper rtmd-ibkr-demo-pilot \
+        refdata-run refdata-run-pilot pilot-run engine-run \
         pilot-java-build pilot-java-test pilot-java-run \
         oms-run-pilot gw-run-pilot \
         recorder-check recorder-build recorder-run \
@@ -351,13 +352,107 @@ rtmd-oanda-demo-pilot: oanda-venv ## Run OANDA RTMD gateway with Pilot bootstrap
 	  RUST_LOG=zk_rtmd_gw_svc=debug,zk_pyo3_bridge=info,zk_infra_rs=debug,warn \
 	  cargo run --release -p zk-rtmd-gw-svc --features python-venue'
 
+# ── IBKR gateway / RTMD (paper TWS or IB Gateway) ───────────────────────────
+ibkr-venv: ## No-op alias: workspace venv provides ibkr adaptor via uv workspace membership. Run `uv sync`.
+	@test -x "$(WORKSPACE_PYTHON)" || (echo "Missing $(WORKSPACE_PYTHON). Run 'uv sync' first." && exit 1)
+	@$(WORKSPACE_PYTHON) -c 'import ibkr' >/dev/null 2>&1 || (echo "ibkr package not importable; run 'uv sync'." && exit 1)
+
+gw-ibkr-paper: ibkr-venv ## Run IBKR gateway against paper TWS / IB Gateway (direct mode)
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh gw-ibkr-paper \
+	  bash -c 'source devops/scripts/load-ibkr-paper-env.sh && \
+	  export ZK_VENUE_CONFIG="$$(printf "{\"mode\":\"%s\",\"host\":\"%s\",\"port\":%s,\"client_id\":%s,\"account_code\":\"%s\",\"read_only\":false}" "$$ZK_IBKR_MODE" "$$ZK_IBKR_HOST" "$$ZK_IBKR_PORT" "$$ZK_IBKR_CLIENT_ID" "$$ZK_IBKR_ACCOUNT_CODE")" && \
+	  cd rust && \
+	  unset VIRTUAL_ENV CONDA_PREFIX && \
+	  PYO3_PYTHON=$(PYO3_PYTHON_BIN) \
+	  PYTHONHOME=$(PYO3_PYTHON_HOME) \
+	  ZK_GW_ID=gw_ibkr_paper \
+	  ZK_VENUE=ibkr \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_ACCOUNT_ID=8010 \
+	  ZK_EXCH_ACCOUNT_ID="$$ZK_IBKR_ACCOUNT_CODE" \
+	  ZK_GRPC_PORT=51056 \
+	  ZK_VENUE_MANIFEST_ROOT=$(CURDIR)/venue-integrations \
+	  RUST_LOG=zk_gw_svc=debug,zk_pyo3_bridge=info,warn \
+	  cargo run --release -p zk-gw-svc --features python-venue'
+
+rtmd-ibkr-paper: ibkr-venv ## Run IBKR RTMD gateway against paper TWS / IB Gateway (direct mode)
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh rtmd-ibkr-paper \
+	  bash -c 'source devops/scripts/load-ibkr-paper-env.sh && \
+	  MDGW_CLIENT_ID=$$((ZK_IBKR_CLIENT_ID + 1)) && \
+	  export ZK_VENUE_CONFIG="$$(printf "{\"mode\":\"%s\",\"host\":\"%s\",\"port\":%s,\"client_id\":%s,\"market_data_type\":3}" "$$ZK_IBKR_MODE" "$$ZK_IBKR_HOST" "$$ZK_IBKR_PORT" "$$MDGW_CLIENT_ID")" && \
+	  cd rust && \
+	  unset VIRTUAL_ENV CONDA_PREFIX && \
+	  PYO3_PYTHON=$(PYO3_PYTHON_BIN) \
+	  PYTHONHOME=$(PYO3_PYTHON_HOME) \
+	  ZK_MDGW_ID=mdgw_ibkr_paper \
+	  ZK_VENUE=ibkr \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_GRPC_PORT=52056 \
+	  ZK_VENUE_MANIFEST_ROOT=$(CURDIR)/venue-integrations \
+	  RUST_LOG=zk_rtmd_gw_svc=debug,zk_pyo3_bridge=info,warn \
+	  cargo run --release -p zk-rtmd-gw-svc --features python-venue'
+
+gw-ibkr-demo-pilot: ibkr-venv ## Run IBKR gateway with Pilot bootstrap (requires: make dev-up + make pilot-java-run)
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh gw-ibkr-demo-pilot \
+	  bash -c 'cd rust && \
+	  unset VIRTUAL_ENV CONDA_PREFIX && \
+	  PYO3_PYTHON=$(PYO3_PYTHON_BIN) \
+	  PYTHONHOME=$(PYO3_PYTHON_HOME) \
+	  ZK_GW_ID=gw_ibkr_demo1 \
+	  ZK_VENUE=ibkr \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_GRPC_PORT=51056 \
+	  ZK_VENUE_MANIFEST_ROOT=$(CURDIR)/venue-integrations \
+	  VAULT_ADDR=http://localhost:8200 \
+	  VAULT_TOKEN=dev-root-token \
+	  ZK_BOOTSTRAP_TOKEN=$(ZK_IBKR_GW_BOOTSTRAP_TOKEN) \
+	  ZK_INSTANCE_TYPE=GW \
+	  ZK_ENV=dev \
+	  RUST_LOG=zk_gw_svc=debug,zk_pyo3_bridge=info,zk_infra_rs=debug,warn \
+	  cargo run --release -p zk-gw-svc --features python-venue'
+
+rtmd-ibkr-demo-pilot: ibkr-venv ## Run IBKR RTMD gateway with Pilot bootstrap (requires: make dev-up + make pilot-java-run)
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh rtmd-ibkr-demo-pilot \
+	  bash -c 'cd rust && \
+	  unset VIRTUAL_ENV CONDA_PREFIX && \
+	  PYO3_PYTHON=$(PYO3_PYTHON_BIN) \
+	  PYTHONHOME=$(PYO3_PYTHON_HOME) \
+	  ZK_MDGW_ID=mdgw_ibkr_demo1 \
+	  ZK_VENUE=ibkr \
+	  ZK_NATS_URL=nats://localhost:4222 \
+	  ZK_GRPC_PORT=52056 \
+	  ZK_VENUE_MANIFEST_ROOT=$(CURDIR)/venue-integrations \
+	  VAULT_ADDR=http://localhost:8200 \
+	  VAULT_TOKEN=dev-root-token \
+	  ZK_BOOTSTRAP_TOKEN=$(ZK_IBKR_MDGW_BOOTSTRAP_TOKEN) \
+	  ZK_INSTANCE_TYPE=MDGW \
+	  ZK_ENV=dev \
+	  RUST_LOG=zk_rtmd_gw_svc=debug,zk_pyo3_bridge=info,zk_infra_rs=debug,warn \
+	  cargo run --release -p zk-rtmd-gw-svc --features python-venue'
+
 # ── Refdata service ───────────────────────────────────────────────────────────
-refdata-run: ## Run refdata-svc locally (requires NATS+PG: make dev-up)
+refdata-run: ## Run refdata-svc locally in direct mode (requires NATS+PG: make dev-up)
 	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh refdata zsh -lc '\
 	ZK_NATS_URL=nats://localhost:4222 \
 	ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
 	ZK_REFDATA_LOGICAL_ID=refdata_dev_1 \
 	ZK_REFDATA_GRPC_PORT=50052 \
+	ZK_VENUE_INTEGRATIONS_DIR=$(CURDIR)/venue-integrations \
+	uv run zk-refdata-svc'
+
+refdata-run-pilot: ## Run refdata-svc in pilot mode; pulls venue configs from Pilot. Requires ZK_BOOTSTRAP_TOKEN from `POST /v1/topology/services/REFDATA/<logical_id>/issue-bootstrap-token`.
+	@test -n "$(ZK_BOOTSTRAP_TOKEN)" || (echo "ZK_BOOTSTRAP_TOKEN is required, e.g. make refdata-run-pilot ZK_BOOTSTRAP_TOKEN=<token>" && exit 1)
+	ZK_DEV_LOG_DIR=$(DEV_LOG_DIR) ./devops/scripts/run-with-log.sh refdata zsh -lc '\
+	ZK_NATS_URL=nats://localhost:4222 \
+	ZK_PG_URL=postgres://zk:zk@localhost:5432/zkbot \
+	ZK_REFDATA_LOGICAL_ID=refdata_dev_1 \
+	ZK_REFDATA_GRPC_PORT=50052 \
+	ZK_MODE=pilot \
+	ZK_ENV=dev \
+	ZK_VENUE_INTEGRATIONS_DIR=$(CURDIR)/venue-integrations \
+	VAULT_ADDR=http://localhost:8200 \
+	VAULT_TOKEN=dev-root-token \
+	ZK_BOOTSTRAP_TOKEN=$(ZK_BOOTSTRAP_TOKEN) \
 	uv run zk-refdata-svc'
 
 # ── Pilot service ─────────────────────────────────────────────────────────────

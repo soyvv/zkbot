@@ -536,6 +536,47 @@ class TopologyServiceTest {
         }
     }
 
+    // ── Create refdata venue instance ────────────────────────────────────
+
+    @Nested
+    class CreateRefdataVenueInstance {
+
+        @Test
+        void does_not_create_logical_instance_row() {
+            when(props.env()).thenReturn("dev");
+            when(repository.findRefdataVenueOwner("dev", "ibkr")).thenReturn(null);
+            when(repository.getRefdataVenueInstance("refdata_ibkr_dev_1")).thenReturn(
+                    Map.of("logical_id", "refdata_ibkr_dev_1", "venue", "ibkr",
+                            "env", "dev", "enabled", true,
+                            "config_version", 1, "config_hash", "abc"));
+
+            var request = new CreateRefdataVenueRequest(
+                    "refdata_ibkr_dev_1", "ibkr", null, true, Map.of("host", "127.0.0.1"));
+            service.createRefdataVenueInstance(request);
+
+            // The defect fixed by zb-00034: venue rows must NOT produce a per-venue
+            // logical_instance row. One logical_instance per env, serving N venues.
+            verify(repository, never()).createLogicalInstance(anyString(), eq("REFDATA"),
+                    anyString(), any(), anyBoolean());
+            verify(repository).createRefdataVenueInstance(eq("refdata_ibkr_dev_1"), eq("dev"),
+                    eq("ibkr"), any(), eq(true), contains("host"), any(), any(), any());
+        }
+
+        @Test
+        void rejects_duplicate_env_venue_with_409() {
+            when(props.env()).thenReturn("dev");
+            when(repository.findRefdataVenueOwner("dev", "ibkr"))
+                    .thenReturn("refdata_other_1");
+
+            var request = new CreateRefdataVenueRequest(
+                    "refdata_ibkr_dev_1", "ibkr", null, true, Map.of());
+
+            assertThatThrownBy(() -> service.createRefdataVenueInstance(request))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("already owned");
+        }
+    }
+
     // ── Update refdata venue config ──────────────────────────────────────
 
     @Nested

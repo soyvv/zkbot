@@ -84,6 +84,10 @@ class IbkrRtmdConfig:
     reconnect_delay_s: float = 2.0
     reconnect_max_delay_s: float = 60.0
     next_valid_id_timeout_s: float = 10.0
+    # L2 depth is capability-gated per docs/integrations/ibkr.md §RTMD.
+    enable_depth: bool = False
+    depth_rows: int = 5
+    smart_depth: bool = False
 
     def __post_init__(self) -> None:
         if self.mode not in _VALID_MODES:
@@ -92,6 +96,8 @@ class IbkrRtmdConfig:
             raise ValueError(f"port must be >= 1, got {self.port}")
         if self.client_id < 0:
             raise ValueError(f"client_id must be >= 0, got {self.client_id}")
+        if self.depth_rows < 1:
+            raise ValueError(f"depth_rows must be >= 1, got {self.depth_rows}")
 
     @classmethod
     def from_dict(cls, d: dict) -> IbkrRtmdConfig:
@@ -157,6 +163,9 @@ class IbkrRtmdAdaptor:
         self._ob_cache: dict[str, bytes] = {}
         # Reverse lookup: ib conId -> instrument_code (for ticker callback)
         self._conid_to_instrument: dict[int, str] = {}
+        # Set of conIds currently subscribed to L2 depth; lets us route
+        # pendingTickersEvent to order_book events.
+        self._depth_conids: set[int] = set()
 
         # IbkrConnection needs an IbkrGwConfig-shaped object; reuse the RTMD config
         # by building a minimal GwConfig-compatible dict.
@@ -238,12 +247,27 @@ class IbkrRtmdAdaptor:
             log.info("subscribed tick: %s (reqId=%s)", instrument_code, req_id)
 
         elif channel_type == "order_book":
-            # IBKR L2 depth data path is not yet implemented (no callback populates
-            # _ob_cache). Log and register the subscription for tracking, but don't
-            # call reqMktDepth until the data pipeline is wired end-to-end.
-            log.warning(
-                "order_book subscribe accepted but L2 data path not yet wired: %s",
+            if not self._config.enable_depth:
+                log.warning(
+                    "order_book subscribe rejected: enable_depth=false "
+                    "(capability-gated per IBKR integration doc) %s",
+                    instrument_code,
+                )
+                return
+            await self._rate_limiter.acquire()
+            ticker = self._conn.ib.reqMktDepth(
+                contract,
+                numRows=self._config.depth_rows,
+                isSmartDepth=self._config.smart_depth,
+            )
+            req_id = getattr(ticker, "reqId", None)
+            if contract.conId:
+                self._depth_conids.add(contract.conId)
+            log.info(
+                "subscribed order_book: %s (reqId=%s rows=%d)",
                 instrument_code,
+                req_id,
+                self._config.depth_rows,
             )
 
         elif channel_type == "kline":
@@ -286,8 +310,18 @@ class IbkrRtmdAdaptor:
             log.info("unsubscribed tick: %s", instrument_code)
 
         elif channel_type == "order_book":
+            if self._config.enable_depth:
+                await self._rate_limiter.acquire()
+                try:
+                    self._conn.ib.cancelMktDepth(
+                        sub.contract, isSmartDepth=self._config.smart_depth
+                    )
+                except Exception as exc:
+                    log.warning("cancelMktDepth failed for %s: %s", instrument_code, exc)
             self._ob_cache.pop(instrument_code, None)
-            log.info("unsubscribed orderbook (stub): %s", instrument_code)
+            if sub.contract.conId:
+                self._depth_conids.discard(sub.contract.conId)
+            log.info("unsubscribed order_book: %s", instrument_code)
 
         # Clean up instrument_map if no remaining subs reference this instrument
         remaining = any(s.instrument_code == instrument_code for s in self._subscriptions.values())
@@ -430,6 +464,11 @@ class IbkrRtmdAdaptor:
 
             exchange = contract.exchange if contract else "IBKR"
 
+            # L2 depth path: emit order_book event from DOM, skip tick path.
+            if contract and contract.conId and contract.conId in self._depth_conids:
+                self._emit_order_book(ticker, instrument_code, exchange, ts_ms)
+                continue
+
             # Build TickData proto
             buy_levels: list[PriceLevel] = []
             sell_levels: list[PriceLevel] = []
@@ -478,6 +517,55 @@ class IbkrRtmdAdaptor:
             except asyncio.QueueFull:
                 log.warning("event queue full, dropping tick for %s", instrument_code)
 
+    def _emit_order_book(
+        self, ticker: Any, instrument_code: str, exchange: str, ts_ms: int
+    ) -> None:
+        """Build an OrderBook proto from ticker DOM levels and enqueue it."""
+        dom_bids = getattr(ticker, "domBids", None) or []
+        dom_asks = getattr(ticker, "domAsks", None) or []
+
+        buy_levels: list[PriceLevel] = []
+        for lvl in dom_bids:
+            price = getattr(lvl, "price", None)
+            size = getattr(lvl, "size", None)
+            if price is None or price != price:  # NaN check
+                continue
+            buy_levels.append(PriceLevel(
+                price=float(price),
+                qty=float(size) if size is not None and size == size else 0.0,
+            ))
+
+        sell_levels: list[PriceLevel] = []
+        for lvl in dom_asks:
+            price = getattr(lvl, "price", None)
+            size = getattr(lvl, "size", None)
+            if price is None or price != price:
+                continue
+            sell_levels.append(PriceLevel(
+                price=float(price),
+                qty=float(size) if size is not None and size == size else 0.0,
+            ))
+
+        if not buy_levels and not sell_levels:
+            return
+
+        ob = OrderBook(
+            instrument_code=instrument_code,
+            exchange=exchange,
+            timestamp_ms=ts_ms,
+            buy_levels=buy_levels,
+            sell_levels=sell_levels,
+        )
+
+        serialized = ob.SerializeToString()
+        self._ob_cache[instrument_code] = serialized
+
+        event = {"event_type": "order_book", "payload_bytes": serialized}
+        try:
+            self._event_queue.put_nowait(event)
+        except asyncio.QueueFull:
+            log.warning("event queue full, dropping order_book for %s", instrument_code)
+
     # ------------------------------------------------------------------
     # Reconnect
     # ------------------------------------------------------------------
@@ -487,11 +575,19 @@ class IbkrRtmdAdaptor:
         self._conn.ib.reqMarketDataType(self._config.market_data_type)
         self._register_callbacks()
 
+        self._depth_conids.clear()
         for sub in self._subscriptions.values():
             try:
                 if sub.channel_type == "tick":
                     self._conn.ib.reqMktData(sub.contract)
-                # order_book: L2 data path not yet wired, skip reqMktDepth
+                elif sub.channel_type == "order_book" and self._config.enable_depth:
+                    self._conn.ib.reqMktDepth(
+                        sub.contract,
+                        numRows=self._config.depth_rows,
+                        isSmartDepth=self._config.smart_depth,
+                    )
+                    if sub.contract.conId:
+                        self._depth_conids.add(sub.contract.conId)
             except Exception as exc:
                 log.error(
                     "failed to resubscribe %s:%s on reconnect: %s",

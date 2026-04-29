@@ -38,7 +38,44 @@
         "type": "string"
       },
       "default": [],
-      "description": "List of IB contract specification strings to qualify, for example AAPL-USD-STK-SMART."
+      "description": "Legacy explicit list of IB contract specification strings to qualify, for example AAPL-USD-STK-SMART. Shorthand for a single `explicit` entry in universe_sources. If universe_sources is also set and non-empty, it takes precedence."
+    },
+    "universe_sources": {
+      "type": "array",
+      "default": [],
+      "description": "Ordered list of universe sources, each `{type, config}`. All sources are resolved and merged; on duplicate symbol (first `-`-separated field of the spec), the later source wins. Known types: `explicit` (config.items=[specs]), `nasdaq_symbol_directory` (Nasdaq Trader stocks/ETF discovery with filters; see resolver docs for full config shape).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["explicit", "nasdaq_symbol_directory"]
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": ["type"],
+        "additionalProperties": false
+      }
+    },
+    "max_qualifications_per_run": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "default": null,
+      "description": "Cap on how many resolved candidates to qualify per refresh run. null = unlimited."
+    },
+    "rate_limit_per_sec": {
+      "type": "number",
+      "minimum": 0.1,
+      "default": 40,
+      "description": "Token-bucket rate limit applied around reqContractDetails during qualification. Stays below IBKR's documented 50 msg/s ceiling."
+    },
+    "dry_run_candidates_only": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, resolve candidates and log them but skip qualification. Useful for validating a resolver without hitting IBKR."
     },
     "read_only": {
       "type": "boolean",

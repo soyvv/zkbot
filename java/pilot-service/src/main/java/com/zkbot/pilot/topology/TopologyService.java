@@ -486,9 +486,9 @@ public class TopologyService {
         var prov = resolveSchemaProvenance("venue_capability",
                 request.venue() + "/" + capability);
 
-        // Create matching logical_instance row so REFDATA participates in topology
+        // REFDATA topology model: one logical_instance per env (refdata_<env>_1), serving N venues.
+        // Venue rows live only in cfg.refdata_venue_instance — no per-venue logical_instance row.
         boolean enabled = request.enabled() != null ? request.enabled() : true;
-        repository.createLogicalInstance(request.logicalId(), "REFDATA", props.env(), null, enabled);
 
         repository.createRefdataVenueInstance(request.logicalId(), props.env(), request.venue(),
                 request.description(), enabled,

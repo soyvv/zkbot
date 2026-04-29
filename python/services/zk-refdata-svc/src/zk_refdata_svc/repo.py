@@ -278,6 +278,42 @@ class RefdataRepo:
                 error_detail,
             )
 
+    async def get_refresh_run(self, run_id: int) -> dict | None:
+        """Fetch a single refresh run by id. Returns None if not found."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT run_id, venue, status,
+                       instruments_added, instruments_updated, instruments_disabled,
+                       error_detail,
+                       (EXTRACT(EPOCH FROM started_at) * 1000)::bigint AS started_at_ms,
+                       (EXTRACT(EPOCH FROM ended_at)   * 1000)::bigint AS ended_at_ms
+                FROM cfg.refdata_refresh_run
+                WHERE run_id = $1
+                """,
+                run_id,
+            )
+        return dict(row) if row else None
+
+    async def find_running_run_for_venue(self, venue: str) -> dict | None:
+        """Return the most recent in-flight (status='running') run for a venue."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT run_id, venue, status,
+                       instruments_added, instruments_updated, instruments_disabled,
+                       error_detail,
+                       (EXTRACT(EPOCH FROM started_at) * 1000)::bigint AS started_at_ms,
+                       (EXTRACT(EPOCH FROM ended_at)   * 1000)::bigint AS ended_at_ms
+                FROM cfg.refdata_refresh_run
+                WHERE venue = $1 AND status = 'running'
+                ORDER BY run_id DESC
+                LIMIT 1
+                """,
+                venue,
+            )
+        return dict(row) if row else None
+
     async def insert_change_events(
         self, events: list[dict], conn: asyncpg.Connection
     ) -> None:

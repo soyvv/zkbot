@@ -1,0 +1,7 @@
+[     204ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/chunk-WERSD76P.js?v=610c70f2:21550
+[     508ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/v1/refdata/watermark:0
+[     516ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/v1/refdata/market-status:0
+[     682ms] [WARNING] AG Grid: As of version 32.2.1, using `rowSelection` with the values "single" or "multiple" has been deprecated. Use the object value instead. @ http://localhost:5173/node_modules/.vite/deps/chunk-JTH6T7N7.js?v=610c70f2:1572
+[    1635ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/v1/refdata/watermark:0
+[    1640ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/v1/refdata/market-status:0
+[   55408ms] [ERROR] Failed to load resource: the server responded with a status of 503 (Service Unavailable) @ http://localhost:5173/v1/refdata/venues/oanda/refresh:0

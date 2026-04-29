@@ -65,8 +65,15 @@ async def _refresh_venue(
     nc: nats.NATS,
     venue_name: str,
     loader: object,
+    run_id: int | None = None,
 ) -> None:
-    run_id = await repo.insert_refresh_run(source_name=venue_name, venue=venue_name)
+    """Refresh one venue. If *run_id* is provided, reuse that pre-allocated row;
+    otherwise create one. The pre-allocated path is used by the
+    operator-triggered ``TriggerVenueRefresh`` RPC so it can return the run_id
+    immediately while the refresh runs as a background task.
+    """
+    if run_id is None:
+        run_id = await repo.insert_refresh_run(source_name=venue_name, venue=venue_name)
     logger.info(f"[{venue_name}] refresh run {run_id} started")
 
     try:

@@ -23,6 +23,7 @@ class MockContract:
     exchange: str = ""
     currency: str = ""
     conId: int = 0
+    multiplier: str = ""
 
 
 @dataclass
@@ -224,10 +225,16 @@ class MockIB:
     async def reqOpenOrdersAsync(self) -> list[MockTrade]:
         return self._open_trades
 
-    def reqAccountUpdates(self, subscribe: bool, account: str = "") -> None:
+    def reqAccountUpdates(self, account: str = "") -> None:
+        pass
+
+    async def reqAccountUpdatesAsync(self, account: str = "") -> None:
         pass
 
     def reqPositions(self) -> None:
+        pass
+
+    async def reqPositionsAsync(self) -> None:
         pass
 
     # -- Market data methods --------------------------------------------------

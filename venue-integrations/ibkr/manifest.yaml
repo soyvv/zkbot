@@ -1,6 +1,6 @@
 venue: ibkr
 schema_id: venue/ibkr
-version: 2
+version: 4
 capabilities:
   gw:
     language: python
@@ -38,5 +38,4 @@ capabilities:
 metadata:
   supports_tradfi_sessions: true
   notes:
-    - Placeholder module only; runtime loading is not implemented yet.
     - IBKR should be treated as a hybrid, session-constrained integration.

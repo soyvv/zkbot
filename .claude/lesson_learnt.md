@@ -1,5 +1,61 @@
 # Lessons Learnt
 
+## 2026-04-21: Pilot dev profile silently shadows ZK_VENUE_INTEGRATIONS_ROOT
+
+### Problem
+- Pilot UI dropdowns (GW/MDGW Onboard, Create Account) showed only a subset of
+  venues (oanda/okx/simulator) with no IBKR, even though all four manifests
+  existed under `zkbot/venue-integrations/` and the `pilot-java-run` Make target
+  explicitly exports `ZK_VENUE_INTEGRATIONS_ROOT=$(CURDIR)/venue-integrations`.
+- `application-dev.yml` hardcoded `pilot.venue-integrations-root: ../venue-integrations`
+  and `service-manifests-root: ../service-manifests`. Under Spring Boot the
+  profile-specific value overrides the default `${ZK_VENUE_INTEGRATIONS_ROOT:}`
+  from `application.yml`, so the Makefile's env var was silently ignored.
+- `bootRun` cwd is `zkbot/java/pilot-service`, so `../venue-integrations` tried
+  to resolve to `zkbot/java/venue-integrations` (doesn't exist). Log showed
+  `venue-manifest: path not found: ../venue-integrations` and the in-memory
+  manifest map stayed empty.
+- Downstream: `MetaService.buildVenueRefs` fell back to DB-distinct venues, so
+  venues appeared without a `capabilities` array; the GW Onboard dropdown
+  filters by `capabilities.includes("gw")` → empty list. The Create Account
+  dropdown had no such filter so the DB rows leaked through without capabilities.
+
+### Fix
+- Changed `application-dev.yml` to `${ZK_VENUE_INTEGRATIONS_ROOT:../venue-integrations}`
+  (and the same for `service-manifests-root`). Env var now wins when set,
+  relative fallback preserved for plain `gradle bootRun`.
+- Post-restart log confirms `venue-manifest: loaded 4 venue manifests: [oanda, ibkr, simulator, okx]`.
+
+### Rule
+- When Spring Boot config supports `${ENV_VAR:default}`, prefer that over a
+  bare hardcoded value in profile YAML — otherwise the env-var escape hatch
+  that higher layers rely on is silently defeated by profile activation.
+
+## 2026-04-20: PyO3 embedded interpreter ignores PYO3_PYTHON at runtime
+
+### Problem
+- All `gw-*-paper` / `gw-*-demo` Makefile targets that load Python venue adapters via
+  `--features python-venue` set `PYO3_PYTHON=$(WORKSPACE_PYTHON)` and
+  `PYTHONHOME=$(PYO3_PYTHON_HOME)` (base prefix), then `unset VIRTUAL_ENV CONDA_PREFIX`.
+- `pyo3::prepare_freethreaded_python()` does NOT honor `PYO3_PYTHON` at runtime (it is a
+  build-time hint only). With `PYTHONHOME` pinned to the base prefix, `sys.prefix` becomes
+  the base prefix and the workspace `.venv/lib/python3.13/site-packages` is never on
+  `sys.path`. Result: `ModuleNotFoundError: No module named 'oanda'` / `'ibkr'`, even
+  though `.venv/bin/python -c 'import ibkr'` works fine outside the embedded interpreter.
+- The OANDA pilot success log from 2026-04-13 predates the 2026-04-19 "update structure"
+  commit (`9c6433d`) that consolidated venue venvs into a single workspace `.venv`. No
+  `python-venue` Rust host had actually run successfully against the new layout until IBKR.
+
+### Fix
+- `zk-pyo3-bridge::PyRuntime::initialize()` now promotes `PYO3_PYTHON` to
+  `PYTHONEXECUTABLE` before `prepare_freethreaded_python()`. On macOS Python honors
+  `PYTHONEXECUTABLE` to derive `sys.executable`, which lets Python read the venv's
+  `pyvenv.cfg` and load all `.pth` files at init. With `PYTHONHOME` providing stdlib and
+  `PYTHONEXECUTABLE` providing the venv shim, both stdlib and venv site-packages resolve.
+- Single-line bridge change benefits every venue: OANDA, IBKR, future Python adapters.
+- Stays within the dependency-contract (no `PYTHONPATH` in Makefile, no `sys.path`
+  mutation).
+
 ## 2026-03-16: gw-sim devops enablement
 
 ### OrderReport.exchange field must be stamped by the gateway

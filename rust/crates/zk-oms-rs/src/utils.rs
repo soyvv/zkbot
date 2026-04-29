@@ -2,13 +2,90 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use zk_proto_rs::zk::common::v1::InstrumentRefData;
+use zk_proto_rs::zk::common::v1::{InstrumentRefData, InstrumentType};
 
 use crate::models::OmsManagedPosition;
 
 /// Instrument type classified as spot-like (balance domain, not position domain).
 /// Matches `InstrumentType::InstTypeSpot` (proto value 1).
+///
+/// **Prefer `is_spot_like(t)`** for new code — it covers ETF and STOCK too,
+/// matching the canonical Python `zk_utils.instrument_utils.SPOT_LIKE_TYPES`.
+/// This bare constant is kept for callers that need only the SPOT-vs-everything
+/// distinction; remove once they migrate to `is_spot_like` / `is_margin`.
 pub const SPOT_INSTRUMENT_TYPE: i32 = 1;
+
+/// Proto values for instrument types that behave like spot — full-value
+/// trading, position tracked by base_asset rather than instrument_id.
+/// Mirrors `zk_utils.instrument_utils.SPOT_LIKE_TYPES` (zb-00043).
+pub const SPOT_LIKE_TYPES: &[i32] = &[
+    InstrumentType::InstTypeSpot as i32,
+    InstrumentType::InstTypeEtf as i32,
+    InstrumentType::InstTypeStock as i32,
+];
+
+/// Proto values for margin / contract instrument types — position tracked by
+/// instrument_id, fund symbol uses settlement_asset.
+pub const MARGIN_TYPES: &[i32] = &[
+    InstrumentType::InstTypePerp as i32,
+    InstrumentType::InstTypeFuture as i32,
+    InstrumentType::InstTypeCfd as i32,
+    InstrumentType::InstTypeOption as i32,
+];
+
+/// Whether *t* is a spot-like instrument type (SPOT, ETF, or STOCK).
+/// Use this in place of `t == SPOT_INSTRUMENT_TYPE` for new code.
+#[inline]
+pub fn is_spot_like(t: i32) -> bool {
+    SPOT_LIKE_TYPES.contains(&t)
+}
+
+/// Whether *t* is a margin / contract instrument type (PERP, FUTURE, CFD, OPTION).
+#[inline]
+pub fn is_margin(t: i32) -> bool {
+    MARGIN_TYPES.contains(&t)
+}
+
+#[cfg(test)]
+mod spot_like_tests {
+    use super::*;
+
+    #[test]
+    fn spot_like_covers_spot_etf_stock() {
+        assert!(is_spot_like(InstrumentType::InstTypeSpot as i32));
+        assert!(is_spot_like(InstrumentType::InstTypeEtf as i32));
+        assert!(is_spot_like(InstrumentType::InstTypeStock as i32));
+    }
+
+    #[test]
+    fn spot_like_excludes_margin() {
+        assert!(!is_spot_like(InstrumentType::InstTypePerp as i32));
+        assert!(!is_spot_like(InstrumentType::InstTypeFuture as i32));
+        assert!(!is_spot_like(InstrumentType::InstTypeCfd as i32));
+        assert!(!is_spot_like(InstrumentType::InstTypeOption as i32));
+    }
+
+    #[test]
+    fn margin_covers_perp_future_cfd_option() {
+        assert!(is_margin(InstrumentType::InstTypePerp as i32));
+        assert!(is_margin(InstrumentType::InstTypeFuture as i32));
+        assert!(is_margin(InstrumentType::InstTypeCfd as i32));
+        assert!(is_margin(InstrumentType::InstTypeOption as i32));
+    }
+
+    #[test]
+    fn margin_excludes_spot_like() {
+        assert!(!is_margin(InstrumentType::InstTypeSpot as i32));
+        assert!(!is_margin(InstrumentType::InstTypeEtf as i32));
+        assert!(!is_margin(InstrumentType::InstTypeStock as i32));
+    }
+
+    #[test]
+    fn unspecified_neither() {
+        assert!(!is_spot_like(InstrumentType::InstTypeUnspecified as i32));
+        assert!(!is_margin(InstrumentType::InstTypeUnspecified as i32));
+    }
+}
 
 /// Current wall-clock time in milliseconds since Unix epoch.
 pub fn gen_timestamp_ms() -> i64 {

@@ -31,6 +31,10 @@ public class DiscoveryResolver {
         return extractAddress(cache.get("svc.mdgw." + logicalId));
     }
 
+    public String findRefdata(String logicalId) {
+        return extractAddress(cache.get("svc.refdata." + logicalId));
+    }
+
     public List<ServiceRegistration> findByType(String type) {
         return cache.getByType(type);
     }

@@ -7,6 +7,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from zk.exch_gw.v1 import exch_gw_pb2 as gw_pb
+
 from ibkr.config import IbkrGwConfig
 from ibkr.types import LIVE, DISCONNECTED
 from tests.conftest import (
@@ -275,9 +277,16 @@ class TestIbkrGatewayAdaptor:
 
         event = await asyncio.wait_for(adaptor.next_event(), timeout=1.0)
         assert event["event_type"] == "order_report"
-        assert event["payload"]["order_id"] == 1
-        assert event["payload"]["exch_order_ref"] == "8000"  # permId bound
-        assert event["payload"]["status"] == "booked"
+        report = gw_pb.OrderReport()
+        report.ParseFromString(event["payload_bytes"])
+        assert report.order_id == 1
+        assert report.exch_order_ref == "8000"  # permId bound
+        state = next(
+            e.order_state_report
+            for e in report.order_report_entries
+            if e.report_type == gw_pb.ORDER_REP_TYPE_STATE
+        )
+        assert state.exch_order_status == gw_pb.EXCH_ORDER_STATUS_BOOKED
 
     @pytest.mark.asyncio
     async def test_query_open_orders(self) -> None:

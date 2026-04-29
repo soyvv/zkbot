@@ -11,6 +11,8 @@ import ib_async
 
 from ibkr.ibkr_client import IbkrConnection
 from ibkr.ibkr_contracts import ContractTranslator
+from ibkr.rate_limiter import TokenBucketRateLimiter
+from ibkr.resolvers import ResolvedInstrument, build_resolver
 from ibkr.types import LIVE
 
 log = logging.getLogger(__name__)
@@ -20,7 +22,35 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _VENUE = "IBKR"
-_SEC_TYPE_MAP = {"STK": "spot", "FUT": "future", "OPT": "option", "CFD": "cfd", "CASH": "forex"}
+# Mapping from IBKR secType to the canonical proto-aligned `instrument_type`
+# string written to cfg.instrument_refdata. Mirrors the proto enum names from
+# zk.common.v1.InstrumentType (UPPERCASE, no INST_TYPE_ prefix). STK is split
+# per-row using the resolver-supplied proto value: `_resolve_instrument_type`
+# checks the resolver hint first (ETF vs STOCK), then falls back here.
+_SEC_TYPE_TO_CANONICAL = {
+    "STK": "STOCK",  # default for STK; ETF override via resolver hint
+    "FUT": "FUTURE",
+    "OPT": "OPTION",
+    "CFD": "CFD",
+    "CASH": "SPOT",  # forex cash treated as spot
+}
+# Resolver-hint proto int → canonical name. Only the values the IBKR loader
+# can produce (ETF/STOCK from Nasdaq directory) need entries here; UNSPECIFIED
+# means "no hint, derive from secType".
+_PROTO_INT_TO_CANONICAL = {
+    1: "SPOT", 2: "PERP", 3: "FUTURE", 4: "CFD",
+    5: "OPTION", 6: "ETF", 7: "STOCK",
+}
+# Session-state tagging — stocks and ETFs share the same trading-hours regime,
+# so both STK variants collapse to a single market key. Distinct from
+# instrument_type (proto-aligned); session market is just a regime tag.
+_SESSION_MARKET_MAP = {
+    "STK": "EQUITY",
+    "FUT": "FUTURE",
+    "OPT": "OPTION",
+    "CFD": "CFD",
+    "CASH": "FOREX",
+}
 _SEC_TYPE_SUFFIX = {"STK": "", "FUT": "-F", "OPT": "-OPT", "CFD": "-CFD", "CASH": ""}
 _VALID_MODES = frozenset({"paper", "live"})
 
@@ -39,23 +69,34 @@ class IbkrRefdataConfig:
     client_id: int = 10
     mode: str = "paper"
     universe: tuple[str, ...] = ()
+    universe_sources: tuple[dict, ...] = ()
     read_only: bool = True
     reconnect_delay_s: float = 2.0
     reconnect_max_delay_s: float = 60.0
     next_valid_id_timeout_s: float = 10.0
+    max_qualifications_per_run: int | None = None
+    rate_limit_per_sec: float = 40.0
+    dry_run_candidates_only: bool = False
 
     def __post_init__(self) -> None:
         if self.mode not in _VALID_MODES:
             raise ValueError(f"mode must be one of {_VALID_MODES}, got {self.mode!r}")
+        if self.rate_limit_per_sec <= 0:
+            raise ValueError(
+                f"rate_limit_per_sec must be > 0, got {self.rate_limit_per_sec}"
+            )
 
     @classmethod
     def from_dict(cls, d: dict) -> IbkrRefdataConfig:
         """Build config from a plain dict, ignoring unknown keys."""
         known = {f.name for f in fields(cls)}
         filtered = {k: v for k, v in d.items() if k in known}
-        # Convert universe list to tuple if needed
         if "universe" in filtered and isinstance(filtered["universe"], list):
             filtered["universe"] = tuple(filtered["universe"])
+        if "universe_sources" in filtered and isinstance(
+            filtered["universe_sources"], list
+        ):
+            filtered["universe_sources"] = tuple(filtered["universe_sources"])
         return cls(**filtered)
 
 
@@ -67,6 +108,19 @@ class IbkrRefdataConfig:
 def _build_canonical_id(contract: ib_async.Contract) -> str:
     suffix = _SEC_TYPE_SUFFIX.get(contract.secType, "")
     return f"{contract.symbol}{suffix}/{contract.currency}@{_VENUE}"
+
+
+def _resolve_instrument_type(sec_type: str, hint_proto_int: int = 0) -> str:
+    """Return the canonical proto-aligned UPPERCASE instrument_type for a row.
+
+    Resolver hint (proto enum int from `ResolvedInstrument.instrument_type`)
+    takes precedence — only the Nasdaq directory can authoritatively
+    distinguish ETF (6) from STOCK (7) for an IBKR STK contract. Explicit
+    lists pass UNSPECIFIED (0); we then derive from secType (STK→STOCK).
+    """
+    if hint_proto_int and hint_proto_int in _PROTO_INT_TO_CANONICAL:
+        return _PROTO_INT_TO_CANONICAL[hint_proto_int]
+    return _SEC_TYPE_TO_CANONICAL.get(sec_type, "UNSPECIFIED")
 
 
 def _infer_precision(min_tick: float) -> int:
@@ -183,6 +237,9 @@ class IbkrRefdataLoader:
         self._translator = ContractTranslator()
         self._contract_details_cache: dict[str, ib_async.ContractDetails] = {}
         self._conn: IbkrConnection | None = None
+        self._rate_limiter = TokenBucketRateLimiter(
+            rate=self._config.rate_limit_per_sec
+        )
 
     async def _ensure_connected(self) -> IbkrConnection:
         """Return an active IbkrConnection, creating one if needed."""
@@ -212,18 +269,87 @@ class IbkrRefdataLoader:
             await self._conn.disconnect()
             self._conn = None
 
+    async def _resolve_universe(self) -> list[ResolvedInstrument]:
+        """Return resolved candidates from the configured universe sources.
+
+        ``universe_sources`` is a list of ``{type, config}`` entries processed in
+        order. Emissions are merged; on duplicate symbol (first ``-``-separated
+        field) the later source wins, so operators can layer a hand-override
+        source after a bulk-discovery source.
+        """
+        if self._config.universe_sources:
+            merged: dict[str, ResolvedInstrument] = {}
+            for i, source in enumerate(self._config.universe_sources):
+                resolver = build_resolver(source)
+                resolved = await resolver.resolve()
+                log.info(
+                    "refdata: source[%d] type=%s emitted %d candidates",
+                    i,
+                    source.get("type"),
+                    len(resolved),
+                )
+                for ri in resolved:
+                    symbol = ri.spec.split("-", 1)[0]
+                    merged[symbol] = ri
+            return list(merged.values())
+        if self._config.universe:
+            # Legacy explicit list — no proto type hint; loader infers from secType.
+            return [ResolvedInstrument(spec=s) for s in self._config.universe]
+        return []
+
     async def load_instruments(self) -> list[dict]:
         """Connect to TWS, qualify each contract in universe, return refdata dicts."""
-        if not self._config.universe:
+        candidates = await self._resolve_universe()
+        if not candidates:
             return []
+
+        # Dry-run logs the full resolver output, not a truncated view.
+        if self._config.dry_run_candidates_only:
+            log.info(
+                "refdata: dry_run_candidates_only=true — skipping qualification for "
+                "%d candidates (first 5: %s)",
+                len(candidates),
+                [ri.spec for ri in candidates[:5]],
+            )
+            return []
+
+        cap = self._config.max_qualifications_per_run
+        if cap is not None and len(candidates) > cap:
+            log.warning(
+                "refdata: truncating %d candidates to max_qualifications_per_run=%d",
+                len(candidates),
+                cap,
+            )
+            candidates = candidates[:cap]
 
         conn = await self._ensure_connected()
         ib = conn.ib
         results: list[dict] = []
 
-        for instrument_str in self._config.universe:
+        for ri in candidates:
+            instrument_str = ri.spec
+            # Circuit-breaker: bail out of the candidate loop the moment IBKR
+            # drops the socket. Without this, every remaining iteration calls
+            # qualify() on a dead connection and raises ConnectionError("Not
+            # connected") instantly — flooding the log and leaving the run row
+            # stuck in 'running' (the diff/upsert that marks the run never
+            # executes because it's after the loop).
+            if not ib.isConnected():
+                log.error(
+                    "refdata: IBKR socket disconnected mid-run after %d/%d "
+                    "qualifications; aborting to let the next refresh tick "
+                    "reconnect cleanly",
+                    len(results),
+                    len(candidates),
+                )
+                raise ConnectionError("IBKR socket disconnected mid-run")
             try:
+                # qualifyContractsAsync and reqContractDetailsAsync are two
+                # separate IBKR requests. Debit one token per request so the
+                # effective outbound rate stays below the configured ceiling.
+                await self._rate_limiter.acquire()
                 contract = await self._translator.qualify(ib, instrument_str)
+                await self._rate_limiter.acquire()
                 detail_list = await ib.reqContractDetailsAsync(contract)
                 if not detail_list:
                     log.warning("no contract details for %s, skipping", instrument_str)
@@ -233,17 +359,22 @@ class IbkrRefdataLoader:
                 self._contract_details_cache[instrument_str] = details
                 c = details.contract
 
+                instrument_type = _resolve_instrument_type(c.secType, ri.instrument_type)
                 results.append({
                     "instrument_id": _build_canonical_id(c),
-                    "instrument_id_exchange": c.symbol,
                     "exchange_name": _VENUE,
-                    "instrument_exch": c.symbol,
+                    # IBKR-native four-part contract spec ({symbol}-{currency}-{secType}-{exchange}).
+                    # OMS forwards this verbatim as gw_req.instrument; ContractTranslator parses
+                    # it back to an ib_async.Contract on the gateway side. Use ri.spec rather
+                    # than reconstructing from c so the operator's routing intent (e.g. SMART)
+                    # is preserved instead of being replaced by a primary exchange.
+                    "instrument_exch": ri.spec,
                     "venue": _VENUE,
-                    "instrument_type": _SEC_TYPE_MAP.get(c.secType, "unknown"),
+                    "instrument_type": instrument_type,
                     "base_asset": c.symbol,
                     "quote_asset": c.currency,
                     "settlement_asset": None,
-                    "contract_size": float(details.multiplier or 1),
+                    "contract_size": float(c.multiplier or 1),
                     "price_precision": _infer_precision(details.minTick),
                     "qty_precision": 0,
                     "price_tick_size": details.minTick,
@@ -253,8 +384,12 @@ class IbkrRefdataLoader:
                     "max_order_qty": None,
                     "disabled": False,
                     "currency": c.currency,
-                    "asset_class": _SEC_TYPE_MAP.get(c.secType, "unknown"),
                 })
+            except ConnectionError:
+                # Re-raise so the caller (refresh job) sees the run as failed
+                # rather than swallowing the disconnect at the per-candidate
+                # try/except level.
+                raise
             except Exception:
                 log.exception("failed to load refdata for %s", instrument_str)
 
@@ -271,7 +406,7 @@ class IbkrRefdataLoader:
         If the cache is empty (load_instruments was not called or universe is empty),
         connects and qualifies contracts first.
         """
-        if not self._config.universe:
+        if not self._config.universe and not self._config.universe_sources:
             return []
 
         # Populate cache if empty
@@ -283,7 +418,7 @@ class IbkrRefdataLoader:
         now = datetime.now(tz=timezone.utc)
 
         for instrument_str, details in self._contract_details_cache.items():
-            market = _SEC_TYPE_MAP.get(details.contract.secType, "equity")
+            market = _SESSION_MARKET_MAP.get(details.contract.secType, "EQUITY")
             if market in seen_markets:
                 continue
             seen_markets.add(market)

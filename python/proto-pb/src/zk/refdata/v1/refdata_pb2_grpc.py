@@ -66,6 +66,16 @@ class RefdataServiceStub(object):
                 request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarRequest.SerializeToString,
                 response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarResponse.FromString,
                 _registered_method=True)
+        self.TriggerVenueRefresh = channel.unary_unary(
+                '/zk.refdata.v1.RefdataService/TriggerVenueRefresh',
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.TriggerVenueRefreshRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.FromString,
+                _registered_method=True)
+        self.GetRefreshRun = channel.unary_unary(
+                '/zk.refdata.v1.RefdataService/GetRefreshRun',
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.GetRefreshRunRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.FromString,
+                _registered_method=True)
 
 
 class RefdataServiceServicer(object):
@@ -109,6 +119,23 @@ class RefdataServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def TriggerVenueRefresh(self, request, context):
+        """Operator-triggered single-venue refresh. Returns immediately with the
+        newly-created run row in status="running"; clients poll GetRefreshRun to
+        observe progress and final counts. Concurrent calls for the same venue
+        (manual or scheduled) are rejected with FAILED_PRECONDITION; the response
+        carries the active run_id so the UI can link to it.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRefreshRun(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RefdataServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -141,6 +168,16 @@ def add_RefdataServiceServicer_to_server(servicer, server):
                     servicer.QueryMarketCalendar,
                     request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarRequest.FromString,
                     response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarResponse.SerializeToString,
+            ),
+            'TriggerVenueRefresh': grpc.unary_unary_rpc_method_handler(
+                    servicer.TriggerVenueRefresh,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.TriggerVenueRefreshRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.SerializeToString,
+            ),
+            'GetRefreshRun': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRefreshRun,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.GetRefreshRunRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -307,6 +344,60 @@ class RefdataService(object):
             '/zk.refdata.v1.RefdataService/QueryMarketCalendar',
             zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarRequest.SerializeToString,
             zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def TriggerVenueRefresh(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zk.refdata.v1.RefdataService/TriggerVenueRefresh',
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.TriggerVenueRefreshRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetRefreshRun(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zk.refdata.v1.RefdataService/GetRefreshRun',
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.GetRefreshRunRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.FromString,
             options,
             channel_credentials,
             insecure,

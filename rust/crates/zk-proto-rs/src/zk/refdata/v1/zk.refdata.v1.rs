@@ -156,6 +156,38 @@ pub struct MarketCalendarEntry {
     #[prost(string, tag="7")]
     pub source: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TriggerVenueRefreshRequest {
+    #[prost(string, tag="1")]
+    pub venue: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetRefreshRunRequest {
+    #[prost(int64, tag="1")]
+    pub run_id: i64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RefreshRunResponse {
+    #[prost(int64, tag="1")]
+    pub run_id: i64,
+    #[prost(string, tag="2")]
+    pub venue: ::prost::alloc::string::String,
+    /// running | completed | failed
+    #[prost(string, tag="3")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(int32, tag="4")]
+    pub added: i32,
+    #[prost(int32, tag="5")]
+    pub updated: i32,
+    #[prost(int32, tag="6")]
+    pub disabled: i32,
+    #[prost(string, tag="7")]
+    pub error_detail: ::prost::alloc::string::String,
+    #[prost(int64, tag="8")]
+    pub started_at_ms: i64,
+    #[prost(int64, tag="9")]
+    pub completed_at_ms: i64,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum DisclosureLevel {

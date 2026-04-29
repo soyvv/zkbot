@@ -183,9 +183,16 @@ public class BootstrapService implements SmartLifecycle {
 
             // 6. Load provided config from service-specific table (authoritative).
             //    DesiredConfigRepository reads provided_config from the service table.
+            //    REFDATA is special: one logical_instance per env serves N venues, so the
+            //    payload is built by aggregating cfg.refdata_venue_instance rows by env.
             //    No legacy fallback — missing config is an explicit error.
-            var desiredConfig = desiredConfigRepo.getDesiredConfig(
-                    req.getLogicalId(), req.getInstanceType());
+            DesiredConfigRepository.DesiredConfig desiredConfig;
+            if ("REFDATA".equalsIgnoreCase(req.getInstanceType())) {
+                desiredConfig = desiredConfigRepo.getRefdataAggregate(req.getEnv());
+            } else {
+                desiredConfig = desiredConfigRepo.getDesiredConfig(
+                        req.getLogicalId(), req.getInstanceType());
+            }
             if (desiredConfig == null || desiredConfig.configJson() == null) {
                 reply(msg, BootstrapRegisterResponse.newBuilder()
                         .setStatus("ERROR")

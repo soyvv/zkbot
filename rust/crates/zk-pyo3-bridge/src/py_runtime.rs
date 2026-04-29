@@ -40,7 +40,19 @@ impl std::fmt::Debug for PyObjectHandle {
 
 impl PyRuntime {
     /// Initialize the Python interpreter.
+    ///
+    /// Honors `PYO3_PYTHON` at runtime by promoting it to `PYTHONEXECUTABLE`
+    /// before `Py_Initialize` is called. With `PYTHONHOME` pinned to the base
+    /// prefix (for stdlib), the embedded interpreter would otherwise miss the
+    /// venv's `site-packages` because Python derives `sys.executable` from the
+    /// host binary. Setting `PYTHONEXECUTABLE=<venv-python>` makes Python read
+    /// the venv's `pyvenv.cfg` and load its `.pth` files at init time.
     pub fn initialize() -> Result<Self, PyBridgeError> {
+        if std::env::var_os("PYTHONEXECUTABLE").is_none() {
+            if let Some(pyo3_python) = std::env::var_os("PYO3_PYTHON") {
+                std::env::set_var("PYTHONEXECUTABLE", pyo3_python);
+            }
+        }
         pyo3::prepare_freethreaded_python();
         Ok(PyRuntime { _marker: () })
     }

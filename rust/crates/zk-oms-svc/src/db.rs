@@ -197,12 +197,61 @@ pub fn gw_grpc_addr(gw: &GwConfigEntry) -> String {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/// Convert the canonical proto-aligned `instrument_type` string from
+/// `cfg.instrument_refdata` into the `zk.common.v1.InstrumentType` proto int.
+///
+/// Source of truth: zkbot/protos/zk/common/v1/common.proto. The DB CHECK
+/// constraint guarantees inputs are UPPERCASE and in the known set;
+/// `to_uppercase()` is defensive for legacy callers / tests. Any unknown
+/// value logs a warning so silent type drops are detected.
 fn parse_instrument_type(s: &str) -> i32 {
-    match s.to_uppercase().as_str() {
+    let upper = s.trim().to_uppercase();
+    match upper.as_str() {
         "SPOT" => InstrumentType::InstTypeSpot as i32,
         "PERP" => InstrumentType::InstTypePerp as i32,
         "FUTURE" => InstrumentType::InstTypeFuture as i32,
+        "CFD" => InstrumentType::InstTypeCfd as i32,
         "OPTION" => InstrumentType::InstTypeOption as i32,
-        _ => InstrumentType::InstTypeUnspecified as i32,
+        "ETF" => InstrumentType::InstTypeEtf as i32,
+        "STOCK" => InstrumentType::InstTypeStock as i32,
+        "UNSPECIFIED" | "" => InstrumentType::InstTypeUnspecified as i32,
+        _ => {
+            tracing::warn!(
+                instrument_type = s,
+                "unknown instrument_type from refdata; defaulting to UNSPECIFIED"
+            );
+            InstrumentType::InstTypeUnspecified as i32
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_instrument_type;
+    use zk_proto_rs::zk::common::v1::InstrumentType;
+
+    #[test]
+    fn covers_every_proto_variant() {
+        assert_eq!(parse_instrument_type("SPOT"), InstrumentType::InstTypeSpot as i32);
+        assert_eq!(parse_instrument_type("PERP"), InstrumentType::InstTypePerp as i32);
+        assert_eq!(parse_instrument_type("FUTURE"), InstrumentType::InstTypeFuture as i32);
+        assert_eq!(parse_instrument_type("CFD"), InstrumentType::InstTypeCfd as i32);
+        assert_eq!(parse_instrument_type("OPTION"), InstrumentType::InstTypeOption as i32);
+        assert_eq!(parse_instrument_type("ETF"), InstrumentType::InstTypeEtf as i32);
+        assert_eq!(parse_instrument_type("STOCK"), InstrumentType::InstTypeStock as i32);
+        assert_eq!(parse_instrument_type("UNSPECIFIED"), InstrumentType::InstTypeUnspecified as i32);
+        assert_eq!(parse_instrument_type(""), InstrumentType::InstTypeUnspecified as i32);
+    }
+
+    #[test]
+    fn case_insensitive() {
+        assert_eq!(parse_instrument_type("stock"), InstrumentType::InstTypeStock as i32);
+        assert_eq!(parse_instrument_type("Etf"), InstrumentType::InstTypeEtf as i32);
+        assert_eq!(parse_instrument_type("  spot  "), InstrumentType::InstTypeSpot as i32);
+    }
+
+    #[test]
+    fn unknown_falls_back_to_unspecified() {
+        assert_eq!(parse_instrument_type("foo"), InstrumentType::InstTypeUnspecified as i32);
     }
 }

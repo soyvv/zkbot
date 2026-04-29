@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-from zk_refdata_svc import refdata_pb2 as refdata__pb2
+from zk.refdata.v1 import refdata_pb2 as zk_dot_refdata_dot_v1_dot_refdata__pb2
 
-GRPC_GENERATED_VERSION = '1.74.0'
+GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in refdata_pb2_grpc.py depends on'
+        + ' but the generated code in zk/refdata/v1/refdata_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -38,33 +38,43 @@ class RefdataServiceStub(object):
         """
         self.QueryInstrumentById = channel.unary_unary(
                 '/zk.refdata.v1.RefdataService/QueryInstrumentById',
-                request_serializer=refdata__pb2.QueryInstrumentByIdRequest.SerializeToString,
-                response_deserializer=refdata__pb2.InstrumentRefdataResponse.FromString,
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryInstrumentByIdRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.InstrumentRefdataResponse.FromString,
                 _registered_method=True)
         self.QueryInstrumentByVenueSymbol = channel.unary_unary(
                 '/zk.refdata.v1.RefdataService/QueryInstrumentByVenueSymbol',
-                request_serializer=refdata__pb2.QueryByVenueSymbolRequest.SerializeToString,
-                response_deserializer=refdata__pb2.InstrumentRefdataResponse.FromString,
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryByVenueSymbolRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.InstrumentRefdataResponse.FromString,
                 _registered_method=True)
         self.ListInstruments = channel.unary_unary(
                 '/zk.refdata.v1.RefdataService/ListInstruments',
-                request_serializer=refdata__pb2.ListInstrumentsRequest.SerializeToString,
-                response_deserializer=refdata__pb2.ListInstrumentsResponse.FromString,
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.ListInstrumentsRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.ListInstrumentsResponse.FromString,
                 _registered_method=True)
         self.QueryRefdataWatermark = channel.unary_unary(
                 '/zk.refdata.v1.RefdataService/QueryRefdataWatermark',
-                request_serializer=refdata__pb2.QueryWatermarkRequest.SerializeToString,
-                response_deserializer=refdata__pb2.WatermarkResponse.FromString,
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryWatermarkRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.WatermarkResponse.FromString,
                 _registered_method=True)
         self.QueryMarketStatus = channel.unary_unary(
                 '/zk.refdata.v1.RefdataService/QueryMarketStatus',
-                request_serializer=refdata__pb2.QueryMarketStatusRequest.SerializeToString,
-                response_deserializer=refdata__pb2.MarketStatusResponse.FromString,
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketStatusRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.MarketStatusResponse.FromString,
                 _registered_method=True)
         self.QueryMarketCalendar = channel.unary_unary(
                 '/zk.refdata.v1.RefdataService/QueryMarketCalendar',
-                request_serializer=refdata__pb2.QueryMarketCalendarRequest.SerializeToString,
-                response_deserializer=refdata__pb2.QueryMarketCalendarResponse.FromString,
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarResponse.FromString,
+                _registered_method=True)
+        self.TriggerVenueRefresh = channel.unary_unary(
+                '/zk.refdata.v1.RefdataService/TriggerVenueRefresh',
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.TriggerVenueRefreshRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.FromString,
+                _registered_method=True)
+        self.GetRefreshRun = channel.unary_unary(
+                '/zk.refdata.v1.RefdataService/GetRefreshRun',
+                request_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.GetRefreshRunRequest.SerializeToString,
+                response_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.FromString,
                 _registered_method=True)
 
 
@@ -109,38 +119,65 @@ class RefdataServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def TriggerVenueRefresh(self, request, context):
+        """Operator-triggered single-venue refresh. Returns immediately with the
+        newly-created run row in status="running"; clients poll GetRefreshRun to
+        observe progress and final counts. Concurrent calls for the same venue
+        (manual or scheduled) are rejected with FAILED_PRECONDITION; the response
+        carries the active run_id so the UI can link to it.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRefreshRun(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RefdataServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'QueryInstrumentById': grpc.unary_unary_rpc_method_handler(
                     servicer.QueryInstrumentById,
-                    request_deserializer=refdata__pb2.QueryInstrumentByIdRequest.FromString,
-                    response_serializer=refdata__pb2.InstrumentRefdataResponse.SerializeToString,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryInstrumentByIdRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.InstrumentRefdataResponse.SerializeToString,
             ),
             'QueryInstrumentByVenueSymbol': grpc.unary_unary_rpc_method_handler(
                     servicer.QueryInstrumentByVenueSymbol,
-                    request_deserializer=refdata__pb2.QueryByVenueSymbolRequest.FromString,
-                    response_serializer=refdata__pb2.InstrumentRefdataResponse.SerializeToString,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryByVenueSymbolRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.InstrumentRefdataResponse.SerializeToString,
             ),
             'ListInstruments': grpc.unary_unary_rpc_method_handler(
                     servicer.ListInstruments,
-                    request_deserializer=refdata__pb2.ListInstrumentsRequest.FromString,
-                    response_serializer=refdata__pb2.ListInstrumentsResponse.SerializeToString,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.ListInstrumentsRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.ListInstrumentsResponse.SerializeToString,
             ),
             'QueryRefdataWatermark': grpc.unary_unary_rpc_method_handler(
                     servicer.QueryRefdataWatermark,
-                    request_deserializer=refdata__pb2.QueryWatermarkRequest.FromString,
-                    response_serializer=refdata__pb2.WatermarkResponse.SerializeToString,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryWatermarkRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.WatermarkResponse.SerializeToString,
             ),
             'QueryMarketStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.QueryMarketStatus,
-                    request_deserializer=refdata__pb2.QueryMarketStatusRequest.FromString,
-                    response_serializer=refdata__pb2.MarketStatusResponse.SerializeToString,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketStatusRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.MarketStatusResponse.SerializeToString,
             ),
             'QueryMarketCalendar': grpc.unary_unary_rpc_method_handler(
                     servicer.QueryMarketCalendar,
-                    request_deserializer=refdata__pb2.QueryMarketCalendarRequest.FromString,
-                    response_serializer=refdata__pb2.QueryMarketCalendarResponse.SerializeToString,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarResponse.SerializeToString,
+            ),
+            'TriggerVenueRefresh': grpc.unary_unary_rpc_method_handler(
+                    servicer.TriggerVenueRefresh,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.TriggerVenueRefreshRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.SerializeToString,
+            ),
+            'GetRefreshRun': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRefreshRun,
+                    request_deserializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.GetRefreshRunRequest.FromString,
+                    response_serializer=zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -170,8 +207,8 @@ class RefdataService(object):
             request,
             target,
             '/zk.refdata.v1.RefdataService/QueryInstrumentById',
-            refdata__pb2.QueryInstrumentByIdRequest.SerializeToString,
-            refdata__pb2.InstrumentRefdataResponse.FromString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryInstrumentByIdRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.InstrumentRefdataResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -197,8 +234,8 @@ class RefdataService(object):
             request,
             target,
             '/zk.refdata.v1.RefdataService/QueryInstrumentByVenueSymbol',
-            refdata__pb2.QueryByVenueSymbolRequest.SerializeToString,
-            refdata__pb2.InstrumentRefdataResponse.FromString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryByVenueSymbolRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.InstrumentRefdataResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -224,8 +261,8 @@ class RefdataService(object):
             request,
             target,
             '/zk.refdata.v1.RefdataService/ListInstruments',
-            refdata__pb2.ListInstrumentsRequest.SerializeToString,
-            refdata__pb2.ListInstrumentsResponse.FromString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.ListInstrumentsRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.ListInstrumentsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -251,8 +288,8 @@ class RefdataService(object):
             request,
             target,
             '/zk.refdata.v1.RefdataService/QueryRefdataWatermark',
-            refdata__pb2.QueryWatermarkRequest.SerializeToString,
-            refdata__pb2.WatermarkResponse.FromString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryWatermarkRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.WatermarkResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -278,8 +315,8 @@ class RefdataService(object):
             request,
             target,
             '/zk.refdata.v1.RefdataService/QueryMarketStatus',
-            refdata__pb2.QueryMarketStatusRequest.SerializeToString,
-            refdata__pb2.MarketStatusResponse.FromString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketStatusRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.MarketStatusResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -305,8 +342,62 @@ class RefdataService(object):
             request,
             target,
             '/zk.refdata.v1.RefdataService/QueryMarketCalendar',
-            refdata__pb2.QueryMarketCalendarRequest.SerializeToString,
-            refdata__pb2.QueryMarketCalendarResponse.FromString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.QueryMarketCalendarResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def TriggerVenueRefresh(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zk.refdata.v1.RefdataService/TriggerVenueRefresh',
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.TriggerVenueRefreshRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetRefreshRun(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zk.refdata.v1.RefdataService/GetRefreshRun',
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.GetRefreshRunRequest.SerializeToString,
+            zk_dot_refdata_dot_v1_dot_refdata__pb2.RefreshRunResponse.FromString,
             options,
             channel_credentials,
             insecure,

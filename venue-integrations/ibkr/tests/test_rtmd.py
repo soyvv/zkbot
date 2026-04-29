@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 import pytest
 
 from ibkr.rtmd import IbkrRtmdAdaptor, IbkrRtmdConfig, _compute_duration_str
-from zk.rtmd.v1.rtmd_pb2 import Kline, TickData
-from tests.conftest import MockBarData, MockContract, MockIB, MockTicker
+from zk.rtmd.v1.rtmd_pb2 import Kline, OrderBook, TickData
+from tests.conftest import MockBarData, MockContract, MockDOMLevel, MockIB, MockTicker
 
 
 # ---------------------------------------------------------------------------
@@ -152,15 +152,24 @@ class TestIbkrRtmdAdaptor:
         assert "AAPL" in mock_ib._tickers
         assert adaptor.instrument_exch_for("AAPL/USD@IBKR") == "AAPL"
 
-    async def test_subscribe_orderbook_stub(self):
-        """order_book subscribe is accepted but L2 data path is not wired."""
+    async def test_subscribe_orderbook_gated_off(self):
+        """order_book subscribe is rejected when enable_depth=false (default)."""
         mock_ib = MockIB()
         adaptor = _make_adaptor(mock_ib)
         await adaptor.subscribe(_ob_spec(depth=10))
-        # reqMktDepth is NOT called (L2 path not wired)
+        # reqMktDepth is NOT called and no subscription is tracked.
         assert "AAPL" not in mock_ib._depth_tickers
-        # But subscription is tracked
+        assert "AAPL/USD@IBKR:order_book" not in adaptor._subscriptions
+
+    async def test_subscribe_orderbook_enabled(self):
+        """With enable_depth=true, reqMktDepth is issued and depth is tracked."""
+        mock_ib = MockIB()
+        adaptor = _make_adaptor(mock_ib, enable_depth=True, depth_rows=10)
+        await adaptor.subscribe(_ob_spec(depth=10))
+        assert "AAPL" in mock_ib._depth_tickers
         assert "AAPL/USD@IBKR:order_book" in adaptor._subscriptions
+        # conId tracked for routing pendingTickersEvent -> order_book.
+        assert any(cid for cid in adaptor._depth_conids)
 
     async def test_subscribe_funding_noop(self):
         mock_ib = MockIB()
@@ -183,21 +192,23 @@ class TestIbkrRtmdAdaptor:
         assert len(adaptor._subscriptions) == 0
         assert "AAPL/USD@IBKR" not in adaptor._instrument_map
 
-    async def test_unsubscribe_orderbook_stub(self):
-        """Unsubscribing order_book removes tracking without calling cancelMktDepth."""
+    async def test_unsubscribe_orderbook_enabled(self):
+        """Unsubscribing order_book cancels reqMktDepth when enabled."""
         mock_ib = MockIB()
-        adaptor = _make_adaptor(mock_ib)
+        adaptor = _make_adaptor(mock_ib, enable_depth=True)
         spec = _ob_spec()
         await adaptor.subscribe(spec)
-        assert "AAPL/USD@IBKR:order_book" in adaptor._subscriptions
+        assert "AAPL" in mock_ib._depth_tickers
 
         await adaptor.unsubscribe(spec)
+        assert "AAPL" not in mock_ib._depth_tickers
         assert len(adaptor._subscriptions) == 0
+        assert not adaptor._depth_conids
 
     async def test_unsubscribe_preserves_other_subs(self):
         """Unsubscribing tick should keep instrument_map if orderbook sub remains."""
         mock_ib = MockIB()
-        adaptor = _make_adaptor(mock_ib)
+        adaptor = _make_adaptor(mock_ib, enable_depth=True)
         tick = _tick_spec()
         ob = _ob_spec()
         await adaptor.subscribe(tick)
@@ -298,6 +309,45 @@ class TestIbkrRtmdAdaptor:
         adaptor._on_pending_tickers([ticker])
         assert adaptor._event_queue.empty()
 
+    async def test_orderbook_callback_enqueues_event(self):
+        """DOM ticker update should emit an order_book event and cache it."""
+        mock_ib = MockIB()
+        adaptor = _make_adaptor(mock_ib, enable_depth=True, depth_rows=3)
+        await adaptor.subscribe(_ob_spec(depth=3))
+
+        con_id = hash("AAPL") % 100000
+        ticker = MockTicker(
+            contract=MockContract(
+                symbol="AAPL", secType="STK", exchange="SMART", currency="USD", conId=con_id,
+            ),
+            domBids=[
+                MockDOMLevel(price=150.00, size=100.0),
+                MockDOMLevel(price=149.99, size=200.0),
+            ],
+            domAsks=[
+                MockDOMLevel(price=150.05, size=150.0),
+                MockDOMLevel(price=150.06, size=250.0),
+            ],
+        )
+        adaptor._on_pending_tickers([ticker])
+
+        event = adaptor._event_queue.get_nowait()
+        assert event["event_type"] == "order_book"
+        assert isinstance(event["payload_bytes"], bytes)
+
+        ob = OrderBook()
+        ob.ParseFromString(event["payload_bytes"])
+        assert ob.instrument_code == "AAPL/USD@IBKR"
+        assert len(ob.buy_levels) == 2
+        assert ob.buy_levels[0].price == pytest.approx(150.00)
+        assert ob.buy_levels[0].qty == pytest.approx(100.0)
+        assert len(ob.sell_levels) == 2
+        assert ob.sell_levels[0].price == pytest.approx(150.05)
+
+        # Snapshot cache populated.
+        cached = await adaptor.query_current_orderbook("AAPL/USD@IBKR")
+        assert len(cached) > 0
+
     async def test_query_current_tick(self):
         mock_ib = MockIB()
         adaptor = _make_adaptor(mock_ib)
@@ -391,23 +441,23 @@ class TestIbkrRtmdAdaptor:
 
     async def test_reconnect_resubscribes(self):
         mock_ib = MockIB()
-        adaptor = _make_adaptor(mock_ib)
+        adaptor = _make_adaptor(mock_ib, enable_depth=True)
 
         await adaptor.subscribe(_tick_spec("AAPL/USD@IBKR", "AAPL"))
         await adaptor.subscribe(_ob_spec("MSFT/USD@IBKR", "MSFT", depth=5))
         assert "AAPL" in mock_ib._tickers
-        # order_book is gated — reqMktDepth NOT called
-        assert "MSFT" not in mock_ib._depth_tickers
+        assert "MSFT" in mock_ib._depth_tickers
 
         # Clear mock state to verify re-registration
         mock_ib._tickers.clear()
+        mock_ib._depth_tickers.clear()
 
         adaptor._on_reconnect()
 
-        # reqMktData should be called again for tick subs
-        assert len(mock_ib._tickers) >= 1
-        # order_book subs are NOT re-subscribed (L2 path not wired)
-        assert len(mock_ib._depth_tickers) == 0
+        # Both tick and order_book subs should be re-issued.
+        assert "AAPL" in mock_ib._tickers
+        assert "MSFT" in mock_ib._depth_tickers
+        assert any(cid for cid in adaptor._depth_conids)
 
     async def test_reconnect_registers_callbacks(self):
         mock_ib = MockIB()

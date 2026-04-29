@@ -6,5 +6,32 @@
   },
   "okx": {
     "api_base_url": "https://www.okx.com"
+  },
+  "ibkr": {
+    "mode": "paper",
+    "host": "192.168.1.136",
+    "port": 4004,
+    "client_id": 11,
+    "account_code": "",
+    "universe_sources": [
+      {
+        "type": "nasdaq_symbol_directory",
+        "config": {
+          "include_etfs": true,
+          "include_stocks": true,
+          "exclude_test_issues": true,
+          "currency": "USD",
+          "routing": "SMART",
+          "class_share_normalization": "space"
+        }
+      }
+    ],
+    "rate_limit_per_sec": 40,
+    "max_qualifications_per_run": 200,
+    "dry_run_candidates_only": false,
+    "read_only": true,
+    "reconnect_delay_s": 2,
+    "reconnect_max_delay_s": 60,
+    "next_valid_id_timeout_s": 10
   }
 }

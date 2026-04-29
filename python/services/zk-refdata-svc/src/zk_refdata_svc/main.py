@@ -32,14 +32,32 @@ from zk_refdata_svc import refdata_pb2_grpc
 from zk_refdata_svc.config import load_config
 from zk_refdata_svc.config_loader import ConfigAssemblyError
 from zk_refdata_svc.config_model import RefdataBootstrapConfig
-from zk_refdata_svc.jobs.refresh_refdata import refresh_refdata
 from zk_refdata_svc.jobs.refresh_sessions import refresh_sessions
 from zk_refdata_svc.jobs.scheduler import run_periodic
 from zk_refdata_svc.registry import ServiceRegistry
 from zk_refdata_svc.repo import RefdataRepo
+from zk_refdata_svc.coordinator import RefreshCoordinator
 from zk_refdata_svc.service import RefdataServicer
 
 _MIGRATIONS_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "migrations"
+
+
+async def _initial_refresh_then_periodic(coordinator, cfg, enabled: list[str]) -> None:
+    """Run the initial refresh, then continue with the periodic schedule.
+
+    Decoupled from the registry-readiness gate (zb-00036) so Pilot's discovery
+    sees the service as soon as the gRPC server is listening. Catches the
+    initial-refresh exception so the periodic loop still starts.
+    """
+    try:
+        await coordinator.refresh_all_periodic(enabled)
+    except Exception:
+        logger.exception("initial refdata refresh failed (will retry on schedule)")
+    await run_periodic(
+        cfg.refresh_interval_s,
+        coordinator.refresh_all_periodic,
+        enabled,
+    )
 
 
 async def _apply_migrations(repo: RefdataRepo) -> None:
@@ -120,56 +138,35 @@ async def _main() -> None:
         nc = await nats.connect(cfg.nats_url)
         logger.info(f"nats connected to {cfg.nats_url}")
 
+    # -- Initial refresh for enabled venues -------------------------------------
+    background_tasks: list[asyncio.Task] = []
+    enabled = cfg.enabled_venues()
+
+    # Build venue_configs dict from runtime config (resolved secrets)
+    venue_configs = (
+        {v: cfg.venue_resolved_config(v) for v in enabled} if enabled else {}
+    )
+
+    # Single coordinator owns per-venue locks, shared between periodic loop and
+    # the operator-triggered TriggerVenueRefresh RPC.
+    coordinator = RefreshCoordinator(repo, nc, venue_configs)
+
     # gRPC server
-    servicer = RefdataServicer(repo)
+    servicer = RefdataServicer(repo, coordinator=coordinator)
     server = grpc.aio.server()
     refdata_pb2_grpc.add_RefdataServiceServicer_to_server(servicer, server)
     server.add_insecure_port(f"0.0.0.0:{cfg.grpc_port}")
     await server.start()
     logger.info(f"gRPC server listening on :{cfg.grpc_port}")
 
-    # -- Initial refresh for enabled venues -------------------------------------
-    background_tasks: list[asyncio.Task] = []
-    enabled = cfg.enabled_venues()
-
-    if enabled:
-        logger.info(f"configured venues: {enabled}")
-
-        # Build venue_configs dict from runtime config (resolved secrets)
-        venue_configs = {v: cfg.venue_resolved_config(v) for v in enabled}
-
-        try:
-            await refresh_refdata(repo, nc, enabled, venue_configs=venue_configs)
-        except Exception:
-            logger.exception("initial refdata refresh failed (will retry on schedule)")
-
-        background_tasks.append(
-            asyncio.create_task(
-                run_periodic(
-                    cfg.refresh_interval_s,
-                    refresh_refdata,
-                    repo,
-                    nc,
-                    enabled,
-                    venue_configs=venue_configs,
-                )
-            )
-        )
-        background_tasks.append(
-            asyncio.create_task(
-                run_periodic(
-                    cfg.refresh_interval_s,
-                    refresh_sessions,
-                    repo,
-                    enabled,
-                    venue_configs=venue_configs,
-                )
-            )
-        )
-    else:
-        logger.info("no venues configured, refresh jobs disabled")
-
-    # -- Register readiness — ONLY after initial refresh ------------------------
+    # -- Register readiness AS SOON AS gRPC is listening -----------------------
+    # Pilot's discovery cache + the operator-triggered TriggerVenueRefresh RPC
+    # depend on the service being visible in NATS KV under svc.refdata.<id>.
+    # Holding registration until the initial refresh finishes blocks the Pilot
+    # proxy for ~50 minutes after each restart on IBKR-scale universes
+    # (~11k contracts at ~2/sec). Register early; consumers can rely on
+    # gRPC reachability and use the existing refresh-run state for "is the
+    # data fresh" semantics. (zb-00036)
     registry = ServiceRegistry(
         service_type="refdata",
         service_id=cfg.logical_id,
@@ -187,7 +184,31 @@ async def _main() -> None:
         kv_key=kv_key_override,
     )
     await registry.start(nc)
-    logger.info("service registered in NATS KV (ready)")
+    logger.info("service registered in NATS KV (ready) — initial refresh runs in background")
+
+    if enabled:
+        logger.info(f"configured venues: {enabled}")
+
+        # Run the initial refresh as a background task instead of awaiting it
+        # inline. The previous DB row state remains queryable while the new
+        # run proceeds; consumers that need fresh-data semantics can poll the
+        # cfg.refdata_refresh_run row via GetRefreshRun.
+        background_tasks.append(
+            asyncio.create_task(_initial_refresh_then_periodic(coordinator, cfg, enabled))
+        )
+        background_tasks.append(
+            asyncio.create_task(
+                run_periodic(
+                    cfg.refresh_interval_s,
+                    refresh_sessions,
+                    coordinator,
+                    repo,
+                    enabled,
+                )
+            )
+        )
+    else:
+        logger.info("no venues configured, refresh jobs disabled")
 
     # -- Wait for termination or fencing ----------------------------------------
     fenced_event = registry.wait_fenced()

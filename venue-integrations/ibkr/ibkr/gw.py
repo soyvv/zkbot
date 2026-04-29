@@ -13,6 +13,7 @@ Key design decisions:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -63,10 +64,21 @@ class IbkrGatewayAdaptor:
         await self._conn.connect()
         self._register_callbacks()
 
-        # Subscribe to account updates and positions for streaming events
+        # Subscribe to account updates and positions for streaming events.
+        # The sync `reqAccountUpdates` / `reqPositions` wrappers spin their own
+        # loop and cannot be called from inside an active asyncio task; use the
+        # *Async variants instead.
         account = self._config.account_code or ""
-        self._conn.ib.reqAccountUpdates(True, account)
-        self._conn.ib.reqPositions()
+        try:
+            await asyncio.wait_for(
+                self._conn.ib.reqAccountUpdatesAsync(account), timeout=10.0
+            )
+        except asyncio.TimeoutError:
+            log.warning("reqAccountUpdatesAsync timed out; continuing without snapshot")
+        try:
+            await asyncio.wait_for(self._conn.ib.reqPositionsAsync(), timeout=10.0)
+        except asyncio.TimeoutError:
+            log.warning("reqPositionsAsync timed out; continuing without snapshot")
         log.info("IBKR adaptor connected and subscribed (account=%s)", account or "<all>")
 
     async def place_order(self, req: dict) -> dict:
@@ -331,8 +343,13 @@ class IbkrGatewayAdaptor:
         """Re-establish subscriptions after a successful reconnect."""
         self._register_callbacks()
         account = self._config.account_code or ""
-        self._conn.ib.reqAccountUpdates(True, account)
-        self._conn.ib.reqPositions()
+        try:
+            loop = asyncio.get_event_loop()
+            loop.create_task(self._conn.ib.reqAccountUpdatesAsync(account))
+            loop.create_task(self._conn.ib.reqPositionsAsync())
+        except RuntimeError:
+            self._conn.ib.reqAccountUpdates(account)
+            self._conn.ib.reqPositions()
         log.info("post-reconnect: resubscribed to account updates and positions")
 
     def _trade_to_order_fact(self, trade: Any) -> dict:

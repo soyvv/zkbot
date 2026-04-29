@@ -282,6 +282,46 @@ class BootstrapServiceTest {
         assertThat(response.getErrorMessage()).contains("No desired config found");
     }
 
+    // ── Register: REFDATA uses aggregate lookup by env ───────────────────
+
+    @Test
+    void register_uses_refdata_aggregate_by_env() throws Exception {
+        var req = registerRequest("refdata_dev_1", "REFDATA", "dev", "token");
+        var msg = mockMessage(req.toByteArray(), "reply-subject");
+
+        when(tokenService.validate("token", "refdata_dev_1", "REFDATA", "dev")).thenReturn("jti-1");
+        when(repository.findSessionForLogical("refdata_dev_1", "REFDATA")).thenReturn(null);
+        String aggregateJson = "{\"venues\":[{\"venue\":\"okx\",\"enabled\":true,\"config\":{}}]}";
+        when(desiredConfigRepo.getRefdataAggregate("dev"))
+                .thenReturn(new DesiredConfigRepository.DesiredConfig(aggregateJson, 3, "hash"));
+
+        invokeHandleRegister(msg);
+
+        // Aggregate path — the per-logical_id getDesiredConfig must not be called for REFDATA.
+        verify(desiredConfigRepo, never()).getDesiredConfig(eq("refdata_dev_1"), anyString());
+        var response = captureRegisterResponse(msg);
+        assertThat(response.getStatus()).isEqualTo("OK");
+        assertThat(response.getRuntimeConfig()).isEqualTo(aggregateJson);
+        assertThat(response.getConfigMetadata().getConfigVersion()).isEqualTo("3");
+        assertThat(response.getConfigMetadata().getConfigHash()).isEqualTo("hash");
+    }
+
+    @Test
+    void register_returns_error_when_refdata_aggregate_is_empty() throws Exception {
+        var req = registerRequest("refdata_dev_1", "REFDATA", "dev", "token");
+        var msg = mockMessage(req.toByteArray(), "reply-subject");
+
+        when(tokenService.validate("token", "refdata_dev_1", "REFDATA", "dev")).thenReturn("jti-1");
+        when(repository.findSessionForLogical("refdata_dev_1", "REFDATA")).thenReturn(null);
+        when(desiredConfigRepo.getRefdataAggregate("dev")).thenReturn(null);
+
+        invokeHandleRegister(msg);
+
+        var response = captureRegisterResponse(msg);
+        assertThat(response.getStatus()).isEqualTo("ERROR");
+        assertThat(response.getErrorMessage()).contains("No desired config found");
+    }
+
     // ── Register: secret_refs extracted from config ──────────────────────
 
     @Test

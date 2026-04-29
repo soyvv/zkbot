@@ -1,0 +1,10 @@
+Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares
+AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N
+MSFT|Microsoft Corporation - Common Stock|Q|N|N|100|N|N
+QQQ|Invesco QQQ Trust, Series 1|Q|N|N|100|Y|N
+ZXZZT|NASDAQ TEST STOCK|Q|Y|N|100|N|N
+AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N
+ZYBT|Zhengye Biotechnology Holding Limited - Class A Ordinary Shares|S|N|N|100|N|N
+ACONW|Acon S2 Acquisition Corp. - Warrant|S|N|N|100|N|N
+ABCDR|Some Co. - Rights|S|N|N|100|N|N
+File Creation Time: 0422202610:01|||||||

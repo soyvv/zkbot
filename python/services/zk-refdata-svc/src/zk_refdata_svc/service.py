@@ -7,6 +7,11 @@ import time
 import grpc
 
 from zk_refdata_svc import refdata_pb2, refdata_pb2_grpc
+from zk_refdata_svc.coordinator import (
+    RefreshAlreadyInProgress,
+    RefreshCoordinator,
+    UnknownVenue,
+)
 
 
 def _row_to_response(row: dict) -> refdata_pb2.InstrumentRefdataResponse:
@@ -47,9 +52,24 @@ def _row_to_response(row: dict) -> refdata_pb2.InstrumentRefdataResponse:
     return refdata_pb2.InstrumentRefdataResponse(**kwargs)
 
 
+def _refresh_run_to_response(row: dict) -> refdata_pb2.RefreshRunResponse:
+    return refdata_pb2.RefreshRunResponse(
+        run_id=int(row["run_id"]),
+        venue=row.get("venue") or "",
+        status=row.get("status") or "",
+        added=int(row.get("instruments_added") or 0),
+        updated=int(row.get("instruments_updated") or 0),
+        disabled=int(row.get("instruments_disabled") or 0),
+        error_detail=row.get("error_detail") or "",
+        started_at_ms=int(row.get("started_at_ms") or 0),
+        completed_at_ms=int(row.get("ended_at_ms") or 0),
+    )
+
+
 class RefdataServicer(refdata_pb2_grpc.RefdataServiceServicer):
-    def __init__(self, repo) -> None:
+    def __init__(self, repo, coordinator: RefreshCoordinator | None = None) -> None:
         self._repo = repo
+        self._coordinator = coordinator
 
     async def QueryInstrumentById(
         self,
@@ -148,3 +168,52 @@ class RefdataServicer(refdata_pb2_grpc.RefdataServiceServicer):
             for r in rows
         ]
         return refdata_pb2.QueryMarketCalendarResponse(entries=entries)
+
+    async def TriggerVenueRefresh(
+        self,
+        request: refdata_pb2.TriggerVenueRefreshRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> refdata_pb2.RefreshRunResponse:
+        if self._coordinator is None:
+            await context.abort(
+                grpc.StatusCode.UNIMPLEMENTED,
+                "refresh coordinator not available — service not fully initialized",
+            )
+        venue = (request.venue or "").strip()
+        if not venue:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "venue is required")
+        try:
+            run_id = await self._coordinator.trigger_manual(venue)
+        except RefreshAlreadyInProgress as exc:
+            detail = (
+                f"refresh already in progress for venue {exc.venue!r}"
+                + (f" (active run_id={exc.active_run_id})" if exc.active_run_id else "")
+            )
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, detail)
+        except UnknownVenue as exc:
+            await context.abort(grpc.StatusCode.NOT_FOUND, str(exc))
+
+        # Look up the freshly-inserted row to populate the response.
+        row = await self._repo.get_refresh_run(run_id)
+        if row is None:
+            # Should not happen — we just inserted it.
+            await context.abort(
+                grpc.StatusCode.INTERNAL,
+                f"refresh run {run_id} not found after insert",
+            )
+        return _refresh_run_to_response(row)
+
+    async def GetRefreshRun(
+        self,
+        request: refdata_pb2.GetRefreshRunRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> refdata_pb2.RefreshRunResponse:
+        run_id = int(request.run_id)
+        if run_id <= 0:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "run_id is required")
+        row = await self._repo.get_refresh_run(run_id)
+        if row is None:
+            await context.abort(
+                grpc.StatusCode.NOT_FOUND, f"refresh run {run_id} not found"
+            )
+        return _refresh_run_to_response(row)

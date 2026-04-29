@@ -1,0 +1,161 @@
+- generic [ref=e7]:
+  - complementary [ref=e8]:
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - paragraph [ref=e12]: Pilot Console
+        - heading "ZKBot Control" [level=1] [ref=e13]
+      - generic [ref=e14]: DEV
+    - generic [ref=e16]:
+      - generic [ref=e17]: Session
+      - generic [ref=e18]: Not connected
+      - generic [ref=e19]: Auth not configured
+    - navigation [ref=e20]:
+      - generic [ref=e21]: Panels
+      - generic [ref=e22]:
+        - link "Overview" [ref=e23] [cursor=pointer]:
+          - /url: /overview
+          - generic [ref=e24]:
+            - img [ref=e25]
+            - text: Overview
+        - link "Trading" [ref=e29] [cursor=pointer]:
+          - /url: /trading
+          - generic [ref=e30]:
+            - img [ref=e31]
+            - text: Trading
+        - link "Topology" [ref=e34] [cursor=pointer]:
+          - /url: /topology
+          - generic [ref=e35]:
+            - img [ref=e36]
+            - text: Topology
+        - link "Ops" [ref=e39] [cursor=pointer]:
+          - /url: /ops
+          - generic [ref=e40]:
+            - img [ref=e41]
+            - text: Ops
+        - link "Strategies" [ref=e43] [cursor=pointer]:
+          - /url: /strategies
+          - generic [ref=e44]:
+            - img [ref=e45]
+            - text: Strategies
+        - link "Bots" [ref=e48] [cursor=pointer]:
+          - /url: /bots
+          - generic [ref=e49]:
+            - img [ref=e50]
+            - text: Bots
+        - link "Refdata" [ref=e53] [cursor=pointer]:
+          - /url: /refdata
+          - generic [ref=e54]:
+            - img [ref=e55]
+            - text: Refdata
+        - link "Risk" [ref=e59] [cursor=pointer]:
+          - /url: /risk
+          - generic [ref=e60]:
+            - img [ref=e61]
+            - text: Risk
+        - link "Audit" [ref=e63] [cursor=pointer]:
+          - /url: /audit
+          - generic [ref=e64]:
+            - img [ref=e65]
+            - text: Audit
+  - main [ref=e67]:
+    - generic [ref=e69]:
+      - generic [ref=e70]:
+        - generic [ref=e71]: Environment / Control Plane
+        - heading "Runtime Operations" [level=2] [ref=e72]
+        - paragraph [ref=e73]: Bounded start, stop, restart, reload, and bootstrap-token workflows.
+      - generic [ref=e74]:
+        - generic "Search coming soon" [ref=e75]:
+          - img [ref=e76]
+          - generic [ref=e79]: Search services, accounts, bots...
+        - generic [ref=e80]: Alerts
+    - generic [ref=e82]:
+      - generic [ref=e83]:
+        - link "← Back to Ops" [ref=e84] [cursor=pointer]:
+          - /url: /ops
+        - generic [ref=e85]: Refdata Venue
+        - heading "Onboard Refdata Venue" [level=2] [ref=e86]
+      - generic [ref=e87]:
+        - generic [ref=e89]:
+          - heading "Venue" [level=3] [ref=e90]
+          - paragraph [ref=e91]: Select the venue to onboard for refdata ingestion.
+        - generic [ref=e93]:
+          - generic [ref=e94]: Venue *
+          - combobox [ref=e95]:
+            - option "-- select venue --"
+            - option "OANDA"
+            - option "IBKR" [selected]
+            - option "OKX"
+      - generic [ref=e96]:
+        - generic [ref=e98]:
+          - heading "Identity" [level=3] [ref=e99]
+          - paragraph [ref=e100]: Optional description and enabled state.
+        - generic [ref=e102]:
+          - generic [ref=e103]:
+            - generic [ref=e104]: Description
+            - textbox "e.g. OKX crypto refdata" [ref=e105]
+          - generic [ref=e106]:
+            - switch [checked] [ref=e107]
+            - generic [ref=e109]: Enabled
+      - generic [ref=e110]:
+        - generic [ref=e112]:
+          - heading "IBKR Refdata Config" [level=3] [ref=e119]
+          - paragraph [ref=e114]: Venue-specific refdata configuration from schema.
+        - generic [ref=e120]:
+          - generic [ref=e121]:
+            - generic [ref=e122]: host *
+            - paragraph [ref=e123]: Hostname or IP address of the target TWS or IB Gateway session.
+            - textbox [ref=e124]: 127.0.0.1
+          - generic [ref=e125]:
+            - generic [ref=e126]: mode *
+            - paragraph [ref=e127]: IBKR connection mode. This is metadata for operator intent; host and port still determine the actual TWS or IB Gateway endpoint.
+            - combobox [ref=e128]:
+              - option "-- select --"
+              - option "paper" [selected]
+              - option "live"
+          - generic [ref=e129]:
+            - generic [ref=e130]: port *
+            - paragraph [ref=e131]: TCP port of the target TWS or IB Gateway session.
+            - spinbutton [ref=e132]: "7497"
+          - generic [ref=e133]:
+            - generic [ref=e134]: universe
+            - paragraph [ref=e135]: "Legacy explicit list of IB contract specification strings to qualify, for example AAPL-USD-STK-SMART. Shorthand for a single `explicit` entry in universe_sources. If universe_sources is also set and non-empty, it takes precedence."
+            - textbox "[]" [ref=e136]
+          - generic [ref=e137]:
+            - generic [ref=e138]: client_id *
+            - paragraph [ref=e139]: IBKR API client ID used for the refdata session.
+            - spinbutton [ref=e140]: "10"
+          - generic [ref=e141]:
+            - switch [checked] [ref=e142]
+            - generic [ref=e144]: read_only
+          - generic [ref=e145]:
+            - generic [ref=e146]: account_code
+            - paragraph [ref=e147]: Optional IBKR account code for account-scoped lookups.
+            - textbox [ref=e148]
+          - generic [ref=e149]:
+            - generic [ref=e150]: universe_sources
+            - paragraph [ref=e151]: "Ordered list of universe sources, each `{type, config}`. All sources are resolved and merged; on duplicate symbol (first `-`-separated field of the spec), the later source wins. Known types: `explicit` (config.items=[specs]), `nasdaq_symbol_directory` (Nasdaq Trader stocks/ETF discovery with filters; see resolver docs for full config shape)."
+            - textbox "[]" [ref=e152]
+          - generic [ref=e153]:
+            - generic [ref=e154]: reconnect_delay_s
+            - paragraph [ref=e155]: Initial reconnect backoff delay in seconds.
+            - spinbutton [ref=e156]: "2"
+          - generic [ref=e157]:
+            - generic [ref=e158]: rate_limit_per_sec
+            - paragraph [ref=e159]: Token-bucket rate limit applied around reqContractDetails during qualification. Stays below IBKR's documented 50 msg/s ceiling.
+            - spinbutton [ref=e160]: "40"
+          - generic [ref=e161]:
+            - generic [ref=e162]: reconnect_max_delay_s
+            - paragraph [ref=e163]: Maximum reconnect backoff delay in seconds.
+            - spinbutton [ref=e164]: "60"
+          - generic [ref=e165]:
+            - switch [ref=e166]
+            - generic [ref=e168]: dry_run_candidates_only
+          - generic [ref=e169]:
+            - generic [ref=e170]: next_valid_id_timeout_s
+            - paragraph [ref=e171]: Timeout in seconds waiting for the nextValidId handshake after connect.
+            - spinbutton [ref=e172]: "10"
+          - generic [ref=e173]:
+            - generic [ref=e174]: max_qualifications_per_run
+            - paragraph [ref=e175]: Cap on how many resolved candidates to qualify per refresh run. null = unlimited.
+            - textbox [ref=e176]
+      - button "Create Refdata Venue" [ref=e118]

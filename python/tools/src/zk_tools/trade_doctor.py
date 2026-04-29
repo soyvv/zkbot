@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import importlib
 import os
+import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path

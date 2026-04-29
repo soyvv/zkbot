@@ -1,0 +1,111 @@
+- generic [ref=e7]:
+  - complementary [ref=e8]:
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - paragraph [ref=e12]: Pilot Console
+        - heading "ZKBot Control" [level=1] [ref=e13]
+      - generic [ref=e14]: DEV
+    - generic [ref=e16]:
+      - generic [ref=e17]: Session
+      - generic [ref=e18]: Not connected
+      - generic [ref=e19]: Auth not configured
+    - navigation [ref=e20]:
+      - generic [ref=e21]: Panels
+      - generic [ref=e22]:
+        - link "Overview" [ref=e23] [cursor=pointer]:
+          - /url: /overview
+          - generic [ref=e24]:
+            - img [ref=e25]
+            - text: Overview
+        - link "Trading" [ref=e29] [cursor=pointer]:
+          - /url: /trading
+          - generic [ref=e30]:
+            - img [ref=e31]
+            - text: Trading
+        - link "Topology" [ref=e34] [cursor=pointer]:
+          - /url: /topology
+          - generic [ref=e35]:
+            - img [ref=e36]
+            - text: Topology
+        - link "Ops" [ref=e39] [cursor=pointer]:
+          - /url: /ops
+          - generic [ref=e40]:
+            - img [ref=e41]
+            - text: Ops
+        - link "Strategies" [ref=e43] [cursor=pointer]:
+          - /url: /strategies
+          - generic [ref=e44]:
+            - img [ref=e45]
+            - text: Strategies
+        - link "Bots" [ref=e48] [cursor=pointer]:
+          - /url: /bots
+          - generic [ref=e49]:
+            - img [ref=e50]
+            - text: Bots
+        - link "Refdata" [ref=e53] [cursor=pointer]:
+          - /url: /refdata
+          - generic [ref=e54]:
+            - img [ref=e55]
+            - text: Refdata
+        - link "Risk" [ref=e59] [cursor=pointer]:
+          - /url: /risk
+          - generic [ref=e60]:
+            - img [ref=e61]
+            - text: Risk
+        - link "Audit" [ref=e63] [cursor=pointer]:
+          - /url: /audit
+          - generic [ref=e64]:
+            - img [ref=e65]
+            - text: Audit
+  - main [ref=e67]:
+    - generic [ref=e69]:
+      - generic [ref=e70]:
+        - generic [ref=e71]: Environment / Control Plane
+        - heading "Refdata Operations" [level=2] [ref=e72]
+        - paragraph [ref=e73]: Instrument lifecycle, market status, and targeted refresh workflows.
+      - generic [ref=e74]:
+        - generic "Search coming soon" [ref=e75]:
+          - img [ref=e76]
+          - generic [ref=e79]: Search services, accounts, bots...
+        - generic [ref=e80]: Alerts
+    - generic [ref=e82]:
+      - generic [ref=e83]:
+        - button "Instruments" [ref=e84]
+        - button "Refdata Venues" [ref=e85]
+        - button "Market Status" [ref=e86]
+      - generic [ref=e87]:
+        - generic [ref=e88]:
+          - generic [ref=e89]:
+            - heading "Instrument Browser" [level=3] [ref=e90]
+            - paragraph [ref=e91]: Canonical refdata and lifecycle state for operator workflows.
+          - generic [ref=e93]:
+            - searchbox "Search symbol or ID…" [ref=e94]
+            - combobox [ref=e95]:
+              - option "All Venues" [selected]
+            - combobox [ref=e96]:
+              - option "All Types" [selected]
+              - option "stock"
+              - option "etf"
+              - option "spot"
+              - option "perp"
+              - option "future"
+              - option "forex"
+              - option "option"
+              - option "cfd"
+            - combobox [ref=e97]:
+              - option "All Statuses" [selected]
+              - option "active"
+              - option "disabled"
+              - option "deprecated"
+        - generic [ref=e99]: Loading instruments...
+      - generic [ref=e100]:
+        - generic [ref=e101]:
+          - generic [ref=e103]:
+            - heading "Instrument Detail" [level=3] [ref=e104]
+            - paragraph [ref=e105]: Select an instrument above to view details.
+          - generic [ref=e107]: Click an instrument row to view details.
+        - generic [ref=e108]:
+          - generic [ref=e110]:
+            - heading "Refdata Watermark" [level=3] [ref=e111]
+            - paragraph [ref=e112]: Latest canonical update watermarks by venue.
+          - generic [ref=e114]: Loading watermarks...

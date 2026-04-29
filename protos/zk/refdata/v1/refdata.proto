@@ -10,6 +10,14 @@ service RefdataService {
   rpc QueryRefdataWatermark        (QueryWatermarkRequest)           returns (WatermarkResponse);
   rpc QueryMarketStatus            (QueryMarketStatusRequest)        returns (MarketStatusResponse);
   rpc QueryMarketCalendar          (QueryMarketCalendarRequest)      returns (QueryMarketCalendarResponse);
+
+  // Operator-triggered single-venue refresh. Returns immediately with the
+  // newly-created run row in status="running"; clients poll GetRefreshRun to
+  // observe progress and final counts. Concurrent calls for the same venue
+  // (manual or scheduled) are rejected with FAILED_PRECONDITION; the response
+  // carries the active run_id so the UI can link to it.
+  rpc TriggerVenueRefresh          (TriggerVenueRefreshRequest)      returns (RefreshRunResponse);
+  rpc GetRefreshRun                (GetRefreshRunRequest)            returns (RefreshRunResponse);
 }
 
 enum DisclosureLevel {
@@ -112,4 +120,24 @@ message MarketCalendarEntry {
   int64  open_time_ms  = 5;
   int64  close_time_ms = 6;
   string source        = 7;
+}
+
+message TriggerVenueRefreshRequest {
+  string venue = 1;
+}
+
+message GetRefreshRunRequest {
+  int64 run_id = 1;
+}
+
+message RefreshRunResponse {
+  int64  run_id            = 1;
+  string venue             = 2;
+  string status            = 3;  // running | completed | failed
+  int32  added             = 4;
+  int32  updated           = 5;
+  int32  disabled          = 6;
+  string error_detail      = 7;
+  int64  started_at_ms     = 8;
+  int64  completed_at_ms   = 9;
 }

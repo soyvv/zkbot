@@ -75,7 +75,7 @@ class ContractTranslator:
 
         contract = self.to_ib_contract(instrument)
         qualified = await ib.qualifyContractsAsync(contract)
-        if not qualified:
+        if not qualified or qualified[0] is None:
             raise ValueError(f"failed to qualify contract for {instrument!r}")
         q = qualified[0]
         self._cache[instrument] = q
