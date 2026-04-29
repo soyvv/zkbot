@@ -71,10 +71,14 @@ class RefdataRepo:
         self, venue: str, instrument_exch: str, level: int = 1
     ) -> dict | None:
         cols = _cols_for_level(level)
+        # Venue compared case-insensitively: DB convention is UPPERCASE
+        # (IBKR/OKX/OANDA), but refdata config keys + RPC callers are commonly
+        # lowercase. Normalize at the query boundary so callers don't have to
+        # know the convention.
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"SELECT {cols} FROM cfg.instrument_refdata"
-                " WHERE venue = $1 AND instrument_exch = $2",
+                " WHERE UPPER(venue) = UPPER($1) AND instrument_exch = $2",
                 venue,
                 instrument_exch,
             )
@@ -89,7 +93,8 @@ class RefdataRepo:
 
         if venue:
             params.append(venue)
-            conditions.append(f"venue = ${len(params)}")
+            # See query_by_venue_symbol — venue compared case-insensitively.
+            conditions.append(f"UPPER(venue) = UPPER(${len(params)})")
         if enabled_only:
             conditions.append("disabled = false")
 
@@ -143,10 +148,19 @@ class RefdataRepo:
     # -- Lifecycle write methods (used by refresh jobs) -----------------------
 
     async def get_instruments_by_venue(self, venue: str) -> list[dict]:
-        """Load all instruments for a venue (for diff comparison)."""
+        """Load all instruments for a venue (for diff comparison).
+
+        Venue compared case-insensitively. The diff path is the load-bearing
+        consumer: when the configured venue key (lowercase, e.g. ``ibkr``
+        from refdata_venue_configs.json) didn't match the DB row's UPPERCASE
+        ``venue``, every refresh saw an empty current set, marked all fetched
+        rows as added, and never disabled stale rows. Fixed by normalizing
+        case at the query boundary.
+        """
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                f"SELECT {_ALL_COLS} FROM cfg.instrument_refdata WHERE venue = $1",
+                f"SELECT {_ALL_COLS} FROM cfg.instrument_refdata"
+                " WHERE UPPER(venue) = UPPER($1)",
                 venue,
             )
         return [dict(r) for r in rows]
