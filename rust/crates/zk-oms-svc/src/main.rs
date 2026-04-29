@@ -777,11 +777,11 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::{normalize_gw_balance_update_for_oms, position_response_to_balance_update_for_oms};
     use zk_oms_rs::config::ConfdataManager;
-    use zk_proto_rs::ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry};
     use zk_proto_rs::zk::{
         common::v1::{InstrumentRefData, InstrumentType, LongShortType},
         exch_gw::v1::{BalanceUpdate, PositionReport},
         gateway::v1::PositionResponse,
+        ods::v1::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
         oms::v1::Position,
     };
 

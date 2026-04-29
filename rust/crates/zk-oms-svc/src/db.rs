@@ -21,9 +21,9 @@ use sqlx::{PgPool, Row};
 use tracing::info;
 
 use zk_oms_rs::config::InstrumentTradingConfig;
-use zk_proto_rs::{
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
-    zk::common::v1::{InstrumentRefData, InstrumentType},
+use zk_proto_rs::zk::{
+    common::v1::{InstrumentRefData, InstrumentType},
+    ods::v1::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
 };
 
 // ── Public loader ─────────────────────────────────────────────────────────────

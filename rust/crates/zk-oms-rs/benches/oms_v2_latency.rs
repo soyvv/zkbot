@@ -17,16 +17,14 @@ use zk_oms_rs::{
     oms_core::OmsCore,
     oms_core_v2::OmsCoreV2,
 };
-use zk_proto_rs::{
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
-    zk::{
-        common::v1::{BasicOrderType, BuySellType, InstrumentRefData, InstrumentType},
-        exch_gw::v1::{
-            order_report_entry::Report, ExchangeOrderStatus, OrderIdLinkageReport, OrderReport,
-            OrderReportEntry, OrderReportType, OrderStateReport, TradeReport,
-        },
-        oms::v1::OrderRequest,
+use zk_proto_rs::zk::{
+    common::v1::{BasicOrderType, BuySellType, InstrumentRefData, InstrumentType},
+    exch_gw::v1::{
+        order_report_entry::Report, ExchangeOrderStatus, OrderIdLinkageReport, OrderReport,
+        OrderReportEntry, OrderReportType, OrderStateReport, TradeReport,
     },
+    ods::v1::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
+    oms::v1::OrderRequest,
 };
 
 // ---------------------------------------------------------------------------

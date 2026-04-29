@@ -1,5 +1,5 @@
-/// Compile the new versioned zk.*.v1 proto packages.
-/// Legacy protos (common, oms, exch_gw, …) remain as committed generated files.
+/// Compile the versioned zk.*.v1 proto packages via prost-build.
+/// (Legacy flat-style protos / generated modules were removed.)
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../protos");
     let proto_dir = proto_dir
@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "zk/common/v1/common.proto",
         "zk/config/v1/config.proto",
         "zk/discovery/v1/discovery.proto",
+        "zk/ods/v1/ods.proto",
         "zk/oms/v1/oms.proto",
         "zk/oms/v1/oms_service.proto",
         "zk/exch_gw/v1/exch_gw.proto",

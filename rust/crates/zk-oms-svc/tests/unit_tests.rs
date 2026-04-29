@@ -22,17 +22,14 @@ use tokio_util::sync::CancellationToken;
 use zk_oms_rs::{
     config::ConfdataManager, models::OmsOrder, models_v2::OmsActionV2, oms_core_v2::OmsCoreV2,
 };
-use zk_proto_rs::{
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
-    zk::{
-        common::v1::InstrumentRefData,
-        common::v1::Rejection,
-        exch_gw::v1::{
-            order_report_entry::Report, BalanceUpdate, ExchExecType, ExecReport, OrderReport,
-            OrderReportEntry, OrderReportType, PositionReport,
-        },
-        oms::v1::{oms_response, OmsErrorType, OmsResponse, OrderRequest, OrderStatus},
+use zk_proto_rs::zk::{
+    common::v1::{InstrumentRefData, Rejection},
+    exch_gw::v1::{
+        order_report_entry::Report, BalanceUpdate, ExchExecType, ExecReport, OrderReport,
+        OrderReportEntry, OrderReportType, PositionReport,
     },
+    ods::v1::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
+    oms::v1::{oms_response, OmsErrorType, OmsResponse, OrderRequest, OrderStatus},
 };
 
 use zk_oms_svc::oms_actor::{self, OmsCommand, ReadReplica};

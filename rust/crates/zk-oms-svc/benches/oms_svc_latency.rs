@@ -22,12 +22,10 @@ use zk_oms_rs::{
     config::ConfdataManager, models::OmsMessage, oms_core::OmsCore, utils::gen_timestamp_ms,
 };
 use zk_oms_svc::oms_actor::{self, OmsCommand, ReadReplica};
-use zk_proto_rs::{
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
-    zk::{
-        common::v1::{BasicOrderType, BuySellType, InstrumentRefData, OpenCloseType},
-        oms::v1::{OmsErrorType, OmsResponse, OrderCancelRequest, OrderRequest},
-    },
+use zk_proto_rs::zk::{
+    common::v1::{BasicOrderType, BuySellType, InstrumentRefData, OpenCloseType},
+    ods::v1::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
+    oms::v1::{OmsErrorType, OmsResponse, OrderCancelRequest, OrderRequest},
 };
 
 // ── Shared order counter ──────────────────────────────────────────────────────

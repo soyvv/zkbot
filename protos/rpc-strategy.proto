@@ -1,8 +1,0 @@
-syntax = "proto3";
-
-package tqrpc_strategy;
-
-
-service StrategyService {
-    // TBA
-}

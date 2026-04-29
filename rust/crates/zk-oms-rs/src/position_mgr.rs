@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 
 use tracing::error;
-use zk_proto_rs::{
-    ods::OmsRouteEntry,
-    zk::{
-        common::v1::{InstrumentRefData, LongShortType},
-        exch_gw::v1::PositionReport,
-        oms::v1::{Position, PositionUpdateEvent},
-    },
+use zk_proto_rs::zk::{
+    common::v1::{InstrumentRefData, LongShortType},
+    exch_gw::v1::PositionReport,
+    ods::v1::OmsRouteEntry,
+    oms::v1::{Position, PositionUpdateEvent},
 };
 
 use crate::models::{ExchPositionSnapshot, OmsManagedPosition, PositionDelta, ReconcileStatus};

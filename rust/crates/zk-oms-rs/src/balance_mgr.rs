@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 
-use zk_proto_rs::{
-    ods::{GwConfigEntry, OmsRouteEntry},
-    zk::{
-        exch_gw::v1::PositionReport,
-        oms::v1::{Balance, BalanceUpdateEvent},
-    },
+use zk_proto_rs::zk::{
+    exch_gw::v1::PositionReport,
+    ods::v1::{GwConfigEntry, OmsRouteEntry},
+    oms::v1::{Balance, BalanceUpdateEvent},
 };
 
 use crate::models::ExchBalanceSnapshot;

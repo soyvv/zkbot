@@ -1,18 +1,16 @@
 use crate::config::InstrumentTradingConfig;
-use zk_proto_rs::{
-    ods::{GwConfigEntry, OmsRouteEntry},
-    zk::{
-        common::v1::InstrumentRefData,
-        exch_gw::v1::{BalanceUpdate, OrderReport},
-        gateway::v1::{
-            BatchCancelOrdersRequest as ExchBatchCancelOrdersRequest,
-            BatchSendOrdersRequest as ExchBatchSendOrdersRequest,
-            CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest,
-        },
-        oms::v1::{
-            Balance, BalanceUpdateEvent, ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest,
-            OrderUpdateEvent, Position, PositionUpdateEvent, Trade,
-        },
+use zk_proto_rs::zk::{
+    common::v1::InstrumentRefData,
+    exch_gw::v1::{BalanceUpdate, OrderReport},
+    gateway::v1::{
+        BatchCancelOrdersRequest as ExchBatchCancelOrdersRequest,
+        BatchSendOrdersRequest as ExchBatchSendOrdersRequest,
+        CancelOrderRequest as ExchCancelOrderRequest, SendOrderRequest as ExchSendOrderRequest,
+    },
+    ods::v1::{GwConfigEntry, OmsRouteEntry},
+    oms::v1::{
+        Balance, BalanceUpdateEvent, ExecMessage, Fee, Order, OrderCancelRequest, OrderRequest,
+        OrderUpdateEvent, Position, PositionUpdateEvent, Trade,
     },
 };
 

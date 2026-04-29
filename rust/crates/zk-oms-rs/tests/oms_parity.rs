@@ -27,22 +27,20 @@ use zk_oms_rs::{
     position_mgr::PositionManager,
     reservation_mgr::ReservationManager,
 };
-use zk_proto_rs::{
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
-    zk::{
-        common::v1::{
-            BasicOrderType, BuySellType, InstrumentRefData, InstrumentType, LongShortType,
-            OpenCloseType,
-        },
-        exch_gw::v1::{
-            order_report_entry::Report, BalanceUpdate, ExchangeOrderStatus, OrderIdLinkageReport,
-            OrderReport, OrderReportEntry, OrderReportType, OrderStateReport, PositionReport,
-            TradeReport,
-        },
-        oms::v1::{
-            BalanceUpdateEvent, OrderCancelRequest, OrderRequest, OrderStatus, OrderUpdateEvent,
-            PositionUpdateEvent,
-        },
+use zk_proto_rs::zk::{
+    common::v1::{
+        BasicOrderType, BuySellType, InstrumentRefData, InstrumentType, LongShortType,
+        OpenCloseType,
+    },
+    exch_gw::v1::{
+        order_report_entry::Report, BalanceUpdate, ExchangeOrderStatus, OrderIdLinkageReport,
+        OrderReport, OrderReportEntry, OrderReportType, OrderStateReport, PositionReport,
+        TradeReport,
+    },
+    ods::v1::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
+    oms::v1::{
+        BalanceUpdateEvent, OrderCancelRequest, OrderRequest, OrderStatus, OrderUpdateEvent,
+        PositionUpdateEvent,
     },
 };
 

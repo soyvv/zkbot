@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use zk_proto_rs::{
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
-    zk::common::v1::InstrumentRefData,
+use zk_proto_rs::zk::{
+    common::v1::InstrumentRefData,
+    ods::v1::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
 };
 
 /// Per-instrument trading behaviour flags for the OMS.

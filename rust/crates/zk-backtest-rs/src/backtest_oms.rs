@@ -1,16 +1,14 @@
 use std::collections::HashMap;
 
-use zk_proto_rs::{
-    ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
-    zk::{
-        common::v1::{
-            BasicOrderType, InstrumentRefData, InstrumentType, TimeInForceType,
-        },
-        exch_gw::v1::{
-            order_report_entry::Report, BalanceUpdate, OrderReport, OrderReportType, PositionReport,
-        },
-        oms::v1::{Balance, OrderCancelRequest, OrderRequest},
+use zk_proto_rs::zk::{
+    common::v1::{
+        BasicOrderType, InstrumentRefData, InstrumentType, TimeInForceType,
     },
+    exch_gw::v1::{
+        order_report_entry::Report, BalanceUpdate, OrderReport, OrderReportType, PositionReport,
+    },
+    ods::v1::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
+    oms::v1::{Balance, OrderCancelRequest, OrderRequest},
 };
 
 use zk_oms_rs::{

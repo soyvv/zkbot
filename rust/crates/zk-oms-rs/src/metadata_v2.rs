@@ -558,9 +558,9 @@ impl MetadataTables {
 mod tests {
     use super::*;
     use crate::config::{ConfdataManager, InstrumentTradingConfig};
-    use zk_proto_rs::{
-        ods::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
-        zk::common::v1::{InstrumentRefData, InstrumentType},
+    use zk_proto_rs::zk::{
+        common::v1::{InstrumentRefData, InstrumentType},
+        ods::v1::{GwConfigEntry, OmsConfigEntry, OmsRouteEntry},
     };
 
     fn build_test_confdata() -> ConfdataManager {

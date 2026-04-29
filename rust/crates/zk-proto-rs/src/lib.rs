@@ -1,24 +1,9 @@
 // Generated protobuf types for zkbot.
 //
-// Legacy modules (below) are compiled by `buf generate` and committed to the repo.
-// New versioned modules under `zk::` are compiled by `build.rs` at build time.
-
-// ===== Legacy committed modules =====
-
-pub mod common;
-pub mod exch_gw;
-pub mod ods;
-pub mod oms;
-pub mod rtmd;
-pub mod strategy;
-pub mod tqrpc_exch_gw;
-pub mod tqrpc_ods;
-pub mod tqrpc_oms;
-pub mod tqrpc_ref;
-pub mod tqrpc_rtmd;
-pub mod tqrpc_strategy;
-
-// ===== New versioned zk.* modules (compiled via build.rs / prost-build) =====
+// Versioned modules under `zk::` are compiled by `build.rs` at build time
+// from `protos/zk/*/v1/*.proto`. The legacy flat-style protos and their
+// committed `pub mod common; exch_gw; ods; oms; rtmd; strategy; tqrpc_*;`
+// modules were retired (no active consumers).
 
 pub mod zk {
     pub mod common {
@@ -34,6 +19,11 @@ pub mod zk {
     pub mod discovery {
         pub mod v1 {
             include!(concat!(env!("OUT_DIR"), "/zk.discovery.v1.rs"));
+        }
+    }
+    pub mod ods {
+        pub mod v1 {
+            include!(concat!(env!("OUT_DIR"), "/zk.ods.v1.rs"));
         }
     }
     pub mod oms {
