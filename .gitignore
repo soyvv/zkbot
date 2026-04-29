@@ -57,6 +57,11 @@ project_plan.md
 # Kept on disk for `make dev-up` etc; not pushed to origin.
 devops/
 
+# Reference / older Python implementations. Kept on disk for browsing,
+# not on the active code path; not pushed to origin.
+python/libs/
+python/legacy/
+
 # Browser automation scratch dirs
 .playwright-cli/
 **/.playwright-cli/

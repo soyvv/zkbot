@@ -22,8 +22,10 @@ dependencies = [
 ]
 
 [tool.uv.workspace]
+# python/libs and python/legacy are kept locally only (not on origin/main);
+# they hold reference / older Python implementations not on the active path.
+# Re-add them to `members` if you need uv to manage them as workspace packages.
 members = [
-  "python/libs/*",
   "python/services/*",
   "python/proto-pb",
   "python/proto-betterproto",
@@ -34,16 +36,11 @@ members = [
 ]
 exclude = [
   "venue-integrations/legacy",
-  "python/legacy",
 ]
 
 # Local workspace sources for development
 # Allows packages to depend on each other and resolve locally
 [tool.uv.sources]
-zk-core = { workspace = true }
-zk-client = { workspace = true }
-zk-rpc = { workspace = true }
-gw-utils = { workspace = true }
 zk-proto-pb = { workspace = true }
 zk-proto-betterproto = { workspace = true }
 zk-tools = { workspace = true }
