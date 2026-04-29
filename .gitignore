@@ -51,8 +51,11 @@ project_plan.md
 .codex/
 
 .logs/
-devops/logs/
 **/logs/*
+
+# Local operator/runtime config (docker-compose, init SQL, scripts, secrets).
+# Kept on disk for `make dev-up` etc; not pushed to origin.
+devops/
 
 # Browser automation scratch dirs
 .playwright-cli/
