@@ -23,7 +23,7 @@ pub trait Strategy: Send + 'static {
     /// Called once after OMS state is loaded and init data is available in `ctx`.
     /// Runs before `on_reinit` and before any market events.
     /// Use `ctx.get_init_data::<T>()` to access data injected by the runtime.
-    /// Mirrors Python `__tq_init__` (sync; async live-engine path is Phase 4/WS8).
+    /// (sync; async live-engine path is Phase 4/WS8).
     fn on_init(&mut self, _ctx: &StrategyContext) -> Vec<SAction> {
         vec![]
     }

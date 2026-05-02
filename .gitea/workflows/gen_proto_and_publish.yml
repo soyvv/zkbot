@@ -49,14 +49,6 @@ jobs:
       - name: Generate BetterProto code
         run: uv run python -m scripts.gen_proto
 
-      # Optional guard: keep generated code committed
-      - name: Check for uncommitted changes in tq_datamodel
-        run: |
-          if ! git diff --exit-code -- tq_datamodel; then
-            echo "::error::Generated files changed. Commit them."
-            exit 1
-          fi
-
       - name: Build wheel
         run: uv run python -m build --wheel
 

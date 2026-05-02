@@ -22,9 +22,9 @@ dependencies = [
 ]
 
 [tool.uv.workspace]
-# python/libs and python/legacy are kept locally only (not on origin/main);
-# they hold reference / older Python implementations not on the active path.
-# Re-add them to `members` if you need uv to manage them as workspace packages.
+# python/libs, python/legacy, and venue-integrations/legacy are kept locally
+# only (not on origin/main); they hold reference / older Python implementations
+# not on the active path. Re-add them to `members` if you need uv to manage them.
 # python/proto-betterproto was retired alongside the dead flat-style protos.
 members = [
   "python/services/*",
@@ -33,9 +33,6 @@ members = [
   "venue-integrations/oanda",
   "venue-integrations/ibkr",
   "venue-integrations/okx",
-]
-exclude = [
-  "venue-integrations/legacy",
 ]
 
 # Local workspace sources for development

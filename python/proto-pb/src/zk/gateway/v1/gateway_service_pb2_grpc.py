@@ -27,7 +27,7 @@ if _version_not_supported:
 
 
 class GatewayServiceStub(object):
-    """GatewayService — replaces legacy ExchangeGatewayService in tqrpc_exch_gw.
+    """GatewayService — replaces the legacy pre-zk.gateway.v1 ExchangeGatewayService.
     """
 
     def __init__(self, channel):
@@ -99,7 +99,7 @@ class GatewayServiceStub(object):
 
 
 class GatewayServiceServicer(object):
-    """GatewayService — replaces legacy ExchangeGatewayService in tqrpc_exch_gw.
+    """GatewayService — replaces the legacy pre-zk.gateway.v1 ExchangeGatewayService.
     """
 
     def PlaceOrder(self, request, context):
@@ -246,7 +246,7 @@ def add_GatewayServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class GatewayService(object):
-    """GatewayService — replaces legacy ExchangeGatewayService in tqrpc_exch_gw.
+    """GatewayService — replaces the legacy pre-zk.gateway.v1 ExchangeGatewayService.
     """
 
     @staticmethod

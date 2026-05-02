@@ -21,7 +21,7 @@ enum ExecType {
     EXEC_TYPE_PLACING_ORDER = 2;
 }
 
-// ===== OMS error / response types (merged from tqrpc_oms) =====
+// ===== OMS error / response types (merged from legacy oms RPC types) =====
 
 enum OMSErrorType {
     OMS_ERR_TYPE_UNSPECIFIED = 0;
@@ -183,7 +183,7 @@ message OMSSystemEvent {
     string event_message = 4;
 }
 
-// ===== RPC request/response messages (merged from tqrpc_oms, field numbers preserved) =====
+// ===== RPC request/response messages (merged from legacy oms RPC types, field numbers preserved) =====
 
 message OMSResponse {
     enum Status {

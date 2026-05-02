@@ -27,7 +27,7 @@ if _version_not_supported:
 
 
 class OMSServiceStub(object):
-    """OMSService — replaces legacy OrderManagerService in tqrpc_oms.
+    """OMSService — replaces the legacy pre-zk.oms.v1 OrderManagerService.
     """
 
     def __init__(self, channel):
@@ -114,7 +114,7 @@ class OMSServiceStub(object):
 
 
 class OMSServiceServicer(object):
-    """OMSService — replaces legacy OrderManagerService in tqrpc_oms.
+    """OMSService — replaces the legacy pre-zk.oms.v1 OrderManagerService.
     """
 
     def PlaceOrder(self, request, context):
@@ -294,7 +294,7 @@ def add_OMSServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class OMSService(object):
-    """OMSService — replaces legacy OrderManagerService in tqrpc_oms.
+    """OMSService — replaces the legacy pre-zk.oms.v1 OrderManagerService.
     """
 
     @staticmethod

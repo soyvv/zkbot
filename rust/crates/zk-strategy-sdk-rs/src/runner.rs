@@ -47,7 +47,7 @@ impl StrategyRunner {
     }
 
     /// Call after the runtime has injected init data via `ctx.set_init_data(...)`.
-    /// Mirrors the position of Python `__tq_init__` in the lifecycle.
+    /// Runs after `on_create` and before any market events.
     pub fn on_init<S: Strategy>(&mut self, strategy: &mut S) -> Vec<SAction> {
         strategy.on_init(&self.ctx)
     }

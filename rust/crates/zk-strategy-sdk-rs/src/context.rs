@@ -103,7 +103,7 @@ pub struct StrategyContext {
     /// Monotonic counter incremented every time position state changes.
     pub position_generation: u64,
     /// Arbitrary init data injected by the runtime before `on_init` fires.
-    /// Mirrors Python `tq.__tq_init_output__` / `tq.get_custom_init_data()`.
+    /// Read inside callbacks via `get_init_data::<T>()`.
     init_data: Option<Box<dyn Any + Send + 'static>>,
     id_allocator: Arc<dyn StrategyIdAllocator>,
 }
@@ -316,7 +316,7 @@ impl StrategyContext {
     // -----------------------------------------------------------------------
 
     /// Store arbitrary init data fetched by the runtime (backtester / live engine).
-    /// Mirrors Python `tq.__tq_init_output__ = data`.
+    /// Strategy callbacks then read it via `get_init_data::<T>()`.
     pub fn set_init_data(&mut self, data: Box<dyn Any + Send + 'static>) {
         self.init_data = Some(data);
     }

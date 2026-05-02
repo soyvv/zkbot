@@ -150,7 +150,7 @@ impl<S: Strategy, D: ActionDispatcher> LiveEngine<S, D> {
     /// Run the startup lifecycle (sync): `on_create → on_init → on_reinit`.
     ///
     /// Call before `run()`. Separated so callers can inject `init_data` into
-    /// `self.runner.ctx` between `on_create` and `on_init` (the `__tq_init__` slot).
+    /// `self.runner.ctx` between `on_create` and `on_init` (the `on_init` slot).
     ///
     /// During startup, a synthetic `TriggerContext` is used for any dispatched
     /// actions (trigger_event_type = "lifecycle").

@@ -30,7 +30,6 @@ libs/zk-datamodel/src/zk_datamodel/rtmd/
 libs/zk-datamodel/src/zk_datamodel/strategy/
 libs/zk-datamodel/src/zk_datamodel/exch_gw/
 libs/zk-datamodel/src/zk_datamodel/ods/
-libs/zk-datamodel/src/zk_datamodel/tqrpc_*/
 
 # Rust build artifacts
 rust/target/
@@ -61,6 +60,7 @@ devops/
 # not on the active code path; not pushed to origin.
 python/libs/
 python/legacy/
+venue-integrations/legacy/
 
 # Browser automation scratch dirs
 .playwright-cli/

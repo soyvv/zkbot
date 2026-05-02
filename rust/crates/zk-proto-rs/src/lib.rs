@@ -2,8 +2,8 @@
 //
 // Versioned modules under `zk::` are compiled by `build.rs` at build time
 // from `protos/zk/*/v1/*.proto`. The legacy flat-style protos and their
-// committed `pub mod common; exch_gw; ods; oms; rtmd; strategy; tqrpc_*;`
-// modules were retired (no active consumers).
+// committed top-level `pub mod` declarations were retired (no active
+// consumers).
 
 pub mod zk {
     pub mod common {

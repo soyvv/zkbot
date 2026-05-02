@@ -196,7 +196,7 @@ message AccountSettingResponse {
     string original_info = 2;
 }
 
-// GatewayService — replaces legacy ExchangeGatewayService in tqrpc_exch_gw.
+// GatewayService — replaces the legacy pre-zk.gateway.v1 ExchangeGatewayService.
 service GatewayService {
     rpc PlaceOrder(SendOrderRequest) returns (GatewayResponse);
     rpc BatchPlaceOrders(BatchSendOrdersRequest) returns (GatewayResponse);

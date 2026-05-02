@@ -4,7 +4,7 @@ package zk.oms.v1;
 import "zk/oms/v1/oms.proto";
 import "zk/common/v1/common.proto";
 
-// OMSService — replaces legacy OrderManagerService in tqrpc_oms.
+// OMSService — replaces the legacy pre-zk.oms.v1 OrderManagerService.
 service OMSService {
     rpc PlaceOrder(PlaceOrderRequest) returns (OMSResponse);
     rpc BatchPlaceOrders(BatchPlaceOrdersRequest) returns (OMSResponse);
