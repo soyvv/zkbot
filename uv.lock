@@ -13,6 +13,7 @@ resolution-markers = [
 [manifest]
 members = [
     "zk-gw-oanda",
+    "zk-proto-betterproto",
     "zk-proto-pb",
     "zk-refdata-svc",
     "zk-tools",
@@ -1584,6 +1585,21 @@ dev = [
 ]
 
 [[package]]
+name = "zk-proto-betterproto"
+version = "0.1.0"
+source = { editable = "python/proto-betterproto" }
+dependencies = [
+    { name = "betterproto" },
+    { name = "grpclib" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "betterproto", specifier = ">=2.0.0b6" },
+    { name = "grpclib", specifier = ">=0.4" },
+]
+
+[[package]]
 name = "zk-proto-pb"
 version = "0.1.0"
 source = { editable = "python/proto-pb" }
@@ -1757,6 +1773,7 @@ name = "zkbot"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "zk-proto-betterproto" },
     { name = "zk-strategylib" },
 ]
 
@@ -1769,7 +1786,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "zk-strategylib", editable = "../zkstrategy_research/zk-strategylib" }]
+requires-dist = [
+    { name = "zk-proto-betterproto", editable = "python/proto-betterproto" },
+    { name = "zk-strategylib", editable = "../zkstrategy_research/zk-strategylib" },
+]
 
 [package.metadata.requires-dev]
 dev = [
